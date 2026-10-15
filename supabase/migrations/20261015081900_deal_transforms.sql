@@ -32,52 +32,6 @@ as $$
   select nullif(nullif(trim(p), '-'), '')
 $$;
 
--- 회사 마스터: corpCode 에 없는 공시 회사도 보강 ------------------------
-create or replace function core.refresh_companies()
-returns integer
-language plpgsql
-set search_path = ''
-as $$
-declare
-  n integer;
-begin
-  insert into core.companies (corp_code, corp_name, corp_name_eng, stock_code, market, induty_code, updated_at)
-  select
-    src.corp_code, src.corp_name, src.corp_eng_name, src.stock_code,
-    case f.corp_cls when 'Y' then '유가증권' when 'K' then '코스닥' when 'N' then '코넥스' when 'E' then '기타' end,
-    co.item ->> 'induty_code',
-    now()
-  from (
-    select c.corp_code, c.corp_name, c.corp_eng_name, nullif(trim(c.stock_code), '') as stock_code
-    from raw.corp_codes c
-    union all
-    (select distinct on (rf.corp_code) rf.corp_code, rf.corp_name, null, rf.stock_code
-     from raw.filings rf
-     where not exists (select 1 from raw.corp_codes c where c.corp_code = rf.corp_code)
-     order by rf.corp_code, rf.rcept_dt desc)
-  ) src
-  left join lateral (
-    select rf.corp_cls from raw.filings rf
-    where rf.corp_code = src.corp_code
-    order by rf.rcept_dt desc limit 1
-  ) f on true
-  left join lateral (
-    select a.item from raw.api_items a
-    where a.endpoint = 'company' and a.corp_code = src.corp_code
-    order by a.fetched_at desc limit 1
-  ) co on true
-  on conflict (corp_code) do update set
-    corp_name     = excluded.corp_name,
-    corp_name_eng = coalesce(excluded.corp_name_eng, core.companies.corp_name_eng),
-    stock_code    = excluded.stock_code,
-    market        = coalesce(excluded.market, core.companies.market),
-    induty_code   = coalesce(excluded.induty_code, core.companies.induty_code),
-    updated_at    = now();
-  get diagnostics n = row_count;
-  return n;
-end
-$$;
-
 -- 회사채 -----------------------------------------------------------------
 create or replace function core.refresh_bond_deals()
 returns integer

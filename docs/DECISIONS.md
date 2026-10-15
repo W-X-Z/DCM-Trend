@@ -11,6 +11,8 @@
 | 제공 형태 | 웹 서비스 (Next.js on Vercel) |
 | DB | Supabase Postgres — 프로젝트 `dcm-trend` (서울 리전, Postgres 17). 기존 jaejallo 프로젝트는 일시정지로 자리 확보 |
 | 레포 | github.com/W-X-Z/DCM-Trend |
+| 화면 호스팅 | Vercel, 함수 리전 서울(icn1). Supabase 키는 서버 환경변수로만 사용 |
+| 수집 | GitHub Actions 매일 07:10 KST. 최초 백필 2024-10-01부터 |
 | 로직 개선 방식 | 현업 인터뷰 후 `ref` 행·`mart` SQL 수정 (docs/LOGIC_CHANGE_GUIDE.md) |
 
 ## 결정 대기
