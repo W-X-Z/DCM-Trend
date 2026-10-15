@@ -21,11 +21,16 @@ export const FEATURE_LABEL: Record<string, string> = {
 // 딜 한 줄 요약 (조건)
 export function dealTerms(d: Deal): string[] {
   if (d.product_type === 'bond') {
+    const sp = d.final_spread_bp != null ? Number(d.final_spread_bp) : null;
     return [
       d.tenor_months ? `${tenor(d.tenor_months)} 만기` : null,
       d.rating,
-      d.yield_pct != null ? `발행금리 ${pct(d.yield_pct, 3)}` : d.coupon_pct != null ? `표면 ${pct(d.coupon_pct, 3)}` : null,
-      d.band_type,
+      d.coupon_pct != null
+        ? `금리 ${pct(d.coupon_pct, 3)}`
+        : sp != null
+          ? `${d.band_type === '국고채' ? '국고' : '민평'} ${sp > 0 ? '+' : sp < 0 ? '−' : ''}${Math.abs(sp)}bp`
+          : null,
+      d.competition_ratio != null ? `경쟁률 ${num(d.competition_ratio, 1)}배` : null,
     ].filter(Boolean) as string[];
   }
   if (d.product_type === 'mezz') {

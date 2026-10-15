@@ -17,6 +17,17 @@
 | "리그테이블은 인수금액 기준" | 화면에서 `uw_rank` 사용 | 뷰 수정 불필요 |
 | 새 증권사 표기가 깨짐 | `ref.firm_aliases` | 행 추가 |
 | 새 지표 추가 | `mart` 트렌드 뷰 컬럼 추가 + `ref.metric_catalog` 행 추가 | 컬럼은 추가만, 삭제·이름 변경 금지 |
+| "인사이트에 수수료 변화는 1bp만 바뀌어도 보여줘" | `ref.insight_rules` | `bond_fee_bp` 의 `min_change` 2 → 1 |
+| "인사이트에서 공모 메자닌 비중은 빼줘" | `ref.insight_rules` | `is_active = false` |
+| "인사이트 비교 기준을 전년 동기 대신 직전 12개월로" | `ref.insight_rules` | `compare` 'yoy' → 'trail' |
+| "만기도래 기본 구간은 2~5개월" | `ref.params` | `maturity_window_months` (화면 탭 기본값도 함께) |
+| "차환 신호는 만기 전 90일 안 신고서" | `ref.params` | `refi_signal_days` = 90 |
+| "IPO 대형 기준 1,000억" | `ref.params` | `large_deal_krw_ipo` 수정 |
+| 공시 분류가 틀림 ("감사보고서는 리스크가 아님") | `ref.disclosure_rules` | 패턴·분류·중요도 수정 (`priority` 작은 규칙이 먼저 적용) |
+| 금통위 일정 변경·내년 일정 추가 | `ref.policy_events` | 행 추가·수정 |
+| 금리 계열 추가 (예: 회사채 5년 AA-) | `ref.rate_series` | ECOS 통계표 코드와 항목명 정규식 한 행 추가 |
+| 원문을 더 받거나 덜 받기 | `ref.document_fetch_rules` | 보고서명 정규식·기간(`lookback_days`)·사용 여부 |
+| 정기보고서 잔액 API 추가·중단 | `ref.periodic_endpoints` | 행 추가·`is_active` |
 
 ## 2. 절차
 
@@ -39,7 +50,13 @@ order by status, kind, item;
 
 `draft` 가 남아 있으면 아직 현업 검증 전이다.
 
-## 4. 지키는 것
+## 4. 원문 파서와 AI 요약
+
+- **원문 파서** (`ingest/lib/docparse.mjs`): 신고서 본문은 형식이 깨진 XML 이라 태그를 지운 텍스트에 정규식을 쓴다. 증권사마다 표현이 달라 놓치는 문서가 생기면 `raw.doc_fields` 에 값이 없는 공시를 찾아 원문 표현을 보고 정규식을 추가한다. 테스트(`tests/docparse.mjs`)에 그 원문 조각을 먼저 넣는다.
+- **값 반영** (`core.apply_doc_fields`): 어떤 필드를 어느 조건 컬럼에 넣을지는 SQL 에 있다.
+- **AI 요약** (`ingest/lib/insights.mjs`): `mart.insight_facts()` 결과만 넣고, 요약에 사실에 없는 숫자나 전망 표현이 있으면 버리고 규칙 문장을 쓴다. 문체·길이는 같은 파일의 `SYSTEM` 프롬프트에서 바꾼다.
+
+## 5. 지키는 것
 
 - `mart` 뷰의 컬럼을 지우거나 이름을 바꾸지 않는다. 화면이 깨진다.
 - 기준일(`deal_dt`) 규칙은 `mart.v_deals` 에서만 바꾼다.

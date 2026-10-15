@@ -57,12 +57,13 @@ Vercel (Next.js) ── RA·RM
 | 공시검색 `list.json` (발행공시 C, 주요사항보고 B) | `raw.filings` | `core.deal_filings` (공시 분류) | 공통 |
 | 기업개황 `company.json` | `raw.api_items` | `core.companies.induty_code` | 공통 |
 | 증권신고서 채무증권 `bdRs.json` | `raw.api_items` | `core.deals`, `core.bond_terms`, `core.deal_underwriters` | 회사채 |
-| 원문 `document.xml` (정정신고서 수요예측 결과) | `raw.documents` | `core.bond_terms` 밴드·수요·경쟁률 | 회사채 |
+| 원문 `document.xml` (발행조건확정 신고서, 메자닌 발행결정) | `raw.doc_fields` (뽑은 값만) | `core.apply_doc_fields()` → 등급·밴드·확정 가산금리·경쟁률, IPO 밴드·확정가, 메자닌 풋 | 회사채·IPO·메자닌 |
 | 전환사채권·신주인수권부사채권·교환사채권 발행결정 | `raw.api_items` | `core.deals`, `core.mezz_terms` | 메자닌 |
 | 유상증자 결정 `piicDecsn.json` | `raw.api_items` | `core.deals`, `core.equity_terms` | 유증 |
-| 증권신고서 지분증권 `estkRs.json` | `raw.api_items` | `core.equity_terms`, `core.deal_underwriters` | 유증 |
+| 증권신고서 지분증권 `estkRs.json` | `raw.api_items` | 상장사: `core.equity_terms` / 비상장·코넥스: `core.ipo_terms` | 유증·IPO |
 | 채무증권 발행실적 `detScritsIsuAcmslt.json` | `raw.api_items` | `core.company_debt_issues` | 회사 이력 |
-| 회사채 미상환 잔액 `cprndNrdmpBlce.json` | `raw.api_items` | `core.company_bond_maturity` | 만기 구조 |
+| 회사채·기업어음·단기사채 미상환 잔액 (`cprndNrdmpBlce`, `entrprsBilScritsNrdmpBlce`, `srtpdPsndbtNrdmpBlce`) | `raw.api_items` | (변환 없이) `mart.v_company_short_debt` | 만기도래 |
+| 한국은행 ECOS 시장금리·기준금리 | `raw.rates` | (변환 없이) `mart.v_rates_daily` 등 | 금리 |
 
 ## 5. 핵심 규칙
 
@@ -90,16 +91,24 @@ Vercel (Next.js) ── RA·RM
 | 주관 순위 | `v_league_table_yearly`, `v_league_credits` |
 | 주목할 딜 | `v_notable_deals` |
 | 툴팁·기본값 | `v_metric_catalog`, `v_ui_params`, `v_products` |
+| 만기도래 | `v_maturities`, `v_maturity_monthly`, `v_company_short_debt` |
+| 인사이트 | `insight_facts()`, `v_insight_summaries` |
+| 금리 | `v_rate_latest`, `v_rates_daily`, `v_rate_spreads_daily`, `v_policy_events` |
+| 최근 공시 | OpenDART 실시간 + `v_disclosure_rules` |
+| IPO 동향 | `v_ipo_trend_monthly` |
+| 데이터 기준·캐시 | `v_data_status`, `v_data_version` |
 
 ## 7. 수집
 
 | 작업 | 주기 | 호출량 (추정) |
 |---|---|---|
-| 공시검색 증분 | 매일 1회 | 수십 건 |
-| 신규 공시 상세 API | 매일 1회 | 신규 딜 수만큼 |
-| 원문(수요예측) | 발행조건확정 공시 발생 시 | 건당 1회 |
-| 정기보고서 API | 분기 1회 | 관심 회사 수만큼 |
-| 24개월 백필 | 최초 1회 (수동) | 수천~1만 건, 1~2일 분할 |
+| 공시검색 증분 | 매일 07:10 | 수십 건 |
+| 신규 공시 상세 API | 매일 | 신규 딜 수만큼 |
+| 원문(발행조건확정·메자닌 결정) | 매일, 실행당 1,500건까지 | 밀린 과거분은 며칠에 나눠 처리 |
+| 정기보고서 잔액 | 매일, 실행당 2,000건까지 | 보고기간이 바뀌면(5·8·11월 중순, 4월) 다시 받음 |
+| ECOS 금리 | 매일 | 7개 계열, 마지막 날짜부터 |
+| 인사이트 요약 | 매일 변환 뒤 | 사실이 바뀐 범위만 OpenAI 호출 |
+| 과거 백필 | 최초 1회 | 24개월 + 회사채 2019~(회사별) + 메자닌 2021~ |
 
 - 공시검색은 회사 지정 없이 3개월 단위로만 조회되므로 월 단위로 나눠 수집한다.
 - 일일 호출 한도(약 2만 건)를 넘지 않도록 수집기가 `ops.ingest_runs.api_calls` 를 누적 관리한다.

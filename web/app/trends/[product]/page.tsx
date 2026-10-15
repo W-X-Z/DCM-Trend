@@ -169,6 +169,12 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
             <>
               <Stat label="평균 만기">{tenorAvg != null ? num(tenorAvg / 12, 1) : '–'}<small>년</small></Stat>
               <Stat label="평균 인수수수료">{feeBp != null ? num(feeBp, 1) : '–'}<small>bp</small></Stat>
+              {sum(rows, (r) => r.demand_known_count) > 0 && (
+                <>
+                  <Stat label="평균 수요예측 경쟁률">{num(weightedAvg(rows.filter((r) => r.demand_known_count > 0).map((r) => ({ ...r, deal_count: r.demand_known_count })), (r) => r.avg_competition), 2)}<small>배</small></Stat>
+                  <Stat label="미달 비중">{pct(share(sum(rows, (r) => r.undersub_count), sum(rows, (r) => r.demand_known_count)), 1)}</Stat>
+                </>
+              )}
               {yieldAvg != null && <Stat label="평균 발행금리">{pct(yieldAvg, 2)}</Stat>}
             </>
           )}
@@ -199,7 +205,10 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
         </dl>
         {(product === 'bond' || product === 'ipo') && (
           <p className="note">
-            {product === 'bond' ? '발행금리, 신용등급, 수요예측 경쟁률' : '희망공모가 밴드, 수요예측 경쟁률, 의무보유 확약'}은 신고서 본문에서 읽어 채웁니다. 본문 파싱이 끝난 딜부터 표시됩니다.
+            {product === 'bond'
+              ? '신용등급, 공모희망금리 밴드, 확정 가산금리, 수요예측 경쟁률은 발행조건확정 신고서 본문에서 읽습니다. 민평 방식은 청약 전일에 쿠폰이 정해져 확정 가산금리로 보여 줍니다.'
+              : '희망공모가 밴드, 확정공모가, 수요예측 경쟁률은 발행조건확정 신고서 본문에서 읽습니다.'}
+            {' '}본문을 읽은 딜부터 표시되고, 과거 딜은 매일 조금씩 채워집니다.
           </p>
         )}
 
