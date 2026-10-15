@@ -43,7 +43,7 @@ export async function GET(req: Request) {
       })),
       ...deals.filter((d) => d.status !== 'withdrawn').map((d): WatchEvent => ({
         when: 'recent', dt: d.deal_dt!, corp_code: d.corp_code, corp_name: d.corp_name, kind: '발행', title: dealTitle(d),
-        detail: [won(d.amount_krw), d.lead_managers ? `대표주관 ${d.lead_managers}` : null].filter(Boolean).join(', '),
+        detail: [d.amount_krw != null ? won(d.amount_krw) : null, d.lead_managers ? `대표주관 ${d.lead_managers}` : null].filter(Boolean).join(', ') || null,
         href: d.dart_url ?? `/company/${d.corp_code}`, tone: d.is_undersubscribed ? 'alert' : null,
       })),
       ...bonds.map((b): WatchEvent => ({
@@ -61,7 +61,7 @@ export async function GET(req: Request) {
         when: 'upcoming', dt: m.event_dt, corp_code: m.corp_code, corp_name: m.corp_name,
         kind: m.event_type === '풋옵션' ? '풋옵션' : '만기',
         title: m.product_type === 'bond' ? `제${m.series}회 회사채 만기` : `${m.sub_type ?? '메자닌'} ${m.event_type === '풋옵션' ? '조기상환청구 시작' : '만기'}`,
-        detail: [won(m.amount_krw), m.lead_managers ? `당시 대표주관 ${m.lead_managers}` : null].filter(Boolean).join(', '),
+        detail: [m.amount_krw != null ? won(m.amount_krw) : null, m.lead_managers ? `당시 대표주관 ${m.lead_managers}` : null].filter(Boolean).join(', ') || null,
         href: `/company/${m.corp_code}`, tone: null,
       })),
     ];

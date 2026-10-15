@@ -128,7 +128,15 @@ export async function ProposalPrep({ corp, deals }: { corp: string; deals: Deal[
                   <span className="tnum muted">{date(u.pricing_dt ?? u.deal_dt)}</span>
                   <Link href={`/company/${u.corp_code}`}>{u.corp_name}</Link>
                   <span className="muted">{u.rating}</span>
-                  <span className="tnum">{won(u.initial_amount_krw ?? u.amount_krw)} 모집, 경쟁률 {ratio(u.competition_ratio)}</span>
+                  <span className="tnum">
+                    {won(u.initial_amount_krw ?? u.amount_krw)} 모집,{' '}
+                    {(() => {
+                      const t = (u.tranches ?? []).find((x) => x.is_undersubscribed);
+                      return t && u.tranche_count > 1
+                        ? `${t.tenor_label ?? t.tenor_bucket} 경쟁률 ${ratio(t.competition_ratio)}`
+                        : `경쟁률 ${ratio(t?.competition_ratio ?? u.competition_ratio)}`;
+                    })()}
+                  </span>
                 </li>
               ))}
             </ul>

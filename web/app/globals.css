@@ -2995,3 +2995,13 @@ tr.row-hl td {
     display: none;
   }
 }
+
+.we-body {
+  min-width: 0;
+}
+
+.we-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
