@@ -61,6 +61,12 @@ await check('회사채 인수단: 표준명·역할',
   ['KB증권:대표주관', '대신증권:대표주관', '키움증권:인수', '하나증권:인수']);
 await check('회사채 수수료 bp (정액 표기 파싱)',
   `select string_agg(fee_bp::text, ',' order by deal_key) from mart.v_deals where product_type = 'bond'`, '24.0,18.0');
+await check('인수대가 비율 표기 → 금액',
+  `select string_agg(coalesce(core.parse_uw_fee(p, 30000000000)::text, '-'), ',' order by i) from (values
+     (1, '인수금액의 0.30%'), (2, '인수수수료\n(액면금액 합계 × 0.05%)'), (3, '인수금액의 0.\n25%'),
+     (4, E'인수수수료 0.10%\\n성과인수수수료 0.03%'), (5, '모집총액의 0.30% 中 10%'), (6, '60,000,000(정액)'),
+     (7, '9,000,000,000')) v(i, p)`,
+  '90000000,15000000,75000000,30000000,-,60000000,-');
 await check('회사채 NH 대표주관 표시',
   `select string_agg(deal_key || ':' || nh_lead, ',' order by deal_key) from mart.v_deals where product_type = 'bond'`,
   'bond:00500254:22-1:true,bond:00500254:22-2:false');

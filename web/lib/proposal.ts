@@ -215,7 +215,12 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
     out.push({
       key: 'peers', title: `같은 등급(${group}급) 수요예측 사례`, status: recent.length ? 'filled' : 'partial',
       lines: recent.length
-        ? [`최근 6개월 ${group}급 공모 회사채 ${recent.length}건의 수요예측 경쟁률 중간값은 ${ratio(median(known.map((p) => p.competition_ratio)))}, 증액 발행 비율은 ${pct0(share(initKnown.filter((p) => p.is_increased).length, initKnown.length))}${ida('%')}.`]
+        ? [
+          known.length
+            ? `최근 6개월 ${group}급 공모 회사채는 ${recent.length}건이고, 경쟁률이 공시된 ${known.length}건의 중간값은 ${ratio(median(known.map((p) => p.competition_ratio)))}다.`
+            : `최근 6개월 ${group}급 공모 회사채는 ${recent.length}건이고, 경쟁률이 공시된 건은 없다.`,
+          ...(initKnown.length ? [`최초 신고 금액이 있는 ${initKnown.length}건 중 증액 발행 비율은 ${pct0(share(initKnown.filter((p) => p.is_increased).length, initKnown.length))}${ida('%')}.`] : []),
+        ]
         : [`최근 6개월 ${group}급 공모 회사채 발행이 없다.`],
       table: recent.length
         ? {
@@ -235,8 +240,8 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
     out.push({
       key: 'under', title: '미달·미매각 사례', status: 'filled',
       lines: [under.length
-        ? `최근 12개월 ${group}급 공모 회사채 ${known12.length}건 중 미달은 ${under.length}건(${pct0(share(under.length, known12.length))})${ida('%')}.`
-        : `최근 12개월 ${group}급 미달 사례가 없다.`],
+        ? `최근 12개월 ${group}급 공모 회사채 ${peers.length}건 중 경쟁률이 공시된 ${known12.length}건을 보면 미달은 ${under.length}건(${pct0(share(under.length, known12.length))})${ida('%')}.`
+        : `최근 12개월 ${group}급 공모 회사채 ${peers.length}건 중 경쟁률이 공시된 ${known12.length}건에서 미달 사례가 없다.`],
       table: under.length
         ? {
           head: ['수요예측일', '발행사', '등급', '모집액', '미달 트랜치', '대표주관'],
