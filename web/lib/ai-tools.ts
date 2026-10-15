@@ -3,7 +3,8 @@
 import 'server-only';
 import { select } from './db';
 import { fetchDisclosures, hasDartKey } from './opendart';
-import { getDisclosureRules, searchCompanies } from './queries';
+import { FILING_GROUPS, daysAgo, isIssuer } from './filings';
+import { getDisclosureRules, getKeyFilings, searchCompanies } from './queries';
 
 type Json = Record<string, unknown>;
 export type Ref = { label: string; href: string };
@@ -154,6 +155,27 @@ export const TOOL_SCHEMAS = [
       parameters: { type: 'object', properties: { corp_code: { type: 'string' } }, required: ['corp_code'] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'key_filings',
+      description:
+        '시장 전체(또는 특정 회사)의 최근 120일 주요 공시와 원문에서 읽은 값(금액·자기자본 대비·상대방·변경 후 최대주주 등). ' +
+        '묶음: 자금 수요(단기차입금 증가·신규 시설투자·CB 풋 취득·자사주 처분·채무보증), 지배구조·M&A(최대주주 변경·경영권 양수도·지분/영업 양수도·합병·분할), ' +
+        '신용·상장 위험(원리금 미지급·채권은행 관리·회생·부도·상장폐지 사유·실질심사·횡령), 자산·실적(유형자산 취득·처분·감자·매출/손익 30% 변동).',
+      parameters: {
+        type: 'object',
+        properties: {
+          group: { type: 'string', enum: ['자금 수요', '지배구조·M&A', '신용·상장 위험', '자산·실적'] },
+          kind: { type: 'string', description: '공시 종류 이름 일부 (예: 단기차입금, 최대주주, 시설투자, 원리금)' },
+          corp_code: { type: 'string' },
+          from: { type: 'string', description: 'YYYY-MM-DD (기본: 30일 전)' },
+          issuers_only: { type: 'boolean', description: '공모 회사채 발행 이력·등급이 있는 회사만' },
+          limit: { type: 'number', description: '최대 40' },
+        },
+      },
+    },
+  },
 ] as const;
 
 export const TOOL_LABEL: Record<string, string> = {
@@ -167,6 +189,7 @@ export const TOOL_LABEL: Record<string, string> = {
   rates_latest: '금리',
   recent_feed: '최근 피드',
   company_disclosures: '공시 목록',
+  key_filings: '주요 공시',
 };
 
 const DEAL_COLS =
@@ -341,6 +364,30 @@ export async function runTool(name: string, args: Json): Promise<ToolResult> {
           다가오는접점: touch.map((t) => ({ 회사: t.corp_name, corp_code: t.corp_code, 제목: t.title, 내용: t.why, 날짜: t.event_dt })),
         },
         refs: [{ label: '홈 피드', href: '/' }],
+      };
+    }
+    case 'key_filings': {
+      const from = isDate(args.from) ? args.from : daysAgo(30);
+      const corp = str(args.corp_code, 12);
+      const group = str(args.group, 12);
+      const kind = str(args.kind, 20);
+      let rows = await getKeyFilings({ since: from, corps: corp ? [corp] : undefined, grp: group });
+      if (kind) rows = rows.filter((r) => r.label.includes(kind) || r.report_nm.includes(kind));
+      if (args.issuers_only === true) rows = rows.filter(isIssuer);
+      const lim = clamp(args.limit, 1, 40, 25);
+      const top = rows.slice(0, lim);
+      return {
+        data: {
+          전체건수: rows.length,
+          목록: top.map((r) => ({
+            날짜: r.rcept_dt, 회사: r.corp_name, corp_code: r.corp_code, 종류: r.label, 묶음: r.grp,
+            최근회사채등급: r.latest_bond_rating ?? undefined, 내용: r.facts,
+          })),
+        },
+        refs: [
+          { label: '주요 공시', href: `/filings${group ? `?g=${FILING_GROUPS.find((g) => g.grp === group)?.key ?? ''}` : ''}` },
+          ...top.slice(0, 4).flatMap((r) => dartRef(r.rcept_no, `${r.corp_name} ${r.label}`)),
+        ],
       };
     }
     case 'company_disclosures': {

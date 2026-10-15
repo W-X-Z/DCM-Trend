@@ -62,7 +62,7 @@ export async function FeedSection({ filter = 'all' }: { filter?: FeedFilter }) {
       <SectionHead
         id="feed-h"
         title="최근 2주 공시·발행"
-        info={`최근 14일의 공시·발행 가운데 이례적인 발행(미달·큰 증액·첫 공모채·대형 메자닌 등)과 자금 수요로 이어질 공시(자산·지분 취득, 합병·분할, 회생 등)를 규칙으로 뽑고, ${isAi ? 'AI가 골라 문장으로 정리했습니다' : '점수 순으로 골랐습니다'}. 숫자는 공시 값 그대로이고, 후보에 없는 숫자가 들어간 문장은 버립니다.`}
+        info={`최근 14일의 공시·발행 가운데 이례적인 발행(미달·큰 증액·첫 공모채·이전 NH 고객의 타사 주관·등급 하락 등)과 자금 수요·신용 위험으로 이어질 공시(단기차입금 증가, 시설투자, 최대주주 변경, 원리금 미지급 등)를 규칙으로 뽑고, ${isAi ? 'AI가 골라 문장으로 정리했습니다' : '점수 순으로 골랐습니다'}. 숫자는 공시 값 그대로이고, 후보에 없는 숫자가 들어간 문장은 버립니다.`}
         right={
           <>
             <nav className="chips" aria-label="피드 구분">
@@ -86,6 +86,9 @@ export async function FeedSection({ filter = 'all' }: { filter?: FeedFilter }) {
           ))}
         </ol>
       )}
+      <p className="feed-more small">
+        <Link href="/filings">주요 공시 전체 보기</Link>
+      </p>
     </section>
   );
 }

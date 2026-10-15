@@ -19,6 +19,8 @@ const ENT = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "
 
 export function stripXml(xml) {
   return xml
+    // 거래소 공시 원문은 HTML 이라 <STYLE> 블록이 본문 앞에 온다 → 내용째 지운다
+    .replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<(TD|TH|TE|TU)\b[^>]*>/gi, '|')
     .replace(/<[^>]+>/g, '')
     .replace(/&(amp|lt|gt|quot|apos|nbsp|#160);/g, (m) => ENT[m] ?? m)
@@ -252,7 +254,7 @@ export function parseDisclosure(text) {
   const pct = (s) => (num(s) === null ? null : String(num(s)));
   const date = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(String(s ?? '').trim()) ? String(s).trim() : ymdKr(s));
 
-  const kind = disclosureKind(text.slice(0, 400));
+  const kind = disclosureKind(text.slice(0, 600));
   if (!kind) return out;
   const equityRatio = () => push('자기자본 대비:pct', pct(val(/^자기자본대비\(%\)$/)));
 

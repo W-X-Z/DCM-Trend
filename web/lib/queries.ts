@@ -3,7 +3,7 @@ import { TREND_DEAL_COLS, type TrendDeal } from './period';
 import type {
   BondIssue, BondTrendRow, Comp, FeedItem, CompanyHit, CompanyOverview, DataStatus, Deal, DisclosureRule, EquityTrendRow,
   FeeRow, InsightFact, InsightIssue, IpoTrendRow, LeagueRow, Maturity, MaturityMonth, Metric, MezzTrendRow,
-  NotableDeal, PolicyEvent, ProductType, RateLatest, RatePoint, ShortDebt, SpreadPoint,
+  KeyFiling, NotableDeal, PolicyEvent, ProductType, RateLatest, RatePoint, ShortDebt, SpreadPoint,
 } from './types';
 
 export async function getDataStatus(): Promise<DataStatus | null> {
@@ -173,4 +173,26 @@ export async function getPolicyEvents(): Promise<PolicyEvent[]> {
 
 export async function getDisclosureRules(): Promise<DisclosureRule[]> {
   return select<DisclosureRule>('v_disclosure_rules', { order: 'priority.asc' });
+}
+
+// 주요 공시 (시장 전체, 최근 120일). corps 를 주면 그 회사들만
+export async function getKeyFilings(opts: { since: string; grp?: string; corps?: string[]; limit?: number }): Promise<KeyFiling[]> {
+  const q = {
+    rcept_dt: `gte.${opts.since}`,
+    grp: opts.grp ? `eq.${opts.grp}` : undefined,
+    corp_code: opts.corps?.length ? inList(opts.corps) : undefined,
+    order: 'rcept_dt.desc,weight.desc,size_krw.desc.nullslast',
+  };
+  return opts.limit ? select<KeyFiling>('v_key_filings', { ...q, limit: opts.limit }) : selectAll<KeyFiling>('v_key_filings', q);
+}
+
+// 회사채 발행(트랜치 묶음): 한 회사 또는 등급군
+export async function getBondIssuesBy(opts: { corp?: string; ratingGroup?: string; since?: string; limit?: number }): Promise<BondIssue[]> {
+  return select<BondIssue>('v_bond_issues', {
+    corp_code: opts.corp ? `eq.${opts.corp}` : undefined,
+    rating_group: opts.ratingGroup ? `eq.${opts.ratingGroup}` : undefined,
+    deal_dt: opts.since ? `gte.${opts.since}` : undefined,
+    order: 'deal_dt.desc,amount_krw.desc.nullslast',
+    limit: opts.limit ?? 200,
+  });
 }

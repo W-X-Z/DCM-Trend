@@ -3,7 +3,7 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import { XMLParser } from 'fast-xml-parser';
 import { STATUS, DartStopError, BudgetError, DocError } from './dart.mjs';
-import { parseByPurpose, disclosureKind } from './docparse.mjs';
+import { parseByPurpose, disclosureKind, stripXml } from './docparse.mjs';
 
 // 공시검색 대상: 발행공시 전체 + 주요사항보고서
 // 실측: 발행공시는 상세유형(C001/C002)을 줘도 발행공시 전체가 돌아와서 유형(C)만 지정한다.
@@ -267,7 +267,8 @@ function guessPurpose(xml) {
   if (/채무증권/.test(name)) return 'bond';
   if (/지분증권/.test(name)) return 'ipo';
   if (/전환사채|신주인수권부사채|교환사채/.test(name)) return 'mezz';
-  if (disclosureKind(name)) return 'disclosure';
+  // 거래소 공시는 DSD 가 아닌 HTML 이라 DOCUMENT-NAME 이 없다 → 본문 첫머리(회사/공시명/날짜)로 판단
+  if (disclosureKind(name || stripXml(xml.slice(0, 20000)).slice(0, 600))) return 'disclosure';
   return null;
 }
 
