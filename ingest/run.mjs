@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import { Dart, DartStopError } from './lib/dart.mjs';
 import { Db } from './lib/db.mjs';
 import {
-  probe, corpCodes, filings, details, refresh, periodic, documents, rates, insights, historyBonds, todayKst, addDays,
+  probe, corpCodes, filings, details, refresh, periodic, documents, rates, insights, historyBonds, todayKst, addDays, FILING_TYPES,
 } from './lib/jobs.mjs';
 
 function parseArgs(argv) {
@@ -62,7 +62,12 @@ async function run(command, opts) {
   switch (command) {
     case 'probe':      return probe(env);
     case 'corp-codes': return corpCodes(env);
-    case 'filings':    return filings(env, { from: opts.from, to: opts.to ?? today });
+    case 'filings':    return filings(env, {
+      from: opts.from ?? addDays(today, -Number(opts.days ?? 7)),
+      to: opts.to ?? today,
+      // --types I 처럼 유형을 골라 받을 수 있다 (예: 거래소공시만 과거 보강)
+      types: opts.types ? FILING_TYPES.filter((t) => String(opts.types).split(',').includes(t.ty)) : FILING_TYPES,
+    });
     case 'details':    return details(env, { maxGroups: Number(opts.maxGroups ?? 100000) });
     case 'refresh':    return refresh(env);
     case 'periodic':   return periodic(env, { maxCalls: Number(opts.maxCallsStep ?? 3000) });

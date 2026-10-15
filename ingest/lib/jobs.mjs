@@ -7,9 +7,17 @@ import { parseByPurpose } from './docparse.mjs';
 
 // 공시검색 대상: 발행공시 전체 + 주요사항보고서
 // 실측: 발행공시는 상세유형(C001/C002)을 줘도 발행공시 전체가 돌아와서 유형(C)만 지정한다.
+// 거래소공시(I)는 양이 많아 RM·RA 가 챙길 공시만 저장한다(보고서명 정규식).
+export const EXCHANGE_INCLUDE = [
+  '단기차입금\\s*증가', '신규\\s*시설\\s*투자', '최대주주\\s*변경', '경영권', '채무\\s*보증', '담보\\s*제공',
+  '손익구조', '원리금', '기한의\\s*이익', '매매거래\\s*정지', '관리종목', '상장폐지', '상장적격성', '횡령', '배임',
+  '기업설명회', '\\(IR\\)', '단일판매', '공급계약', '자산양수도', '투자판단',
+].join('|');
+
 export const FILING_TYPES = [
   { ty: 'C' },                   // 발행공시 (증권신고서·정정·발행조건확정·실적보고 등)
   { ty: 'B', detail: 'B001' },   // 주요사항보고서
+  { ty: 'I', include: EXCHANGE_INCLUDE },  // 거래소공시 중 자금 수요·위기·접점 신호만
 ];
 
 export const ymd = (d) => d.replaceAll('-', '');
@@ -106,10 +114,12 @@ export async function corpCodes(env) {
 // types: FILING_TYPES 중 일부만 (예: [{ ty: 'C' }])
 // include: 보고서명 정규식. 지정하면 맞는 공시만 저장한다 (과거 백필에서 DB 용량 절약)
 export async function filings(env, { from, to, types = FILING_TYPES, include = null }) {
-  const re = include ? new RegExp(include) : null;
+  const globalRe = include ? new RegExp(include) : null;
   return withRun(env, 'filings', { from, to, types, include }, async (ctx) => {
     for (const [bgn, end] of monthChunks(from, to)) {
       for (const t of types) {
+        const typeRe = t.include ? new RegExp(t.include) : null;
+        const keep = (nm) => (!globalRe || globalRe.test(nm)) && (!typeRe || typeRe.test(nm));
         let page = 1;
         let totalPage = 1;
         do {
@@ -128,7 +138,7 @@ export async function filings(env, { from, to, types = FILING_TYPES, include = n
           }
           totalPage = Number(body.total_page ?? 1);
           const items = (body.list ?? [])
-            .filter((x) => !re || re.test(String(x.report_nm ?? '')))
+            .filter((x) => keep(String(x.report_nm ?? '')))
             .map((x) => ({ ...x, _pblntf_ty: t.ty, _pblntf_detail_ty: t.detail ?? null }));
           ctx.fetched += (body.list ?? []).length;
           if (items.length) ctx.written += await env.db.rpc('ingest_put_filings', { p_run_id: ctx.runId, p_items: items });
