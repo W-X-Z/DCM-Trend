@@ -92,13 +92,13 @@ export function ruleSummary(facts) {
 }
 
 // 프롬프트를 바꾸면 올린다 → 사실이 같아도 요약을 다시 만든다
-const PROMPT_VERSION = 3;
+const PROMPT_VERSION = 4;
 
 const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을 정리해 주는 애널리스트다.
 규칙:
 - 주어진 JSON 사실만 쓴다. 숫자는 JSON의 문자열을 그대로 옮기고 새 숫자를 만들거나 계산하지 않는다.
 - 예측, 전망, 권고, 추측("~할 것", "~로 보인다", "~해야")은 쓰지 않는다.
-- 3~5개의 불릿("- "로 시작), 각 불릿은 한 문장이고 지표는 두 개까지. 변화가 큰 것부터.
+- 불릿("- "로 시작)은 5개 이하, 각 불릿은 한 문장이고 지표는 두 개까지. 변화가 큰 것부터. 사실이 적으면 불릿도 적게 쓰고, 기간·기준만 되풀이하는 불릿은 쓰지 않는다.
 - 숫자와 이름에 따옴표를 붙이지 않는다.
 - 각 불릿에 비교 기준(예: 전년 동기, 직전 12개월, 1개월 전)을 밝힌다.
 - 눈에띄는변화가 false 인 항목은 숫자 없이 지표 이름만 주어진다. 마지막 불릿 하나에 "큰 변화 없음: 지표, 지표"로만 쓴다.
@@ -108,9 +108,11 @@ const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을
 
 // 눈에 띄지 않는 지표는 이름만 넘겨 요약이 숫자 나열이 되지 않게 한다.
 export function compactForModel(facts) {
+  // 점수는 정렬용 내부 값이라 넘기지 않는다(요약에 "점수 2.08" 이 나온 적이 있다).
   return facts
     .filter((f) => f.눈에띄는변화 || !String(f.key).startsWith('top_deal'))
-    .map((f) => (f.눈에띄는변화 ? f : { scope: f.scope, key: f.key, 지표: f.지표, 눈에띄는변화: false }));
+    .sort((a, b) => Number(b.점수 ?? 0) - Number(a.점수 ?? 0))
+    .map(({ 점수, ...f }) => (f.눈에띄는변화 ? f : { scope: f.scope, key: f.key, 지표: f.지표, 눈에띄는변화: false }));
 }
 
 function numbersIn(text) {
@@ -120,7 +122,8 @@ function numbersIn(text) {
 export function validate(summary, facts) {
   const allowed = new Set();
   for (const f of facts) {
-    for (const s of [f.기간, f.값, f.비교기준, f.비교값, f.변화]) for (const n of numbersIn(String(s ?? ''))) allowed.add(n);
+    // 지표 이름 속 숫자("0%/0% 조건 비중", "리픽싱 하한 70% 이하")도 허용
+    for (const s of [f.지표, f.기간, f.값, f.비교기준, f.비교값, f.변화]) for (const n of numbersIn(String(s ?? ''))) allowed.add(n);
   }
   for (const n of ['1', '2', '3', '4', '5', '6', '12']) allowed.add(n); // "3개월", "12개월" 같은 기간 표현
   const bad = numbersIn(summary).filter((n) => !allowed.has(n));
