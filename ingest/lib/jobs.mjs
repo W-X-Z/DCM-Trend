@@ -2,7 +2,7 @@
 
 import { unzipSync, strFromU8 } from 'fflate';
 import { XMLParser } from 'fast-xml-parser';
-import { STATUS, DartStopError, BudgetError } from './dart.mjs';
+import { STATUS, DartStopError, BudgetError, DocError } from './dart.mjs';
 
 // 공시검색 대상: 발행공시 전체 + 주요사항보고서
 // 실측: 발행공시는 상세유형(C001/C002)을 줘도 발행공시 전체가 돌아와서 유형(C)만 지정한다.
@@ -102,10 +102,13 @@ export async function corpCodes(env) {
 }
 
 // 3. 공시 목록 (list.json) -------------------------------------------------
-export async function filings(env, { from, to }) {
-  return withRun(env, 'filings', { from, to }, async (ctx) => {
+// types: FILING_TYPES 중 일부만 (예: [{ ty: 'C' }])
+// include: 보고서명 정규식. 지정하면 맞는 공시만 저장한다 (과거 백필에서 DB 용량 절약)
+export async function filings(env, { from, to, types = FILING_TYPES, include = null }) {
+  const re = include ? new RegExp(include) : null;
+  return withRun(env, 'filings', { from, to, types, include }, async (ctx) => {
     for (const [bgn, end] of monthChunks(from, to)) {
-      for (const t of FILING_TYPES) {
+      for (const t of types) {
         let page = 1;
         let totalPage = 1;
         do {
@@ -123,8 +126,10 @@ export async function filings(env, { from, to }) {
             break;
           }
           totalPage = Number(body.total_page ?? 1);
-          const items = (body.list ?? []).map((x) => ({ ...x, _pblntf_ty: t.ty, _pblntf_detail_ty: t.detail ?? null }));
-          ctx.fetched += items.length;
+          const items = (body.list ?? [])
+            .filter((x) => !re || re.test(String(x.report_nm ?? '')))
+            .map((x) => ({ ...x, _pblntf_ty: t.ty, _pblntf_detail_ty: t.detail ?? null }));
+          ctx.fetched += (body.list ?? []).length;
           if (items.length) ctx.written += await env.db.rpc('ingest_put_filings', { p_run_id: ctx.runId, p_items: items });
           page++;
         } while (page <= totalPage);
@@ -182,5 +187,157 @@ export async function refresh(env) {
     const res = await env.db.rpc('ingest_refresh');
     console.log(`refresh: ${JSON.stringify(res)}`);
     ctx.written = Object.values(res ?? {}).reduce((a, b) => a + (Number(b) || 0), 0);
+  });
+}
+
+// 6. 정기보고서 잔액 (회사채·기업어음·단기사채 미상환 잔액) --------------------
+// 기준 보고서: 오늘 날짜로 제출이 끝났을 가장 최근 정기보고서
+//   11월 15일~ : 당해 3분기(11014) / 8월 15일~ : 반기(11012) / 5월 16일~ : 1분기(11013)
+//   4월 1일~ : 전년 사업보고서(11011) / 그 전 : 전년 3분기(11014)
+export function latestPeriod(today = todayKst()) {
+  const y = Number(today.slice(0, 4));
+  const md = today.slice(5);
+  if (md >= '11-15') return { year: y, reprt: '11014' };
+  if (md >= '08-15') return { year: y, reprt: '11012' };
+  if (md >= '05-16') return { year: y, reprt: '11013' };
+  if (md >= '04-01') return { year: y - 1, reprt: '11011' };
+  return { year: y - 1, reprt: '11014' };
+}
+
+export async function periodic(env, { maxCalls = 3000, period = latestPeriod() } = {}) {
+  const periodKey = `${period.year}-${period.reprt}`;
+  return withRun(env, 'periodic', { maxCalls, periodKey }, async (ctx) => {
+    const start = env.dart.calls;
+    while (env.dart.calls - start < maxCalls) {
+      const targets = await env.db.rpc('ingest_periodic_targets', { p_period_key: periodKey, p_limit: 300 });
+      if (!targets.length) break;
+      for (const t of targets) {
+        if (env.dart.calls - start >= maxCalls) break;
+        const body = await env.dart.json(t.endpoint, {
+          corp_code: t.corp_code, bsns_year: period.year, reprt_code: period.reprt,
+        });
+        const ok = [STATUS.OK, STATUS.NO_DATA].includes(body.status);
+        const items = ok ? body.list ?? [] : [];
+        ctx.fetched += items.length;
+        ctx.written += await env.db.rpc('ingest_put_periodic', {
+          p_run_id: ctx.runId, p_endpoint: t.endpoint, p_corp_code: t.corp_code,
+          p_period_key: periodKey, p_status_code: body.status, p_items: items,
+        });
+        if (!ok) {
+          await env.db.rpc('ingest_log_issue', {
+            p_stage: 'ingest', p_code: `${t.endpoint}_${body.status}`, p_corp_code: t.corp_code,
+            p_detail: { periodKey, message: body.message },
+          });
+        }
+      }
+      console.log(`periodic ${periodKey}: 호출 ${env.dart.calls - start}회, 항목 ${ctx.fetched}건`);
+    }
+  });
+}
+
+// 7. 신고서 원문 (document.xml) -------------------------------------------
+// 압축을 풀어 파일별로 raw.documents 에 넣는다. 파싱은 별도 단계.
+// rceptNos 를 주면 그 공시만, 아니면 DB 대기 목록(ref.document_fetch_rules)에서 가져온다.
+const MAX_DOC_CHARS = 1_000_000;
+
+function decodeXml(bytes) {
+  const head = new TextDecoder('ascii').decode(bytes.slice(0, 200));
+  const enc = head.match(/encoding="([^"]+)"/i)?.[1]?.toLowerCase() ?? 'utf-8';
+  try {
+    return new TextDecoder(enc).decode(bytes);
+  } catch {
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+}
+
+export async function documents(env, { rceptNos = null, maxDocs = 500 } = {}) {
+  return withRun(env, 'documents', { rceptNos, maxDocs }, async (ctx) => {
+    let queue = rceptNos ? rceptNos.map((r) => ({ rcept_no: r })) : null;
+    let done = 0;
+    while (done < maxDocs) {
+      if (!queue || !queue.length) {
+        if (rceptNos) break;
+        queue = await env.db.rpc('ingest_pending_documents', { p_limit: 100 });
+        if (!queue.length) break;
+      }
+      const { rcept_no } = queue.shift();
+      done++;
+      try {
+        const zip = await env.dart.binary('document.xml', { rcept_no });
+        const files = unzipSync(zip);
+        let bytes = 0;
+        const names = Object.keys(files);
+        for (const name of names) {
+          const text = decodeXml(files[name]);
+          bytes += files[name].length;
+          await env.db.rpc('ingest_put_document', {
+            p_run_id: ctx.runId, p_rcept_no: rcept_no, p_section: `file:${name}`,
+            p_content: text.slice(0, MAX_DOC_CHARS),
+          });
+        }
+        await env.db.rpc('ingest_mark_document', { p_run_id: ctx.runId, p_rcept_no: rcept_no, p_status: 'ok', p_files: names.length, p_bytes: bytes });
+        ctx.fetched += 1;
+        ctx.written += names.length;
+      } catch (e) {
+        if (!(e instanceof DocError)) throw e;
+        await env.db.rpc('ingest_mark_document', {
+          p_run_id: ctx.runId, p_rcept_no: rcept_no, p_status: e.status === '014' ? 'missing' : 'error', p_files: 0, p_bytes: 0,
+        });
+        await env.db.rpc('ingest_log_issue', { p_stage: 'ingest', p_code: `document_${e.status}`, p_rcept_no: rcept_no, p_detail: { message: e.message } });
+      }
+      if (done % 50 === 0) console.log(`documents: ${done}건`);
+    }
+  });
+}
+
+// 8. 한국은행 ECOS 금리 ----------------------------------------------------
+// 항목코드는 ECOS 항목 목록에서 ref.rate_series.item_pattern(항목명)으로 찾는다.
+const ECOS_BASE = process.env.ECOS_BASE ?? 'https://ecos.bok.or.kr/api';
+
+async function ecosJson(key, path) {
+  const res = await fetch(`${ECOS_BASE}/${path.replace('{KEY}', key)}`, { signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw new Error(`ECOS HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function rates(env, { from = '2019-01-01', key = process.env.ECOS_API_KEY } = {}) {
+  if (!key) {
+    console.log('rates: ECOS_API_KEY 가 없어 건너뜀');
+    return null;
+  }
+  return withRun(env, 'rates', { from }, async (ctx) => {
+    const series = await env.db.rpc('ingest_rate_series');
+    const itemLists = new Map();
+    const today = ymd(todayKst());
+    for (const s of series) {
+      if (!itemLists.has(s.stat_code)) {
+        const body = await ecosJson(key, `StatisticItemList/{KEY}/json/kr/1/1000/${s.stat_code}`);
+        const rows = body?.StatisticItemList?.row ?? [];
+        if (!rows.length) throw new Error(`ECOS 항목 목록 없음 ${s.stat_code}: ${JSON.stringify(body).slice(0, 200)}`);
+        itemLists.set(s.stat_code, rows);
+      }
+      const rows = itemLists.get(s.stat_code);
+      const re = new RegExp(s.item_pattern);
+      const item = rows.find((r) => re.test(r.ITEM_NAME) && r.CYCLE === s.cycle) ?? rows.find((r) => re.test(r.ITEM_NAME));
+      if (!item) {
+        await env.db.rpc('ingest_log_issue', { p_stage: 'ingest', p_code: 'ecos_item_not_found', p_detail: { series: s.series_key, pattern: s.item_pattern } });
+        continue;
+      }
+      const cycle = item.CYCLE ?? s.cycle;
+      const start = s.last_dt ? addDays(s.last_dt, -7) : from;
+      const fmt = (d) => (cycle === 'M' ? ymd(d).slice(0, 6) : ymd(d));
+      const body = await ecosJson(key,
+        `StatisticSearch/{KEY}/json/kr/1/100000/${s.stat_code}/${cycle}/${fmt(start)}/${cycle === 'M' ? today.slice(0, 6) : today}/${item.ITEM_CODE}`);
+      const data = body?.StatisticSearch?.row ?? [];
+      ctx.fetched += data.length;
+      const items = data.map((r) => ({
+        dt: r.TIME.length === 6 ? `${r.TIME.slice(0, 4)}-${r.TIME.slice(4, 6)}-01` : `${r.TIME.slice(0, 4)}-${r.TIME.slice(4, 6)}-${r.TIME.slice(6, 8)}`,
+        value: r.DATA_VALUE,
+      }));
+      for (let i = 0; i < items.length; i += 2000) {
+        ctx.written += await env.db.rpc('ingest_put_rates', { p_series_key: s.series_key, p_items: items.slice(i, i + 2000) });
+      }
+      console.log(`rates: ${s.series_key} (${item.ITEM_NAME}, ${cycle}) ${items.length}건`);
+    }
   });
 }

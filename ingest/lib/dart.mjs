@@ -16,6 +16,9 @@ const FATAL = new Set(['010', '011', '012', '901']);
 
 export class DartStopError extends Error {}   // 더 호출하면 안 되는 상황 (한도·키·IP)
 export class BudgetError extends Error {}     // 이번 실행의 호출 상한 도달
+export class DocError extends Error {         // 문서 하나만 실패 (파일 없음 등). 다음 문서는 계속
+  constructor(status, message) { super(message); this.status = status; }
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -79,13 +82,18 @@ export class Dart {
     }
   }
 
-  // 바이너리(zip) API. JSON 오류 응답이면 그 내용을 에러로 던진다.
+  // 바이너리(zip) API. 오류 응답(JSON·XML)이면 상태 코드에 따라
+  // 한도·키 문제는 DartStopError, 그 밖(파일 없음 등)은 DocError 를 던진다.
   async binary(path, params) {
     return this.#request(path, params, async (res) => {
       const buf = new Uint8Array(await res.arrayBuffer());
-      const head = new TextDecoder().decode(buf.slice(0, 200));
-      if (head.trimStart().startsWith('{') || head.includes('<status>')) {
-        throw new DartStopError(`${path} 오류 응답: ${head.slice(0, 160)}`);
+      const isZip = buf[0] === 0x50 && buf[1] === 0x4b;
+      if (!isZip) {
+        const head = new TextDecoder().decode(buf.slice(0, 400));
+        const status = head.match(/"status"\s*:\s*"(\d+)"|<status>(\d+)<\/status>/);
+        const code = status?.[1] ?? status?.[2] ?? 'unknown';
+        if (code === STATUS.LIMIT || FATAL.has(code)) throw new DartStopError(`${path} 중단 (${code}): ${head.slice(0, 160)}`);
+        throw new DocError(code, `${path} 오류 응답 (${code}): ${head.slice(0, 160)}`);
       }
       return buf;
     });
