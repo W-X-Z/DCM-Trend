@@ -254,7 +254,9 @@ export function parseDisclosure(text) {
   const pct = (s) => (num(s) === null ? null : String(num(s)));
   const date = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(String(s ?? '').trim()) ? String(s).trim() : ymdKr(s));
 
-  const kind = disclosureKind(text.slice(0, 600));
+  // 종류는 제목('회사/공시명/(날짜)')으로만 판단한다. 본문 앞부분(변경사유 '주식양수도계약에 따른 …')에 끌려가지 않게
+  const title = text.match(/\/\s*([^/|]{2,120}?)\s*\/\s*\(\d{4}\.\d{2}\.\d{2}\)/)?.[1] ?? text.slice(0, 200);
+  const kind = disclosureKind(title);
   if (!kind) return out;
   const equityRatio = () => push('자기자본 대비:pct', pct(val(/^자기자본대비\(%\)$/)));
 
@@ -336,10 +338,12 @@ export function parseDisclosure(text) {
     push('발생 금액:krw', krw(val(/금액\(원\)$/)));
     equityRatio();
   } else if (kind === 'bond_default') {
-    push('미지급 금액:krw', krw(val(/(미지급|지급불능).*금액.*\(원\)$/)));
-    push('사채 종류:text', val(/^사채(의)?종류$/));
-    push('미지급 사유:text', val(/사유$/));
+    // "1. 미지급금액 | 원금(원) | … | 합계(원) | 3,500,000,000" , 내역 표 "사채종류 … | 전환사채 | 제8회 |"
+    push('미지급 금액:krw', krw(val(/^합계\(원\)$/)) ?? krw(val(/(미지급|지급불능).*금액.*\(원\)$/)));
     equityRatio();
+    const kindRow = text.match(/(전환사채|신주인수권부사채|교환사채|무보증사채|회사채|사채)\s*\|\s*(제?\s*[\d-]+\s*회)\s*\|/);
+    push('사채 종류:text', kindRow ? `${kindRow[1]} ${kindRow[2].replace(/\s+/g, '')}` : null);
+    push('미지급 사유:text', val(/^미지급사유(및대책)?$/)?.replace(/^1\)\s*미지급\s*사유\s*/, ''));
   }
   return out;
 }
