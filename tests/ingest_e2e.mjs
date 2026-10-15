@@ -121,6 +121,7 @@ child.stderr.on('data', (d) => { out += d; });
 const code = await new Promise((r) => child.on('close', r));
 
 const q = async (sql) => (await db.query(sql)).rows;
+if (code !== 0) console.log(out);
 const checks = [
   ['수집기 종료 코드 0', code, 0],
   ['회사 마스터 적재', (await q(`select count(*)::int c from raw.corp_codes`))[0].c, 1202],

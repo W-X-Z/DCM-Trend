@@ -18,3 +18,5 @@ jobs:
       - run: npm test
       - run: npm run test:ingest
       - run: npm run test:transforms
+      - run: npm run test:insights
+      - run: npm run test:docparse

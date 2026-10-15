@@ -1,9 +1,10 @@
-export type ProductType = 'bond' | 'mezz' | 'equity';
+export type ProductType = 'bond' | 'mezz' | 'equity' | 'ipo';
 
 export const PRODUCTS: { key: ProductType; label: string; unitNote: string }[] = [
   { key: 'bond', label: '회사채', unitNote: '공모 회사채, 납입일 기준' },
   { key: 'mezz', label: '메자닌', unitNote: 'CB, BW, EB 발행 결정, 이사회 결의일 기준' },
-  { key: 'equity', label: '유상증자', unitNote: '유상증자 결정, 이사회 결의일 기준' },
+  { key: 'equity', label: '유상증자', unitNote: '상장사 유상증자 결정, 이사회 결의일 기준' },
+  { key: 'ipo', label: 'IPO', unitNote: '비상장사 공모(스팩 포함), 납입일 기준' },
 ];
 
 export type Deal = {
@@ -54,6 +55,14 @@ export type Deal = {
   nh_lead: boolean;
   latest_rcept_no: string | null;
   dart_url: string | null;
+  put_start_dt: string | null;
+  ipo_secondary_pct: number | null;
+  ipo_has_putback: boolean | null;
+  ipo_band_low: number | null;
+  ipo_band_high: number | null;
+  ipo_demand_ratio: number | null;
+  ipo_subscription_dt: string | null;
+  ipo_price_vs_band: string | null;
 };
 
 export type CompanyHit = {
@@ -144,4 +153,46 @@ export type MezzTrendRow = {
 export type EquityTrendRow = {
   month: string; method: string | null; market: string | null; deal_count: number; amount_krw: number | null;
   avg_dilution_pct: number | null; firm_commitment_count: number; standby_count: number; method_known_count: number;
+};
+
+export type IpoTrendRow = {
+  month: string; sub_type: string | null; market: string | null; deal_count: number; amount_krw: number | null;
+  avg_secondary_pct: number | null; putback_count: number; avg_demand_ratio: number | null; demand_known_count: number;
+  above_band_count: number; in_band_count: number; below_band_count: number; band_known_count: number;
+};
+
+export type Maturity = {
+  deal_key: string; product_type: ProductType; product_label: string; sub_type: string | null;
+  corp_code: string; corp_name: string; market: string | null; series: string | null; is_public: boolean | null;
+  event_type: '만기' | '풋옵션'; event_dt: string; days_left: number; issue_dt: string | null; maturity_dt: string | null;
+  amount_krw: number | null; tenor_months: number | null; coupon_pct: number | null; yield_pct: number | null; ytm_pct: number | null;
+  rating: string | null; rating_group: string | null; lead_managers: string | null; nh_involved: boolean; nh_lead: boolean;
+  dart_url: string | null; refi_signal: boolean;
+};
+
+export type MaturityMonth = { month: string; product_type: ProductType; event_type: string; tranche_count: number; company_count: number; amount_krw: number | null; nh_lead_count: number };
+
+export type InsightUnit = 'krw' | 'count' | 'pct' | 'months' | 'bp' | 'rate';
+export type InsightFact = {
+  scope: string; fact_key: string; label_ko: string; unit: InsightUnit; compare: string;
+  value_now: number | null; value_base: number | null; change: number | null;
+  period_now: string; period_base: string; score: number | null; is_notable: boolean; priority: number; rule_status: string;
+};
+export type InsightSummary = { scope: string; asof: string; summary: string; model: string | null; created_at: string };
+
+export type RateLatest = {
+  series_key: string; label_ko: string; grp: string; sort_order: number; dt: string; value: number;
+  chg_1w_bp: number | null; chg_1m_bp: number | null; chg_3m_bp: number | null; chg_1y_bp: number | null;
+};
+export type RatePoint = { series_key: string; dt: string; value: number };
+export type SpreadPoint = { dt: string; aa_spread_bp: number | null; bbb_aa_gap_bp: number | null; term_spread_bp: number | null };
+export type PolicyEvent = { event_dt: string; kind: string; label_ko: string; source: string | null };
+export type DisclosureRule = { priority: number; pattern: string; category: string; importance: number };
+export type Disclosure = { rcept_no: string; rcept_dt: string; report_nm: string; flr_nm: string; rm: string; category: string; importance: number };
+
+export type ShortDebt = {
+  corp_code: string; corp_name: string; market: string | null; period_key: string; stlm_dt: string | null;
+  bond_1y_krw: number | null; bond_private_1y_krw: number | null; bond_total_krw: number | null;
+  cp_1y_krw: number | null; cp_3m_krw: number | null; stb_krw: number | null; total_1y_krw: number | null;
+  is_financial: boolean;
 };

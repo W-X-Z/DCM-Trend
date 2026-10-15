@@ -4,8 +4,10 @@ import { BarChart } from '@/components/BarChart';
 import { Tombstone } from '@/components/Tombstone';
 import { byMonth, monthList, sum } from '@/lib/agg';
 import { month, won } from '@/lib/format';
-import { getNotable, getRecentDeals, getTrend, getUiParam } from '@/lib/queries';
-import { PRODUCTS, type BondTrendRow, type Deal, type ProductType } from '@/lib/types';
+import { getMaturities, getNotable, getRecentDeals, getTrend, getUiParam } from '@/lib/queries';
+import { PRODUCTS, type BondTrendRow, type Deal, type Maturity, type ProductType } from '@/lib/types';
+import { InsightPanel } from '@/components/Insights';
+import { date } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,15 +26,36 @@ function recentIssuers(deals: Deal[]): { corp_code: string; corp_name: string }[
   return [...seen].map(([corp_code, corp_name]) => ({ corp_code, corp_name }));
 }
 
+function addMonths(n: number) {
+  const d = new Date(Date.now() + 9 * 3600_000);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function topMaturing(rows: Maturity[]) {
+  const map = new Map<string, { corp_code: string; corp_name: string; amount: number; first: string; nh: boolean; refi: boolean }>();
+  for (const r of rows) {
+    const g = map.get(r.corp_code) ?? { corp_code: r.corp_code, corp_name: r.corp_name, amount: 0, first: r.event_dt, nh: false, refi: false };
+    g.amount += Number(r.amount_krw ?? 0);
+    if (r.event_dt < g.first) g.first = r.event_dt;
+    g.nh ||= r.nh_lead;
+    g.refi ||= r.refi_signal;
+    map.set(r.corp_code, g);
+  }
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
+}
+
 export default async function Home() {
   const bondCats = (await getUiParam<string[]>('bond_trend_categories').catch(() => null)) ?? [];
   const since30 = new Date(Date.now() + 9 * 3600_000 - 30 * 86400_000).toISOString().slice(0, 10);
-  const [panels, notable, recentBonds] = await Promise.all([
+  const [panels, notable, recentBonds, maturing] = await Promise.all([
     Promise.all(PRODUCTS.map((p) => productPanel(p.key, bondCats))).catch(() => null),
     getNotable(since30, 80).catch(() => null),
     getRecentDeals('bond', { subTypes: bondCats, limit: 40 }).catch(() => []),
+    getMaturities({ from: addMonths(3), to: addMonths(6), product: 'bond', eventType: '만기' }).catch(() => null),
   ]);
   const examples = recentIssuers(recentBonds);
+  const mat = maturing ? topMaturing(maturing.filter((m) => m.sub_type !== '금융채')) : [];
 
   return (
     <>
@@ -57,6 +80,34 @@ export default async function Home() {
         </section>
 
         <div className="wrap">
+          <InsightPanel scope="home" title="최근 3개월 눈에 띄는 변화" maxCards={6} />
+
+          {maturing && (
+            <section className="section" aria-labelledby="mat-h">
+              <div className="section-head">
+                <h2 id="mat-h">3~6개월 뒤 공모채 만기가 돌아오는 회사 (금융사 제외)</h2>
+                <p>
+                  {mat.length}곳, {won(mat.reduce((s, g) => s + g.amount, 0))}. <Link href="/maturities">전체 목록 보기</Link>
+                </p>
+              </div>
+              {mat.length === 0 ? (
+                <p className="empty">이 기간에 만기가 돌아오는 공모 회사채가 없습니다.</p>
+              ) : (
+                <ol className="mat-top">
+                  {mat.slice(0, 8).map((g) => (
+                    <li key={g.corp_code}>
+                      <Link href={`/company/${g.corp_code}`}>{g.corp_name}</Link>
+                      <span className="tnum">{won(g.amount)}</span>
+                      <span className="muted tnum">{date(g.first)}</span>
+                      {g.refi && <span className="badge hit">차환 진행</span>}
+                      {g.nh && <span className="badge">NH 이력</span>}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+          )}
+
           <section className="section" aria-labelledby="market-h">
             <div className="section-head">
               <h2 id="market-h">최근 12개월 발행시장</h2>

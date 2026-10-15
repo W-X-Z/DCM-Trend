@@ -1,7 +1,8 @@
-import { select, rpc, inList } from './db';
+import { select, selectAll, rpc, inList } from './db';
 import type {
-  BondTrendRow, Comp, CompanyHit, CompanyOverview, DataStatus, Deal, EquityTrendRow,
-  FeeRow, LeagueRow, Metric, MezzTrendRow, NotableDeal, ProductType,
+  BondTrendRow, Comp, CompanyHit, CompanyOverview, DataStatus, Deal, DisclosureRule, EquityTrendRow,
+  FeeRow, InsightFact, InsightSummary, IpoTrendRow, LeagueRow, Maturity, MaturityMonth, Metric, MezzTrendRow,
+  NotableDeal, PolicyEvent, ProductType, RateLatest, RatePoint, ShortDebt, SpreadPoint,
 } from './types';
 
 export async function getDataStatus(): Promise<DataStatus | null> {
@@ -62,9 +63,10 @@ const TREND_VIEW: Record<ProductType, string> = {
   bond: 'v_bond_trend_monthly',
   mezz: 'v_mezz_trend_monthly',
   equity: 'v_equity_trend_monthly',
+  ipo: 'v_ipo_trend_monthly',
 };
 
-export async function getTrend<T extends BondTrendRow | MezzTrendRow | EquityTrendRow>(product: ProductType, since: string): Promise<T[]> {
+export async function getTrend<T extends BondTrendRow | MezzTrendRow | EquityTrendRow | IpoTrendRow>(product: ProductType, since: string): Promise<T[]> {
   return select<T>(TREND_VIEW[product], { month: `gte.${since}`, order: 'month.asc' });
 }
 
@@ -89,4 +91,60 @@ export async function getMetrics(product: ProductType): Promise<Metric[]> {
 export async function getUiParam<T>(key: string): Promise<T | null> {
   const rows = await select<{ key: string; value: T }>('v_ui_params', { key: `eq.${key}` });
   return rows[0]?.value ?? null;
+}
+
+// 만기·풋옵션 -------------------------------------------------------------
+export async function getMaturities(opts: { from: string; to: string; product?: ProductType; corp?: string; eventType?: string }): Promise<Maturity[]> {
+  return select<Maturity>('v_maturities', {
+    and: `(event_dt.gte.${opts.from},event_dt.lt.${opts.to})`,
+    product_type: opts.product ? `eq.${opts.product}` : undefined,
+    corp_code: opts.corp ? `eq.${opts.corp}` : undefined,
+    event_type: opts.eventType ? `eq.${opts.eventType}` : undefined,
+    order: 'event_dt.asc,amount_krw.desc.nullslast',
+    limit: 1000,
+  });
+}
+
+export async function getShortDebt(limit = 200, corp?: string, includeFinancial = true): Promise<ShortDebt[]> {
+  return select<ShortDebt>('v_company_short_debt', {
+    corp_code: corp ? `eq.${corp}` : undefined,
+    total_1y_krw: corp ? undefined : 'gt.0',
+    is_financial: includeFinancial ? undefined : 'eq.false',
+    order: 'total_1y_krw.desc.nullslast',
+    limit,
+  });
+}
+
+export async function getMaturityMonthly(from: string, to: string): Promise<MaturityMonth[]> {
+  return select<MaturityMonth>('v_maturity_monthly', { and: `(month.gte.${from},month.lt.${to})`, order: 'month.asc' });
+}
+
+// 인사이트 -----------------------------------------------------------------
+export async function getInsightFacts(): Promise<InsightFact[]> {
+  return rpc<InsightFact[]>('insight_facts', {});
+}
+
+export async function getInsightSummaries(): Promise<InsightSummary[]> {
+  return select<InsightSummary>('v_insight_summaries');
+}
+
+// 금리 ---------------------------------------------------------------------
+export async function getRateLatest(): Promise<RateLatest[]> {
+  return select<RateLatest>('v_rate_latest', { order: 'sort_order.asc' });
+}
+
+export async function getRates(since: string, keys: string[]): Promise<RatePoint[]> {
+  return selectAll<RatePoint>('v_rates_daily', { select: 'series_key,dt,value', dt: `gte.${since}`, series_key: inList(keys), order: 'dt.asc' });
+}
+
+export async function getSpreads(since: string): Promise<SpreadPoint[]> {
+  return selectAll<SpreadPoint>('v_rate_spreads_daily', { dt: `gte.${since}`, order: 'dt.asc' });
+}
+
+export async function getPolicyEvents(): Promise<PolicyEvent[]> {
+  return select<PolicyEvent>('v_policy_events', { order: 'event_dt.asc' });
+}
+
+export async function getDisclosureRules(): Promise<DisclosureRule[]> {
+  return select<DisclosureRule>('v_disclosure_rules', { order: 'priority.asc' });
 }

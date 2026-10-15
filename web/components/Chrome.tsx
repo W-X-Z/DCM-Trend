@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { PRODUCTS } from '@/lib/types';
 import { getDataStatus } from '@/lib/queries';
+import { kstDateTime } from '@/lib/format';
 
 export function SearchForm({ defaultValue = '', size = 'small' }: { defaultValue?: string; size?: 'small' | 'large' }) {
   return (
@@ -26,7 +27,7 @@ export function Header({ active, showSearch = true }: { active?: string; showSea
     <header className="site-header">
       <div className="wrap header-row">
         <Link href="/" className="wordmark">DCM 트렌드</Link>
-        <nav aria-label="상품별 동향" className="nav">
+        <nav aria-label="주요 화면" className="nav">
           {PRODUCTS.map((p) => (
             <Link
               key={p.key}
@@ -37,6 +38,20 @@ export function Header({ active, showSearch = true }: { active?: string; showSea
               {p.label}
             </Link>
           ))}
+          <span className="nav-sep" aria-hidden />
+          {[
+            { key: 'maturities', label: '만기도래' },
+            { key: 'rates', label: '금리' },
+          ].map((x) => (
+            <Link
+              key={x.key}
+              href={`/${x.key}`}
+              className={`nav-link nav-plain${active === x.key ? ' is-active' : ''}`}
+              aria-current={active === x.key ? 'page' : undefined}
+            >
+              {x.label}
+            </Link>
+          ))}
         </nav>
         {showSearch && <SearchForm />}
       </div>
@@ -44,10 +59,6 @@ export function Header({ active, showSearch = true }: { active?: string; showSea
   );
 }
 
-function kstDateTime(iso: string): string {
-  const d = new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString();
-  return `${d.slice(0, 10).replaceAll('-', '.')} ${d.slice(11, 16)}`;
-}
 
 export async function Footer() {
   const s = await getDataStatus().catch(() => null);

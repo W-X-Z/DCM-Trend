@@ -8,6 +8,17 @@ type Col = { head: string; cell: (d: Deal) => ReactNode; num?: boolean; classNam
 
 const today = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 
+// 회사채 금리: 고정금리면 확정 이자율, 민평 방식이면 확정 가산금리
+function bondRate(d: Deal) {
+  if (d.coupon_pct != null) return pct(d.coupon_pct, 3);
+  if (d.final_spread_bp != null) {
+    const base = d.band_type === '국고채' ? '국고' : '민평';
+    const v = Number(d.final_spread_bp);
+    return `${base} ${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v)}bp`;
+  }
+  return '–';
+}
+
 const COMMON = {
   date: { head: '기준일', cell: (d: Deal) => <span className="nowrap">{date(d.deal_dt)}{d.deal_dt && d.deal_dt > today() ? <em className="tag">예정</em> : null}</span> },
   company: { head: '발행사', cell: (d: Deal) => <Link href={`/company/${d.corp_code}`}>{d.corp_name}</Link> },
@@ -25,6 +36,9 @@ const BY_PRODUCT: Record<string, Col[]> = {
   bond: [
     COMMON.date, COMMON.company, COMMON.title, COMMON.amount,
     { head: '만기', num: true, cell: (d) => tenor(d.tenor_months) },
+    { head: '등급', cell: (d) => d.rating ?? '–' },
+    { head: '경쟁률', num: true, cell: (d) => (d.competition_ratio != null ? `${num(d.competition_ratio, 2)}배` : '–') },
+    { head: '금리', num: true, cell: (d) => bondRate(d) },
     { head: '수수료', num: true, cell: (d) => (d.fee_bp != null ? `${num(d.fee_bp, 1)}bp` : '–') },
     COMMON.lead, COMMON.dart,
   ],
@@ -42,6 +56,14 @@ const BY_PRODUCT: Record<string, Col[]> = {
     { head: '인수방식', cell: (d) => d.underwriting_method ?? '–' },
     COMMON.lead, COMMON.dart,
   ],
+  ipo: [
+    COMMON.date, COMMON.company, COMMON.title, COMMON.amount,
+    { head: '공모가', num: true, cell: (d) => (d.offer_price ? `${num(d.offer_price)}원` : '–') },
+    { head: '밴드 대비', cell: (d) => d.ipo_price_vs_band ?? '–' },
+    { head: '구주매출', num: true, cell: (d) => (d.ipo_secondary_pct ? pct(d.ipo_secondary_pct, 0) : '–') },
+    { head: '수수료', num: true, cell: (d) => (d.fee_bp != null ? `${num(d.fee_bp / 100, 2)}%` : '–') },
+    COMMON.lead, COMMON.dart,
+  ],
   mixed: [
     COMMON.date, COMMON.product, COMMON.title, COMMON.amount,
     { head: '조건', cell: (d) => dealTerms(d).join(', ') || '–', className: 'col-terms' },
@@ -56,7 +78,7 @@ export function DealTable({
   caption,
 }: {
   deals: Deal[];
-  layout: 'bond' | 'mezz' | 'equity' | 'mixed';
+  layout: 'bond' | 'mezz' | 'equity' | 'ipo' | 'mixed';
   extra?: Col;
   caption?: string;
 }) {

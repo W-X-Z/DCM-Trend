@@ -1,7 +1,7 @@
 import type { Deal, ProductType } from './types';
 import { num, pct, tenor } from './format';
 
-export const PRODUCT_LABEL: Record<ProductType, string> = { bond: '회사채', mezz: '메자닌', equity: '유상증자' };
+export const PRODUCT_LABEL: Record<ProductType, string> = { bond: '회사채', mezz: '메자닌', equity: '유상증자', ipo: 'IPO' };
 
 // mart.v_deal_features 의 특성 이름 → 화면 표시
 export const FEATURE_LABEL: Record<string, string> = {
@@ -21,11 +21,16 @@ export const FEATURE_LABEL: Record<string, string> = {
 // 딜 한 줄 요약 (조건)
 export function dealTerms(d: Deal): string[] {
   if (d.product_type === 'bond') {
+    const sp = d.final_spread_bp != null ? Number(d.final_spread_bp) : null;
     return [
       d.tenor_months ? `${tenor(d.tenor_months)} 만기` : null,
       d.rating,
-      d.yield_pct != null ? `발행금리 ${pct(d.yield_pct, 3)}` : d.coupon_pct != null ? `표면 ${pct(d.coupon_pct, 3)}` : null,
-      d.band_type,
+      d.coupon_pct != null
+        ? `금리 ${pct(d.coupon_pct, 3)}`
+        : sp != null
+          ? `${d.band_type === '국고채' ? '국고' : '민평'} ${sp > 0 ? '+' : sp < 0 ? '−' : ''}${Math.abs(sp)}bp`
+          : null,
+      d.competition_ratio != null ? `경쟁률 ${num(d.competition_ratio, 1)}배` : null,
     ].filter(Boolean) as string[];
   }
   if (d.product_type === 'mezz') {
@@ -34,6 +39,14 @@ export function dealTerms(d: Deal): string[] {
       d.coupon_pct != null && d.ytm_pct != null ? `표면 ${pct(d.coupon_pct, 1)}, 만기 ${pct(d.ytm_pct, 1)}` : null,
       d.conv_price ? `전환가 ${num(d.conv_price)}원` : null,
       d.refix_floor_ratio_pct != null ? `리픽싱 하한 ${num(d.refix_floor_ratio_pct)}%` : null,
+    ].filter(Boolean) as string[];
+  }
+  if (d.product_type === 'ipo') {
+    return [
+      d.offer_price ? `공모가 ${num(d.offer_price)}원` : null,
+      d.ipo_price_vs_band ? `밴드 ${d.ipo_price_vs_band}` : null,
+      d.ipo_secondary_pct ? `구주매출 ${pct(d.ipo_secondary_pct, 0)}` : null,
+      d.ipo_has_putback ? '환매청구권' : null,
     ].filter(Boolean) as string[];
   }
   return [
@@ -51,6 +64,7 @@ export function dealTitle(d: Deal): string {
     // 회차가 없으면 접수번호(14자리)가 들어가므로 표시하지 않는다
     return d.series && d.series.length <= 6 ? `제${d.series}회 ${kind}` : kind;
   }
+  if (d.product_type === 'ipo') return d.sub_type && d.sub_type !== '일반' ? `IPO (${d.sub_type})` : 'IPO';
   return d.sub_type ? `${d.sub_type} 유상증자` : '유상증자';
 }
 
@@ -58,4 +72,5 @@ export const DATE_BASIS: Record<ProductType, string> = {
   bond: '납입일 기준',
   mezz: '이사회 결의일 기준',
   equity: '이사회 결의일 기준',
+  ipo: '납입일 기준',
 };

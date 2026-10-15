@@ -1,6 +1,11 @@
 {
-  "command": "backfill",
-  "from": "2024-10-01",
-  "to": "2026-10-15",
-  "maxCalls": "18000"
+  "command": "sequence",
+  "maxCalls": "400",
+  "steps": [
+    { "command": "documents", "rceptNos": "20261015000311,20260417000660,20260422000662,20260729000511,20261012000308,20261012000445,20261015000232,20261014000424" },
+    { "command": "documents", "maxDocs": 200 },
+    { "command": "rates" },
+    { "command": "refresh" },
+    { "command": "insights" }
+  ]
 }

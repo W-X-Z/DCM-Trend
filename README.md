@@ -25,13 +25,25 @@ docs/                  아키텍처, 로직 변경 가이드, 결정 사항
 npm install
 npm test                 # SQL 로직: 108 신고서 'BBB0 최근 1년 발행사례 14건' 재현 등 41개 항목
 npm run test:ingest      # 수집기 종단: 모의 OpenDART → 수집 RPC → raw → 변환
-npm run test:transforms  # 실제 OpenDART 응답 샘플 → 딜 변환 결과
+npm run test:transforms  # 실제 OpenDART 응답 샘플 → 딜 변환 결과 (원문 값 반영 포함)
+npm run test:insights    # AI 요약 숫자·전망 표현 검증, 규칙 문장
+npm run test:docparse    # 신고서 원문 파서 (실제 신고서 조각)
 ```
+
+## 키 (값은 채팅·코드에 두지 않음)
+
+| 키 | 위치 | 없으면 |
+|---|---|---|
+| `OPENDART_API_KEY` | GitHub Secrets, Vercel 환경변수 | 수집 중단 / 회사 화면 최근 공시만 빔 |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | GitHub Secrets | 수집 중단 |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Vercel 환경변수 | 화면 데이터 없음 |
+| `ECOS_API_KEY` | GitHub Secrets | 금리 화면만 빔 |
+| `OPENAI_API_KEY` (선택 `OPENAI_MODEL`) | GitHub Secrets | 인사이트가 규칙 문장으로 표시 |
 
 ## DB
 
 - Supabase 프로젝트 `dcm-trend` (서울 리전, Postgres 17).
-- `20261015081900_deal_transforms` 는 SQL 편집기에서 직접 적용해 원격 이력에 없다. CLI 를 쓰기 전에 `supabase migration repair --status applied 20261015081900` 을 한 번 실행한다.
+- `20261015081900_deal_transforms`, `20261015120000_transforms_phase2` 는 함수 본문의 삭제 구문 때문에 SQL 편집기에서 직접 적용한다(원격 이력에 없음). CLI 를 쓰기 전에 `supabase migration repair --status applied 20261015081900 20261015120000` 을 한 번 실행한다.
 - 로컬 `supabase/migrations` 파일명의 버전은 원격 이력과 같다. 새 마이그레이션은 이 뒤에 추가한다.
 
 ```bash
