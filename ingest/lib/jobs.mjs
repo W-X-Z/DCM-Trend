@@ -341,3 +341,50 @@ export async function rates(env, { from = '2019-01-01', key = process.env.ECOS_A
     }
   });
 }
+
+// 9. 인사이트 요약 (DB 사실 → AI 요약 또는 규칙 문장) -------------------------
+import { buildSummaries } from './insights.mjs';
+
+export async function insights(env) {
+  return withRun(env, 'insights', {}, async (ctx) => {
+    const out = await buildSummaries({ db: env.db });
+    ctx.written = Object.values(out).filter((v) => v !== 'same').length;
+  });
+}
+
+// 10. 과거 회사채 신고서 (회사별 공시검색) ---------------------------------
+// 회사 미지정 검색은 파생결합증권까지 모두 받아야 해서 비싸다. 공모채 이력·잔액이 있는 회사만 회사별로 받는다.
+export async function historyBonds(env, { from = '2019-01-01', to = '2024-09-30', maxPages = 5, include = '증권신고서\\(채무증권\\)' } = {}) {
+  const periodKey = `${from}~${to}`;
+  const re = new RegExp(include);
+  return withRun(env, 'history-bonds', { from, to }, async (ctx) => {
+    for (;;) {
+      const corps = await env.db.rpc('ingest_history_bond_corps', { p_period_key: periodKey, p_limit: 300 });
+      if (!corps.length) break;
+      for (const { corp_code } of corps) {
+        let page = 1;
+        let totalPage = 1;
+        let status = STATUS.NO_DATA;
+        do {
+          const body = await env.dart.json('list', {
+            corp_code, bgn_de: ymd(from), end_de: ymd(to), pblntf_ty: 'C', page_no: page, page_count: 100,
+          });
+          status = body.status;
+          if (body.status !== STATUS.OK) break;
+          totalPage = Number(body.total_page ?? 1);
+          const items = (body.list ?? [])
+            .filter((x) => re.test(String(x.report_nm ?? '')))
+            .map((x) => ({ ...x, _pblntf_ty: 'C', _pblntf_detail_ty: null }));
+          ctx.fetched += items.length;
+          if (items.length) ctx.written += await env.db.rpc('ingest_put_filings', { p_run_id: ctx.runId, p_items: items });
+          page++;
+        } while (page <= Math.min(totalPage, maxPages));
+        await env.db.rpc('ingest_put_periodic', {
+          p_run_id: ctx.runId, p_endpoint: 'history_bond_list', p_corp_code: corp_code,
+          p_period_key: periodKey, p_status_code: status === STATUS.OK ? '000' : status, p_items: [],
+        });
+      }
+      console.log(`history-bonds: 공시 ${ctx.written}건 저장`);
+    }
+  });
+}

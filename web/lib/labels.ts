@@ -1,7 +1,7 @@
 import type { Deal, ProductType } from './types';
 import { num, pct, tenor } from './format';
 
-export const PRODUCT_LABEL: Record<ProductType, string> = { bond: '회사채', mezz: '메자닌', equity: '유상증자' };
+export const PRODUCT_LABEL: Record<ProductType, string> = { bond: '회사채', mezz: '메자닌', equity: '유상증자', ipo: 'IPO' };
 
 // mart.v_deal_features 의 특성 이름 → 화면 표시
 export const FEATURE_LABEL: Record<string, string> = {
@@ -36,6 +36,14 @@ export function dealTerms(d: Deal): string[] {
       d.refix_floor_ratio_pct != null ? `리픽싱 하한 ${num(d.refix_floor_ratio_pct)}%` : null,
     ].filter(Boolean) as string[];
   }
+  if (d.product_type === 'ipo') {
+    return [
+      d.offer_price ? `공모가 ${num(d.offer_price)}원` : null,
+      d.ipo_price_vs_band ? `밴드 ${d.ipo_price_vs_band}` : null,
+      d.ipo_secondary_pct ? `구주매출 ${pct(d.ipo_secondary_pct, 0)}` : null,
+      d.ipo_has_putback ? '환매청구권' : null,
+    ].filter(Boolean) as string[];
+  }
   return [
     d.dilution_pct != null ? `신주 비율 ${pct(d.dilution_pct, 1)}` : null,
     d.offer_price ? `발행가 ${num(d.offer_price)}원` : null,
@@ -51,6 +59,7 @@ export function dealTitle(d: Deal): string {
     // 회차가 없으면 접수번호(14자리)가 들어가므로 표시하지 않는다
     return d.series && d.series.length <= 6 ? `제${d.series}회 ${kind}` : kind;
   }
+  if (d.product_type === 'ipo') return d.sub_type && d.sub_type !== '일반' ? `IPO (${d.sub_type})` : 'IPO';
   return d.sub_type ? `${d.sub_type} 유상증자` : '유상증자';
 }
 
@@ -58,4 +67,5 @@ export const DATE_BASIS: Record<ProductType, string> = {
   bond: '납입일 기준',
   mezz: '이사회 결의일 기준',
   equity: '이사회 결의일 기준',
+  ipo: '납입일 기준',
 };

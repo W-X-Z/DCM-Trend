@@ -8,15 +8,17 @@ import { byKey, byMonth, monthList, share, sum, weightedAvg, type Slice } from '
 import { month, num, pct, won } from '@/lib/format';
 import { DATE_BASIS } from '@/lib/labels';
 import { getFees, getLeague, getMetrics, getRecentDeals, getTrend, getUiParam } from '@/lib/queries';
-import { PRODUCTS, type BondTrendRow, type EquityTrendRow, type FeeRow, type MezzTrendRow, type ProductType } from '@/lib/types';
+import { PRODUCTS, type BondTrendRow, type EquityTrendRow, type FeeRow, type IpoTrendRow, type MezzTrendRow, type ProductType } from '@/lib/types';
+import { InsightPanel } from '@/components/Insights';
 
 export const dynamic = 'force-dynamic';
 
-const TITLES: Record<ProductType, string> = { bond: '회사채 발행 동향', mezz: '메자닌 발행 동향', equity: '유상증자 동향' };
+const TITLES: Record<ProductType, string> = { bond: '회사채 발행 동향', mezz: '메자닌 발행 동향', equity: '유상증자 동향', ipo: 'IPO 동향' };
 const SUBS: Record<ProductType, string> = {
   bond: '증권신고서(채무증권)를 낸 공모 회사채. 트랜치(회차)마다 한 건으로 셉니다.',
   mezz: '전환사채(CB), 신주인수권부사채(BW), 교환사채(EB) 발행 결정 공시. 공모와 사모를 모두 포함합니다.',
-  equity: '유상증자 결정 공시. 정정 공시는 처음 결정한 딜에 합칩니다.',
+  equity: '상장사 유상증자 결정 공시. 정정 공시는 처음 결정한 딜에 합칩니다.',
+  ipo: '비상장사(코넥스 이전상장 포함)의 증권신고서(지분증권) 일반공모. 스팩·리츠는 구분해서 셉니다. 철회한 공모는 뺍니다.',
 };
 
 export function generateMetadata({ params }: { params: { product: string } }) {
@@ -109,7 +111,7 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
 
   const bondDefault = product === 'bond' ? ((await getUiParam<string[]>('bond_trend_categories').catch(() => null)) ?? []) : [];
   const [rowsAll, fees, league, metrics] = await Promise.all([
-    getTrend<BondTrendRow & MezzTrendRow & EquityTrendRow>(product, since),
+    getTrend<BondTrendRow & MezzTrendRow & EquityTrendRow & IpoTrendRow>(product, since),
     getFees(product, qStart).catch(() => [] as FeeRow[]),
     getLeague(product, year).catch(() => []),
     getMetrics(product).catch(() => []),
@@ -185,12 +187,23 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
               <Stat label="인수방식 확인">{num(sum(rows, (r) => r.method_known_count))}<small>건</small></Stat>
             </>
           )}
+          {product === 'ipo' && (
+            <>
+              <Stat label="평균 구주매출 비중">{pct(weightedAvg(rows, (r) => r.avg_secondary_pct), 1)}</Stat>
+              <Stat label="환매청구권 부여">{pct(share(sum(rows, (r) => r.putback_count), count), 1)}</Stat>
+              {sum(rows, (r) => r.band_known_count) > 0 && (
+                <Stat label="밴드 상단 초과">{pct(share(sum(rows, (r) => r.above_band_count), sum(rows, (r) => r.band_known_count)), 1)}</Stat>
+              )}
+            </>
+          )}
         </dl>
-        {product === 'bond' && (
+        {(product === 'bond' || product === 'ipo') && (
           <p className="note">
-            발행금리, 신용등급, 수요예측 경쟁률은 신고서 본문을 읽어야 해서 다음 단계에서 채웁니다. 지금은 OpenDART 주요정보 API에 있는 값만 보여 줍니다.
+            {product === 'bond' ? '발행금리, 신용등급, 수요예측 경쟁률' : '희망공모가 밴드, 수요예측 경쟁률, 의무보유 확약'}은 신고서 본문에서 읽어 채웁니다. 본문 파싱이 끝난 딜부터 표시됩니다.
           </p>
         )}
+
+        <InsightPanel scope={product} />
 
         <section className="section" aria-labelledby="monthly-h">
           <div className="section-head">
@@ -247,6 +260,12 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
               <>
                 <Breakdown title="증자 방식" slices={byKey(rows, (r) => r.method ?? '기타')} color={color} />
                 <Breakdown title="시장" slices={byKey(rows, (r) => r.market ?? '확인 안 됨')} color={color} />
+              </>
+            )}
+            {product === 'ipo' && (
+              <>
+                <Breakdown title="구분" slices={byKey(rows, (r) => r.sub_type ?? '기타')} color={color} />
+                <Breakdown title="상장 시장" slices={byKey(rows, (r) => (r.market && r.market !== '기타' ? r.market : '상장 전·확인 안 됨'))} color={color} />
               </>
             )}
           </div>

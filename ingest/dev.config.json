@@ -1,10 +1,11 @@
 {
   "command": "sequence",
-  "maxCalls": "11000",
+  "maxCalls": "9000",
   "steps": [
+    { "command": "periodic", "maxCallsStep": 3500 },
     { "command": "history" },
-    { "command": "periodic", "maxCallsStep": 3000 },
     { "command": "documents", "rceptNos": "20261015000311,20260417000660,20260422000662,20260729000511,20261012000308,20261012000445,20261015000232,20261014000424" },
-    { "command": "rates" }
+    { "command": "rates" },
+    { "command": "insights" }
   ]
 }

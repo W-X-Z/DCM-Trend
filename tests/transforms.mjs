@@ -45,7 +45,7 @@ async function check(name, sql, expected) {
 }
 
 await check('변환 건수', `select '${JSON.stringify(refreshed).replace(/'/g, "''")}'::jsonb - 'companies'`,
-  { bond: 2, mezz: 3, equity: 1 });
+  { ipo: 1, bond: 2, mezz: 3, equity: 1 });
 await check('회사 보강: corpCode 없이 공시만으로 회사 생성·시장 구분',
   `select market from core.companies where corp_code = '01764099'`, '코스닥');
 
@@ -84,15 +84,19 @@ await check('메자닌 0%/0% 특성',
 await check('유증: 제3자배정·금액(자금목적 합)·희석률',
   `select deal_key, sub_type, amount_krw, dilution_pct, is_public from mart.v_deals where product_type = 'equity'`,
   ['equity:00270113:20260914000397|제3자배정|990000000|3.50|false']);
-await check('IPO 신고서(다비오)는 유증으로 잡지 않음',
-  `select count(*)::int from core.deals where corp_code = '01706509'`, 0);
+await check('IPO 신고서(다비오)는 유증이 아니라 IPO 로',
+  `select string_agg(product_type, ',') from core.deals where corp_code = '01706509'`, 'ipo');
+await check('IPO: 공모가·주식수·구주매출·주관사',
+  `select v.sub_type || '|' || v.offer_price || '|' || t.shares_offered || '|' || coalesce(t.secondary_pct::text, '-') || '|' || coalesce(v.lead_managers, '-') || '|' || v.deal_dt
+     from mart.v_deals v join core.ipo_terms t using (deal_key) where v.product_type = 'ipo'`,
+  '일반|12300|1000000|-|대신증권|2026-11-13');
 
 // 트렌드 뷰가 실제 변환 결과로 동작
 await check('메자닌 월간 트렌드 (2026-09, 코스닥 사모)',
   `select kind || ':' || deal_count || ':' || zero_coupon_count from mart.v_mezz_trend_monthly where month = '2026-09-01' order by kind`,
   ['BW:1:1', 'CB:1:1']);
 await check('변환 재실행해도 결과 동일 (멱등)',
-  `select (public.ingest_refresh() - 'companies')::text`, '{"bond": 2, "mezz": 3, "equity": 1}');
+  `select (public.ingest_refresh() - 'companies')::text`, '{"ipo": 1, "bond": 2, "mezz": 3, "equity": 1}');
 
 let failed = 0;
 for (const r of results) {

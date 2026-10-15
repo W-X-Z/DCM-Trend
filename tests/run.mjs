@@ -163,7 +163,7 @@ await db.exec('set role anon');
 await check('anon: mart 뷰 조회 가능', `select count(*)::int from mart.v_deals`, 17, one);
 await check('anon: mart 함수 실행 가능',
   `select count(*)::int from mart.similar_deals('bond:FX_ELAND:108')`, 14, one);
-await check('anon: 지표 정의 조회 가능', `select count(*)::int from mart.v_metric_catalog`, 14, one);
+await check('anon: 지표 정의 조회 가능', `select count(*)::int from mart.v_metric_catalog`, 18, one);
 await check('anon: core 직접 조회 불가', `select count(*) from core.deals`, 'permission denied',
   () => 'allowed');
 results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');

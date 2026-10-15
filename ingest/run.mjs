@@ -7,10 +7,11 @@
 //   node ingest/run.mjs refresh
 //   node ingest/run.mjs daily                     최근 7일 공시 → 상세 → 변환
 //   node ingest/run.mjs backfill --from 2024-10-01 --to 2026-10-15
-//   node ingest/run.mjs history                   과거 백필: 회사채 신고서 2019~, 메자닌 결정 2021~ (해당 공시만 저장)
+//   node ingest/run.mjs history                   과거 백필: 회사채 신고서 2019~ (회사별), 메자닌 결정 2021~ (해당 공시만 저장)
 //   node ingest/run.mjs periodic [--max-calls-step 3000]   정기보고서 미상환 잔액 (회사채·CP·단기사채)
 //   node ingest/run.mjs documents [--rcept-nos a,b]       신고서 원문 (지정 공시 또는 ref 규칙 대기 목록)
 //   node ingest/run.mjs rates                     한국은행 ECOS 금리 (ECOS_API_KEY 없으면 건너뜀)
+//   node ingest/run.mjs insights                  인사이트 요약 (OPENAI_API_KEY 없으면 규칙 문장)
 //   node ingest/run.mjs --config ingest/dev.config.json   (config 의 steps 를 차례로 실행)
 //
 // 공통 옵션: --max-calls N (이번 실행의 OpenDART 호출 상한, 기본 15000)
@@ -20,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import { Dart, DartStopError } from './lib/dart.mjs';
 import { Db } from './lib/db.mjs';
 import {
-  probe, corpCodes, filings, details, refresh, periodic, documents, rates, todayKst, addDays,
+  probe, corpCodes, filings, details, refresh, periodic, documents, rates, insights, historyBonds, todayKst, addDays,
 } from './lib/jobs.mjs';
 
 function parseArgs(argv) {
@@ -50,8 +51,9 @@ async function stats(label) {
   return s;
 }
 
+// 과거 백필: 회사채는 회사별 검색(공모채 이력·잔액이 있는 회사), 메자닌은 주요사항보고서 전체 검색
 const HISTORY = {
-  bond: { from: '2019-01-01', to: '2024-09-30', types: [{ ty: 'C' }], include: '증권신고서\\(채무증권\\)' },
+  bond: { from: '2019-01-01', to: '2024-09-30' },
   mezz: { from: '2021-01-01', to: '2024-09-30', types: [{ ty: 'B', detail: 'B001' }], include: '(전환사채권|신주인수권부사채권|교환사채권)\\s*발행\\s*결정' },
 };
 
@@ -69,10 +71,11 @@ async function run(command, opts) {
       maxDocs: Number(opts.maxDocs ?? 500),
     });
     case 'rates':      return rates(env);
+    case 'insights':   return insights(env);
 
     case 'history': {
       await probe(env);
-      await filings(env, HISTORY.bond);
+      await historyBonds(env, HISTORY.bond);
       await filings(env, HISTORY.mezz);
       await details(env);
       await refresh(env);
@@ -98,6 +101,7 @@ async function run(command, opts) {
       await documents(env, { maxDocs: 300 }).catch((e) => console.error(`documents: ${e.message}`));
       await rates(env).catch((e) => console.error(`rates: ${e.message}`));
       await refresh(env);
+      await insights(env).catch((e) => console.error(`insights: ${e.message}`));
       return stats('after');
     }
 

@@ -61,6 +61,17 @@ export async function select<T>(view: string, query: Query = {}): Promise<T[]> {
   return res.json();
 }
 
+// 1,000행 제한(PostgREST max-rows)을 넘는 조회: offset 으로 나눠 받는다
+export async function selectAll<T>(view: string, query: Query = {}, pageSize = 1000, maxRows = 20000): Promise<T[]> {
+  const out: T[] = [];
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const page = await select<T>(view, { ...query, limit: pageSize, offset });
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
+}
+
 export async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   assertEnv();
   const version = await dataVersion();

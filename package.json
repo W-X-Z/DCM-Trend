@@ -6,7 +6,8 @@
     "test": "node tests/run.mjs",
     "test:ingest": "node tests/ingest_e2e.mjs",
     "ingest": "node ingest/run.mjs",
-    "test:transforms": "node tests/transforms.mjs"
+    "test:transforms": "node tests/transforms.mjs",
+    "test:insights": "node tests/insights.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17"

@@ -42,6 +42,14 @@ const BY_PRODUCT: Record<string, Col[]> = {
     { head: '인수방식', cell: (d) => d.underwriting_method ?? '–' },
     COMMON.lead, COMMON.dart,
   ],
+  ipo: [
+    COMMON.date, COMMON.company, COMMON.title, COMMON.amount,
+    { head: '공모가', num: true, cell: (d) => (d.offer_price ? `${num(d.offer_price)}원` : '–') },
+    { head: '밴드 대비', cell: (d) => d.ipo_price_vs_band ?? '–' },
+    { head: '구주매출', num: true, cell: (d) => (d.ipo_secondary_pct ? pct(d.ipo_secondary_pct, 0) : '–') },
+    { head: '수수료', num: true, cell: (d) => (d.fee_bp != null ? `${num(d.fee_bp / 100, 2)}%` : '–') },
+    COMMON.lead, COMMON.dart,
+  ],
   mixed: [
     COMMON.date, COMMON.product, COMMON.title, COMMON.amount,
     { head: '조건', cell: (d) => dealTerms(d).join(', ') || '–', className: 'col-terms' },
@@ -56,7 +64,7 @@ export function DealTable({
   caption,
 }: {
   deals: Deal[];
-  layout: 'bond' | 'mezz' | 'equity' | 'mixed';
+  layout: 'bond' | 'mezz' | 'equity' | 'ipo' | 'mixed';
   extra?: Col;
   caption?: string;
 }) {

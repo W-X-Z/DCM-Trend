@@ -79,7 +79,7 @@ for (let back = 24; back >= 0; back--) {
     const pay = day(between(2, maxDay));
     sql.push(`insert into core.deals (deal_key, product_type, sub_type, corp_code, series, is_public, status, announce_dt, pricing_dt, payment_dt, amount_krw, initial_amount_krw, latest_rcept_no)
       values (${q(key)}, 'bond', ${q(cat)}, ${q(c.code)}, ${q(`${between(10, 120)}-${between(1, 2)}`)}, true, 'completed', ${q(pay)}::date - 14, ${q(pay)}::date - 7, ${q(pay)}, ${amt}, ${inc ? amt * 0.6 : amt}, null);`);
-    sql.push(`insert into core.bond_terms (deal_key, tenor_months) values (${q(key)}, ${tenor});`);
+    sql.push(`insert into core.bond_terms (deal_key, tenor_months, maturity_dt) values (${q(key)}, ${tenor}, (${q(pay)}::date + make_interval(months => ${tenor}))::date);`);
     const lead = pick(firms);
     sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(lead)}, ${q(lead)}, '대표주관', '총액인수', ${amt * 0.6}, ${Math.round(amt * 0.6 * between(10, 32) / 1e4)});`);
     const co = pick(firms.filter((f) => f !== lead));
@@ -96,8 +96,26 @@ for (let back = 24; back >= 0; back--) {
     const cp = between(3000, 40000);
     sql.push(`insert into core.deals (deal_key, product_type, sub_type, corp_code, series, is_public, status, announce_dt, payment_dt, amount_krw, initial_amount_krw)
       values (${q(key)}, 'mezz', ${q(kind)}, ${q(c.code)}, ${q(String(between(1, 30)))}, ${pub}, 'completed', ${q(day(between(1, maxDay)))}, null, ${amt}, ${amt});`);
-    sql.push(`insert into core.mezz_terms (deal_key, coupon_pct, ytm_pct, conv_price, refix_floor_price, shares_ratio_pct, lead_manager)
-      values (${q(key)}, ${zero ? 0 : between(0, 30) / 10}, ${zero ? 0 : between(10, 70) / 10}, ${cp}, ${Math.round(cp * pick([0.7, 0.7, 0.8, 0.9]))}, ${between(15, 220) / 10}, ${pub ? q(pick(firms)) : 'null'});`);
+    const issue = day(between(1, maxDay));
+    sql.push(`insert into core.mezz_terms (deal_key, coupon_pct, ytm_pct, conv_price, refix_floor_price, shares_ratio_pct, lead_manager, maturity_dt, put_start_dt)
+      values (${q(key)}, ${zero ? 0 : between(0, 30) / 10}, ${zero ? 0 : between(10, 70) / 10}, ${cp}, ${Math.round(cp * pick([0.7, 0.7, 0.8, 0.9]))}, ${between(15, 220) / 10}, ${pub ? q(pick(firms)) : 'null'},
+              (${q(issue)}::date + interval '3 year')::date, (${q(issue)}::date + interval '18 month')::date);`);
+  }
+  // IPO
+  for (let i = 0, k = between(4, 12); i < k; i++) {
+    const c = pick(corps);
+    const key = `ipo:${c.code}:${++n}`;
+    const amt = between(10, 400) * 1e8;
+    const pay = day(between(1, maxDay));
+    const spac = rnd() < 0.2;
+    sql.push(`insert into core.deals (deal_key, product_type, sub_type, corp_code, is_public, status, announce_dt, payment_dt, amount_krw)
+      values (${q(key)}, 'ipo', ${q(spac ? '스팩' : '일반')}, ${q(c.code)}, true, 'completed', ${q(pay)}::date - 45, ${q(pay)}, ${amt});`);
+    const price = spac ? 2000 : between(8, 60) * 1000;
+    const bandHigh = Math.round(price * pick([0.9, 1, 1, 1.1]));
+    sql.push(`insert into core.ipo_terms (deal_key, offer_price, shares_offered, secondary_pct, has_putback, band_low, band_high)
+      values (${q(key)}, ${price}, ${Math.round(amt / price)}, ${spac ? 0 : between(0, 40)}, ${rnd() < 0.2}, ${Math.round(bandHigh * 0.85)}, ${bandHigh});`);
+    const lead = pick(firms);
+    sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(lead)}, ${q(lead)}, '대표주관', '총액인수', ${amt}, ${Math.round(amt * between(250, 450) / 1e4)});`);
   }
   // 유상증자
   for (let i = 0, k = between(8, 22); i < k; i++) {
@@ -117,6 +135,40 @@ for (let back = 24; back >= 0; back--) {
 }
 await db.exec(sql.join('\n'));
 console.log(`mock: 가상 딜 ${n}건 적재`);
+
+// 가상 금리 (일별 랜덤 워크) + 금통위 기준금리 계단
+{
+  const start = new Date(Date.UTC(2021, 0, 4));
+  const vals = { ktb3y: 1.0, ktb10y: 1.7, corp3y_aa: 1.5, corp3y_bbb: 7.4, cd91: 0.8, base_rate: 0.5 };
+  const rows = [];
+  for (let d = new Date(start); d <= today; d.setUTCDate(d.getUTCDate() + 1)) {
+    if ([0, 6].includes(d.getUTCDay())) continue;
+    const dt = d.toISOString().slice(0, 10);
+    const drift = d.getUTCFullYear() < 2023 ? 0.004 : -0.0015;
+    const shock = (rnd() - 0.5) * 0.05;
+    vals.ktb3y = Math.max(0.5, vals.ktb3y + drift + shock);
+    vals.ktb10y = vals.ktb3y + 0.35 + (rnd() - 0.5) * 0.05;
+    vals.corp3y_aa = vals.ktb3y + 0.55 + (rnd() - 0.5) * 0.04;
+    vals.corp3y_bbb = vals.corp3y_aa + 5.9 + (rnd() - 0.5) * 0.06;
+    vals.cd91 = vals.ktb3y - 0.1;
+    if (d.getUTCDate() === 15 && rnd() < 0.25) vals.base_rate = Math.max(0.5, Math.round((vals.base_rate + (d.getUTCFullYear() < 2023 ? 0.25 : -0.25)) * 100) / 100);
+    for (const [k, v] of Object.entries(vals)) rows.push(`(${q(k)}, ${q(dt)}, ${v.toFixed(3)})`);
+  }
+  for (let i = 0; i < rows.length; i += 5000) await db.exec(`insert into raw.rates (series_key, dt, value) values ${rows.slice(i, i + 5000).join(',')};`);
+}
+
+// 인사이트 요약 (수집기와 같은 코드, AI 키 없이 규칙 문장)
+{
+  const { buildSummaries } = await import('../ingest/lib/insights.mjs');
+  const rpcDb = {
+    rpc: async (fn, args = {}) => {
+      const names = Object.keys(args);
+      const r = await db.query(`select public.${fn}(${names.map((k, i) => `${k} => $${i + 1}`).join(', ')}) as v`, names.map((k) => args[k]));
+      return r.rows[0]?.v;
+    },
+  };
+  await buildSummaries({ db: rpcDb, key: '', log: (m) => console.log(`mock: ${m}`) });
+}
 
 // 3) PostgREST 일부 문법 ---------------------------------------------------
 const ident = (s) => {
@@ -161,9 +213,9 @@ async function handleSelect(view, sp) {
       }).join(', ');
     } else if (k === 'limit') limit = `limit ${Number(v)}`;
     else if (k === 'offset') offset = `offset ${Number(v)}`;
-    else if (k === 'or') {
+    else if (k === 'or' || k === 'and') {
       const parts = v.replace(/^\(|\)$/g, '').split(',');
-      where.push(`(${parts.map((p) => { const i = p.indexOf('.'); return cond(p.slice(0, i), p.slice(i + 1), params); }).join(' or ')})`);
+      where.push(`(${parts.map((p) => { const i = p.indexOf('.'); return cond(p.slice(0, i), p.slice(i + 1), params); }).join(` ${k} `)})`);
     } else where.push(cond(k, v, params));
   }
   const sqlText = `select coalesce(json_agg(t), '[]'::json) as j from (select ${select} from mart.${ident(view)} ${where.length ? 'where ' + where.join(' and ') : ''} ${order} ${limit} ${offset}) t`;
