@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { DealTable } from '@/components/DealTable';
@@ -99,6 +100,7 @@ export default async function CompanyPage({ params }: { params: { corp: string }
           <div className="page-head-row">
             <h1 className="page-title">{company.corp_name}</h1>
             <WatchButton corp={company.corp_code} name={company.corp_name} />
+            <Link href={`/proposal?corp=${company.corp_code}`} className="watch-btn">제안서 초안</Link>
           </div>
           <p className="company-meta">
             <span>{listed ? company.market : '비상장'}</span>

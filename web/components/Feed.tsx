@@ -31,7 +31,7 @@ function Card({ it, lead }: { it: FeedItem; lead?: boolean }) {
       <h3 className="fc-head">{it.headline}</h3>
       <p className="fc-body">{it.body}</p>
       <p className="fc-point">
-        <span className="sr-only">확인할 점: </span>
+        <span className="fc-point-k">확인할 점</span>
         {it.point}
       </p>
       {it.rcept_no && (
@@ -103,7 +103,10 @@ function Touch({ it }: { it: InsightIssue }) {
         {it.event_dt && <span className="tp-date tnum">{date(it.event_dt)}</span>}
       </div>
       <p className="tp-why">{it.why}</p>
-      <p className="tp-angle">{it.angle}</p>
+      <p className="tp-angle">
+        <span className="fc-point-k">제안 포인트</span>
+        {it.angle}
+      </p>
     </li>
   );
 }

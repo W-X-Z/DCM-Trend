@@ -5,8 +5,11 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 type Hit = { corp_code: string; corp_name: string; market: string | null; deal_count: number; last_deal_dt: string | null };
 
-// 머리글 회사 검색: 글자를 넣으면 회사 후보를 바로 보여 준다. Enter 는 고른 회사로, 고른 게 없으면 검색 화면으로.
-export function CompanySearch() {
+// 회사 검색: 글자를 넣으면 회사 후보를 바로 보여 준다.
+// mode 'company'(머리글): 고른 회사 화면으로, 고른 게 없으면 검색 화면으로. '/' 키로 열기.
+// mode 'proposal'(제안서 초안): 고른 회사의 초안 화면으로.
+export function CompanySearch({ mode = 'company', placeholder = '회사 이름으로 찾기' }: { mode?: 'company' | 'proposal'; placeholder?: string }) {
+  const isHeader = mode === 'company';
   const router = useRouter();
   const listId = useId();
   const [q, setQ] = useState('');
@@ -15,6 +18,7 @@ export function CompanySearch() {
   const [active, setActive] = useState(-1);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputId = isHeader ? 'cs-input' : 'cs-input-proposal';
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,8 +49,9 @@ export function CompanySearch() {
     };
   }, [q]);
 
-  // '/' 키로 검색창 열기
+  // '/' 키로 검색창 열기 (머리글만)
   useEffect(() => {
+    if (!isHeader) return;
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
@@ -56,7 +61,7 @@ export function CompanySearch() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [isHeader]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -70,7 +75,7 @@ export function CompanySearch() {
     setOpen(false);
     setQ('');
     inputRef.current?.blur();
-    router.push(`/company/${h.corp_code}`);
+    router.push(isHeader ? `/company/${h.corp_code}` : `/proposal?corp=${h.corp_code}`);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -92,23 +97,35 @@ export function CompanySearch() {
   const showList = open && q.trim().length > 0;
 
   return (
-    <div className="cs" ref={boxRef}>
-      <form action="/search" method="get" role="search" className="cs-form" onSubmit={() => setOpen(false)}>
-        <label htmlFor="cs-input" className="sr-only">회사 이름으로 찾기</label>
+    <div className={`cs${isHeader ? '' : ' cs-wide'}`} ref={boxRef}>
+      <form
+        action="/search"
+        method="get"
+        role="search"
+        className="cs-form"
+        onSubmit={(e) => {
+          setOpen(false);
+          if (!isHeader) {
+            e.preventDefault();
+            if (hits[0]) go(hits[Math.max(0, active)]);
+          }
+        }}
+      >
+        <label htmlFor={inputId} className="sr-only">{placeholder}</label>
         <svg className="cs-icon" viewBox="0 0 20 20" aria-hidden width="16" height="16">
           <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
           <path d="M13 13l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         </svg>
         <input
           ref={inputRef}
-          id="cs-input"
+          id={inputId}
           name="q"
           type="search"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onFocus={() => hits.length && setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder="회사 이름으로 찾기"
+          placeholder={placeholder}
           autoComplete="off"
           required
           role="combobox"
@@ -117,7 +134,7 @@ export function CompanySearch() {
           aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
         />
-        <kbd className="cs-kbd" aria-hidden>/</kbd>
+        {isHeader && <kbd className="cs-kbd" aria-hidden>/</kbd>}
       </form>
       {showList && (
         <ul className="cs-list" id={listId} role="listbox" aria-label="회사 후보">
@@ -145,7 +162,7 @@ export function CompanySearch() {
               </li>
             ))
           )}
-          {hits.length > 0 && (
+          {hits.length > 0 && isHeader && (
             <li role="presentation" className="cs-all">
               <a href={`/search?q=${encodeURIComponent(q.trim())}`}>‘{q.trim()}’ 검색 결과 모두 보기</a>
             </li>
