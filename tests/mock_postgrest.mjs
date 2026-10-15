@@ -174,9 +174,9 @@ console.log(`mock: 가상 딜 ${n}건 적재`);
   for (let i = 0; i < rows.length; i += 5000) await db.exec(`insert into raw.rates (series_key, dt, value) values ${rows.slice(i, i + 5000).join(',')};`);
 }
 
-// 인사이트 요약 (수집기와 같은 코드, AI 키 없이 규칙 문장)
+// 눈여겨볼 회사 (수집기와 같은 코드, AI 키 없이 규칙으로 고름)
 {
-  const { buildSummaries } = await import('../ingest/lib/insights.mjs');
+  const { buildIssues } = await import('../ingest/lib/issues.mjs');
   const rpcDb = {
     rpc: async (fn, args = {}) => {
       const names = Object.keys(args);
@@ -184,7 +184,9 @@ console.log(`mock: 가상 딜 ${n}건 적재`);
       return r.rows[0]?.v;
     },
   };
-  await buildSummaries({ db: rpcDb, key: '', log: (m) => console.log(`mock: ${m}`) });
+  await db.exec('set role service_role');
+  await buildIssues({ db: rpcDb, key: '', log: (m) => console.log(`mock: ${m}`) });
+  await db.exec('reset role');
 }
 
 // 3) PostgREST 일부 문법 ---------------------------------------------------

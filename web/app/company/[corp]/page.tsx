@@ -4,6 +4,7 @@ import { Header } from '@/components/Chrome';
 import { DealTable } from '@/components/DealTable';
 import { Disclosures } from '@/components/Disclosures';
 import { Tombstone } from '@/components/Tombstone';
+import { Info, SectionHead } from '@/components/Ui';
 import { date, pct, won } from '@/lib/format';
 import { FEATURE_LABEL, PRODUCT_LABEL, dealTitle } from '@/lib/labels';
 import { getCompany, getCompanyDeals, getMaturities, getShortDebt, getSimilar } from '@/lib/queries';
@@ -123,10 +124,7 @@ export default async function CompanyPage({ params }: { params: { corp: string }
 
         {upcoming.length > 0 && (
           <section className="section" aria-labelledby="upcoming-h">
-            <div className="section-head">
-              <h2 id="upcoming-h">다가오는 만기·풋옵션</h2>
-              <p>공모 회사채 트랜치 만기, 메자닌 만기·조기상환청구 시작일. 앞으로 5년</p>
-            </div>
+            <SectionHead id="upcoming-h" title="다가오는 만기·풋옵션" info="앞으로 5년. 공모 회사채 트랜치 만기, 메자닌 만기·조기상환청구 시작일." />
             <UpcomingTable rows={upcoming.slice(0, 12)} />
             {upcoming.length > 12 && (
               <details className="disc-more">
@@ -139,10 +137,7 @@ export default async function CompanyPage({ params }: { params: { corp: string }
 
         {sd && (
           <section className="section" aria-labelledby="short-h">
-            <div className="section-head">
-              <h2 id="short-h">만기 구간별 차입 잔액</h2>
-              <p>정기보고서 {date(sd.stlm_dt)} 기준 미상환 잔액</p>
-            </div>
+            <SectionHead id="short-h" title="만기 구간별 차입 잔액" info="정기보고서의 미상환 잔액" right={<span className="muted small tnum">{date(sd.stlm_dt)} 기준</span>} />
             <dl className="stats">
               <div className="stat"><dt>회사채 1년 이하</dt><dd>{won(sd.bond_1y_krw)}</dd></div>
               <div className="stat"><dt>그중 사모</dt><dd>{won(sd.bond_private_1y_krw)}</dd></div>
@@ -156,9 +151,7 @@ export default async function CompanyPage({ params }: { params: { corp: string }
 
         {latest.length > 0 && (
           <section className="section" aria-labelledby="latest-h">
-            <div className="section-head">
-              <h2 id="latest-h">상품별 최근 발행</h2>
-            </div>
+            <SectionHead id="latest-h" title="상품별 최근 발행" />
             <div className="tombstones">
               {latest.map((d) => (
                 <Tombstone key={d.deal_key} deal={d} linkCompany={false} />
@@ -168,43 +161,31 @@ export default async function CompanyPage({ params }: { params: { corp: string }
         )}
 
         <section className="section" aria-labelledby="disc-h">
-          <div className="section-head">
-            <h2 id="disc-h">최근 공시</h2>
-            <p>최근 6개월. 자금조달, 지배구조, 리스크, 계약·투자 공시를 먼저 보여 줍니다</p>
-          </div>
+          <SectionHead id="disc-h" title="최근 공시" info="최근 6개월. 자금조달, 지배구조, 리스크, 계약·투자 공시를 먼저 보여 줍니다." />
           <Disclosures corp={corp} />
         </section>
 
         {deals.length === 0 ? (
           <section className="section">
-            <p className="empty">
-              수집 기간 동안 이 회사의 공모 회사채 신고서, 메자닌 발행 결정, 유상증자·IPO 공시가 없습니다.
-              위 메뉴에서 상품별 동향을 보면 비슷한 회사의 최근 딜을 찾을 수 있습니다.
-            </p>
+            <p className="empty">수집 기간에 이 회사의 공모 회사채, 메자닌, 유상증자·IPO 공시가 없습니다.</p>
           </section>
         ) : (
           <>
             <section className="section" aria-labelledby="history-h">
-              <div className="section-head">
-                <h2 id="history-h">발행 이력</h2>
-                <p>최근 순. 회사채·IPO 는 납입일, 메자닌과 유상증자는 이사회 결의일 기준. 왼쪽 선은 NH투자증권 대표주관</p>
-              </div>
+              <SectionHead id="history-h" title="발행 이력" info="최근 순. 회사채·IPO 는 납입일, 메자닌과 유상증자는 이사회 결의일 기준. 왼쪽 선은 NH투자증권 대표주관." />
               <DealTable deals={deals} layout="mixed" caption={`${company.corp_name} 발행 이력`} />
             </section>
 
             <section className="section" aria-labelledby="comps-h">
-              <div className="section-head">
-                <h2 id="comps-h">비슷한 다른 회사 딜</h2>
-                <p>상품별 최근 딜과 조건이 가까운 순. 최근 12개월 이내</p>
-              </div>
+              <SectionHead id="comps-h" title="비슷한 다른 회사 딜" info="상품별 최근 딜과 조건이 가까운 순. 최근 12개월 이내." />
               {similar.map(({ base, comps }) => {
                 const criteria = comps?.[0] ? [...comps[0].comp.matched, ...comps[0].comp.unmatched] : [];
                 return (
                   <div key={base.deal_key} className="comps-block">
                     <h3>
                       {dealTitle(base)}({date(base.deal_dt)})와 비슷한 {PRODUCT_LABEL[base.product_type]}
+                      {criteria.length > 0 && <Info>{`비교 조건: ${criteria.map((c) => FEATURE_LABEL[c] ?? c).join(', ')}`}</Info>}
                     </h3>
-                    {criteria.length > 0 && <p>비교 조건: {criteria.map((c) => FEATURE_LABEL[c] ?? c).join(', ')}</p>}
                     {comps === null ? (
                       <p className="empty">비슷한 딜을 불러오지 못했습니다.</p>
                     ) : comps.length === 0 ? (

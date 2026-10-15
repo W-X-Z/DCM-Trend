@@ -8,7 +8,8 @@
     "ingest": "node ingest/run.mjs",
     "test:transforms": "node tests/transforms.mjs",
     "test:insights": "node tests/insights.mjs",
-    "test:docparse": "node tests/docparse.mjs"
+    "test:docparse": "node tests/docparse.mjs",
+    "test:issues": "node tests/issues.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17"

@@ -1,7 +1,7 @@
 import { select, selectAll, rpc, inList } from './db';
 import type {
   BondTrendRow, Comp, CompanyHit, CompanyOverview, DataStatus, Deal, DisclosureRule, EquityTrendRow,
-  FeeRow, InsightFact, InsightSummary, IpoTrendRow, LeagueRow, Maturity, MaturityMonth, Metric, MezzTrendRow,
+  FeeRow, InsightFact, InsightIssue, IpoTrendRow, LeagueRow, Maturity, MaturityMonth, Metric, MezzTrendRow,
   NotableDeal, PolicyEvent, ProductType, RateLatest, RatePoint, ShortDebt, SpreadPoint,
 } from './types';
 
@@ -124,8 +124,8 @@ export async function getInsightFacts(): Promise<InsightFact[]> {
   return rpc<InsightFact[]>('insight_facts', {});
 }
 
-export async function getInsightSummaries(): Promise<InsightSummary[]> {
-  return select<InsightSummary>('v_insight_summaries');
+export async function getInsightIssues(): Promise<InsightIssue[]> {
+  return select<InsightIssue>('v_insight_issues', { order: 'rank.asc' });
 }
 
 // 금리 ---------------------------------------------------------------------

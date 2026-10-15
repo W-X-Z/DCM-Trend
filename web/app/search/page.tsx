@@ -28,16 +28,14 @@ export default async function SearchPage({ searchParams }: { searchParams: { q?:
           </div>
         </div>
         {!q ? (
-          <p className="empty">회사 이름을 넣으세요. 이름 일부만 넣어도 찾습니다.</p>
+          <p className="empty">회사 이름 일부만 넣어도 찾습니다.</p>
         ) : hits === null ? (
           <p className="empty">검색하지 못했습니다. 잠시 뒤 다시 찾아 보세요.</p>
         ) : hits.length === 0 ? (
-          <p className="empty">‘{q}’와 비슷한 이름의 회사가 없습니다. 이름 일부만 넣어 보세요. 예: ‘이랜드월드’ 대신 ‘이랜드’</p>
+          <p className="empty">‘{q}’와 비슷한 이름의 회사가 없습니다. 이름 일부만 넣어 보세요.</p>
         ) : (
           <>
-            <p className="note" style={{ marginBottom: 12 }}>
-              ‘{q}’ 검색 결과 {hits.length}곳. 발행 이력이 있는 회사가 위에 옵니다.
-            </p>
+            <p className="note" style={{ marginBottom: 12 }}>{hits.length}곳</p>
             <ul className="hits">
               {hits.map((h) => (
                 <li key={h.corp_code}>

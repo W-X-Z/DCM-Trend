@@ -9,16 +9,17 @@ import { month, num, pct, won } from '@/lib/format';
 import { DATE_BASIS } from '@/lib/labels';
 import { getFees, getLeague, getMetrics, getRecentDeals, getTrend, getUiParam } from '@/lib/queries';
 import { PRODUCTS, type BondTrendRow, type EquityTrendRow, type FeeRow, type IpoTrendRow, type MezzTrendRow, type ProductType } from '@/lib/types';
-import { InsightPanel } from '@/components/Insights';
+import { ChangeTiles } from '@/components/Insights';
+import { Info, PageHead, ProductTabs, SectionHead } from '@/components/Ui';
 
 export const dynamic = 'force-dynamic';
 
 const TITLES: Record<ProductType, string> = { bond: '회사채 발행 동향', mezz: '메자닌 발행 동향', equity: '유상증자 동향', ipo: 'IPO 동향' };
 const SUBS: Record<ProductType, string> = {
-  bond: '증권신고서(채무증권)를 낸 공모 회사채. 트랜치(회차)마다 한 건으로 셉니다.',
-  mezz: '전환사채(CB), 신주인수권부사채(BW), 교환사채(EB) 발행 결정 공시. 공모와 사모를 모두 포함합니다.',
+  bond: '증권신고서(채무증권)를 낸 공모 회사채. 트랜치(회차)마다 한 건. 등급·밴드·확정 가산금리·경쟁률은 발행조건확정 신고서 본문에서 읽습니다.',
+  mezz: '전환사채(CB), 신주인수권부사채(BW), 교환사채(EB) 발행 결정 공시. 공모와 사모 모두.',
   equity: '상장사 유상증자 결정 공시. 정정 공시는 처음 결정한 딜에 합칩니다.',
-  ipo: '비상장사(코넥스 이전상장 포함)의 증권신고서(지분증권) 일반공모. 스팩·리츠는 구분해서 셉니다. 철회한 공모는 뺍니다.',
+  ipo: '비상장사(코넥스 이전상장 포함)의 지분증권 일반공모. 스팩·리츠는 구분해서 세고, 철회한 공모는 뺍니다. 밴드·확정공모가·경쟁률은 발행조건확정 신고서 본문에서 읽습니다.',
 };
 
 export function generateMetadata({ params }: { params: { product: string } }) {
@@ -42,7 +43,10 @@ function Breakdown({ title, slices, color, note }: { title: string; slices: Slic
   const max = Math.max(...slices.map((s) => s.amount), 0);
   return (
     <div>
-      <h3 className="sub-h">{title}</h3>
+      <h3 className="sub-h">
+        {title}
+        {note && <Info>{note}</Info>}
+      </h3>
       <div className="table-wrap">
         <table className="data">
           <thead>
@@ -67,7 +71,6 @@ function Breakdown({ title, slices, color, note }: { title: string; slices: Slic
           </tbody>
         </table>
       </div>
-      {note && <p className="note">{note}</p>}
     </div>
   );
 }
@@ -139,9 +142,8 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
     <>
       <Header active={product} />
       <main id="main" className="wrap">
-        <div className="page-head">
-          <h1 className="page-title">{TITLES[product]}</h1>
-          <p className="page-sub">{SUBS[product]} {DATE_BASIS[product]}으로 월을 나눕니다.</p>
+        <PageHead title="발행 동향" info={`${SUBS[product]} ${DATE_BASIS[product]}으로 월을 나눕니다.`}>
+          <ProductTabs active={product} query={m === 24 ? '?m=24' : ''} />
           <div className="controls">
             <span className="seg" aria-label="기간">
               {(['12', '24'] as const).map((v) => (
@@ -160,7 +162,7 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
               </span>
             )}
           </div>
-        </div>
+        </PageHead>
 
         <dl className="stats">
           <Stat label="발행금액">{won(amount)}</Stat>
@@ -203,22 +205,10 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
             </>
           )}
         </dl>
-        {(product === 'bond' || product === 'ipo') && (
-          <p className="note">
-            {product === 'bond'
-              ? '신용등급, 공모희망금리 밴드, 확정 가산금리, 수요예측 경쟁률은 발행조건확정 신고서 본문에서 읽습니다. 민평 방식은 청약 전일에 쿠폰이 정해져 확정 가산금리로 보여 줍니다.'
-              : '희망공모가 밴드, 확정공모가, 수요예측 경쟁률은 발행조건확정 신고서 본문에서 읽습니다.'}
-            {' '}본문을 읽은 딜부터 표시되고, 과거 딜은 매일 조금씩 채워집니다.
-          </p>
-        )}
-
-        <InsightPanel scope={product} />
+        <ChangeTiles scope={product} title="최근 3개월 변화" color={color} />
 
         <section className="section" aria-labelledby="monthly-h">
-          <div className="section-head">
-            <h2 id="monthly-h">월별 추이</h2>
-            <p>이번 달은 진행 중이라 옅게 표시</p>
-          </div>
+          <SectionHead id="monthly-h" title="월별 추이" />
           <div className="chart-pair">
             <div className="chart-card">
               <h3>발행금액</h3>
@@ -246,10 +236,7 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
         </section>
 
         <section className="section" aria-labelledby="mix-h">
-          <div className="section-head">
-            <h2 id="mix-h">구성</h2>
-            <p>최근 {m}개월 합계, 금액 비중 순</p>
-          </div>
+          <SectionHead id="mix-h" title={`구성 (최근 ${m}개월)`} />
           <div className="breakdowns">
             {product === 'bond' && cat === 'all' && <Breakdown title="회사채 구분" slices={byKey(rows, (r) => r.category ?? '기타')} color={color} />}
             {product === 'bond' && rows.some((r) => r.rating_group) && (
@@ -282,14 +269,14 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
 
         {(league.length > 0 || feeQ.length > 0) && (
           <section className="section" aria-labelledby="ib-h">
-            <div className="section-head">
-              <h2 id="ib-h">주관사</h2>
-              <p>인수인 정보가 공시된 딜만 집계</p>
-            </div>
+            <SectionHead id="ib-h" title="주관사" info="인수인 정보가 공시된 딜만 집계합니다." />
             <div className="breakdowns">
               {league.length > 0 && (
                 <div>
-                  <h3 className="sub-h">{year}년 대표주관 순위</h3>
+                  <h3 className="sub-h">
+                    {year}년 대표주관 순위
+                    <Info>대표주관 실적은 딜 금액을 공동 대표주관사 수로 나눠 더한 값입니다. 회사채는 모든 구분을 합칩니다.</Info>
+                  </h3>
                   <div className="table-wrap">
                     <table className="data">
                       <thead>
@@ -314,12 +301,14 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
                       </tbody>
                     </table>
                   </div>
-                  <p className="note">대표주관 실적은 딜 금액을 공동 대표주관사 수로 나눠 더한 값입니다. 회사채는 모든 구분을 합칩니다.</p>
                 </div>
               )}
               {feeQ.length > 0 && (
                 <div>
-                  <h3 className="sub-h">분기별 인수수수료율</h3>
+                  <h3 className="sub-h">
+                    분기별 인수수수료율
+                    <Info>인수대가 합 ÷ 인수금액 합. 신고서에 따로 적힌 대표주관 수수료는 빠집니다.</Info>
+                  </h3>
                   <div className="table-wrap">
                     <table className="data">
                       <thead>
@@ -342,7 +331,6 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
                       </tbody>
                     </table>
                   </div>
-                  <p className="note">인수대가 합 ÷ 인수금액 합. 신고서에 따로 적힌 대표주관 수수료는 빠집니다.</p>
                 </div>
               )}
             </div>
@@ -350,10 +338,7 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
         )}
 
         <section className="section" aria-labelledby="recent-h">
-          <div className="section-head">
-            <h2 id="recent-h">최근 딜</h2>
-            <p>{DATE_BASIS[product]} 최근 30건. 왼쪽 선은 NH투자증권 대표주관</p>
-          </div>
+          <SectionHead id="recent-h" title="최근 딜" info={`${DATE_BASIS[product]} 최근 30건. 왼쪽 선은 NH투자증권 대표주관.`} />
           {recent.length ? (
             <DealTable deals={recent} layout={product} caption={`최근 ${meta!.label} 딜`} />
           ) : (

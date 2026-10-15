@@ -179,6 +179,47 @@ await check('유상증자 정정본만 있는 딜: 결정일 = 원 결정 공시
      from mart.v_deals v where v.deal_key = 'equity:01764099:20260910000002'`,
   '2026-08-01|20260801000001:decision,20260910000002:amendment');
 
+// 눈여겨볼 회사 후보: 규칙별 후보가 만들어지고, 화면 뷰는 저장된 최신 묶음을 순서대로 펼친다
+{
+  await db.exec('set role service_role');
+  const runSig = (await db.query(`select public.ingest_start_run('test-signal') as id`)).rows[0].id;
+  await db.query(`select public.ingest_put_filings($1, $2::jsonb)`, [runSig, JSON.stringify([
+    { rm: '', flr_nm: 'GS', corp_cls: 'Y', rcept_dt: '20261010', rcept_no: '20261010000101', corp_code: '00500254', corp_name: 'GS', report_nm: '주요사항보고서(타법인주식및출자증권양수결정)', stock_code: '078930' },
+    { rm: '', flr_nm: 'GS', corp_cls: 'Y', rcept_dt: '20261011', rcept_no: '20261011000102', corp_code: '00500254', corp_name: 'GS', report_nm: '[기재정정]주요사항보고서(타법인주식및출자증권양수결정)', stock_code: '078930' },
+    { rm: '', flr_nm: '테스트', corp_cls: 'K', rcept_dt: '20260801', rcept_no: '20260801000103', corp_code: '01764099', corp_name: '테스트', report_nm: '주요사항보고서(회생절차개시신청)', stock_code: '' },
+  ])]);
+  await db.exec('reset role');
+  const cands = (await db.query(`select public.ingest_signal_candidates('2026-10-15') as c`)).rows[0].c;
+  results.push({
+    name: '후보: 투자 결정 공시(정정 제외)는 접점, 30일 지난 회생 공시는 제외',
+    ok: JSON.stringify(cands.map((c) => `${c.signal_key}:${c.kind}:${c.corp_code}:${c.rcept_no}`)) === JSON.stringify(['invest:touchpoint:00500254:20261010000101']),
+    actual: cands.map((c) => `${c.signal_key}:${c.kind}:${c.corp_code}:${c.rcept_no}`), expected: ['invest:touchpoint:00500254:20261010000101'],
+  });
+  results.push({ name: '후보: 회사 맥락(공모채 이력) 포함', ok: cands[0]?.context?.['공모채 발행 이력(건)'] === 2, actual: cands[0]?.context, expected: { '공모채 발행 이력(건)': 2 } });
+  await db.exec('set role service_role');
+  await db.query(`select public.ingest_put_issue_set('2026-10-15', $1::jsonb, 'rule', 'h1')`, [JSON.stringify([
+    { kind: 'touchpoint', corp_code: '00500254', corp_name: 'GS', title: 't1', why: 'w1', angle: 'a1', signal_key: 'invest', signal_label: 'l', event_dt: '2026-10-10', rcept_no: '20261010000101' },
+    { kind: 'issue', corp_code: 'X', corp_name: 'Y', title: 't2', why: 'w2', angle: 'a2', signal_key: 'distress', signal_label: 'l', event_dt: '2026-10-01', rcept_no: null },
+  ])]);
+  await db.exec('reset role');
+  await check('화면 뷰: 최신 묶음 순서', `select string_agg(rank || ':' || title, ',' order by rank) from mart.v_insight_issues`, '1:t1,2:t2');
+}
+
+// 금리 조사 값: ECOS 값이 오면 덮어쓰고, 조사 값은 ECOS 값을 덮어쓰지 않는다
+await db.exec('set role service_role');
+await db.query(`select public.ingest_put_rates_research($1::jsonb)`, [JSON.stringify([
+  { series_key: 'ktb3y', dt: '2026-10-12', value: 3.921, source_url: 'https://example.com/a' },
+  { series_key: 'ktb3y', dt: '2026-10-13', value: 3.95, source_url: 'https://example.com/b' },
+  { series_key: 'nope', dt: '2026-10-13', value: 1 },
+])]);
+await db.query(`select public.ingest_put_rates('ktb3y', $1::jsonb)`, [JSON.stringify([{ dt: '2026-10-13', value: '3.940' }])]);
+await db.query(`select public.ingest_put_rates_research($1::jsonb)`, [JSON.stringify([{ series_key: 'ktb3y', dt: '2026-10-13', value: 9.9 }])]);
+await db.exec('reset role');
+await check('금리: 조사 값·ECOS 우선순위',
+  `select string_agg(dt || ':' || value || ':' || source, ',' order by dt) from raw.rates where series_key = 'ktb3y'`,
+  '2026-10-12:3.921:research,2026-10-13:3.940:ecos');
+await check('금리 최신값에 출처', `select source || '|' || coalesce(source_url, '-') from mart.v_rate_latest where series_key = 'ktb3y'`, 'ecos|-');
+
 let failed = 0;
 for (const r of results) {
   if (!r.ok) failed++;

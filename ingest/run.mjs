@@ -11,7 +11,7 @@
 //   node ingest/run.mjs periodic [--max-calls-step 3000]   정기보고서 미상환 잔액 (회사채·CP·단기사채)
 //   node ingest/run.mjs documents [--rcept-nos a,b]       신고서 원문 (지정 공시 또는 ref 규칙 대기 목록)
 //   node ingest/run.mjs rates                     한국은행 ECOS 금리 (ECOS_API_KEY 없으면 건너뜀)
-//   node ingest/run.mjs insights                  인사이트 요약 (OPENAI_API_KEY 없으면 규칙 문장)
+//   node ingest/run.mjs insights                  눈여겨볼 회사 고르기 (OPENAI_API_KEY 없으면 규칙으로)
 //   node ingest/run.mjs --config ingest/dev.config.json   (config 의 steps 를 차례로 실행)
 //
 // 공통 옵션: --max-calls N (이번 실행의 OpenDART 호출 상한, 기본 15000)
