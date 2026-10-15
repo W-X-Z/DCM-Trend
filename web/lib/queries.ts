@@ -105,10 +105,11 @@ export async function getMaturities(opts: { from: string; to: string; product?: 
   });
 }
 
-export async function getShortDebt(limit = 200, corp?: string): Promise<ShortDebt[]> {
+export async function getShortDebt(limit = 200, corp?: string, includeFinancial = true): Promise<ShortDebt[]> {
   return select<ShortDebt>('v_company_short_debt', {
     corp_code: corp ? `eq.${corp}` : undefined,
     total_1y_krw: corp ? undefined : 'gt.0',
+    is_financial: includeFinancial ? undefined : 'eq.false',
     order: 'total_1y_krw.desc.nullslast',
     limit,
   });

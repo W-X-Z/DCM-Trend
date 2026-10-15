@@ -1,23 +1,11 @@
 {
   "command": "sequence",
-  "maxCalls": "9000",
+  "maxCalls": "400",
   "steps": [
-    {
-      "command": "documents",
-      "rceptNos": "20261015000311,20260417000660,20260422000662,20260729000511,20261012000308,20261012000445,20261015000232,20261014000424"
-    },
-    {
-      "command": "periodic",
-      "maxCallsStep": 3500
-    },
-    {
-      "command": "history"
-    },
-    {
-      "command": "rates"
-    },
-    {
-      "command": "insights"
-    }
+    { "command": "documents", "rceptNos": "20261015000311,20260417000660,20260422000662,20260729000511,20261012000308,20261012000445,20261015000232,20261014000424" },
+    { "command": "documents", "maxDocs": 200 },
+    { "command": "rates" },
+    { "command": "refresh" },
+    { "command": "insights" }
   ]
 }

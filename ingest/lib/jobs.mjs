@@ -3,6 +3,7 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import { XMLParser } from 'fast-xml-parser';
 import { STATUS, DartStopError, BudgetError, DocError } from './dart.mjs';
+import { parseByPurpose } from './docparse.mjs';
 
 // 공시검색 대상: 발행공시 전체 + 주요사항보고서
 // 실측: 발행공시는 상세유형(C001/C002)을 줘도 발행공시 전체가 돌아와서 유형(C)만 지정한다.
@@ -236,8 +237,9 @@ export async function periodic(env, { maxCalls = 3000, period = latestPeriod() }
 }
 
 // 7. 신고서 원문 (document.xml) -------------------------------------------
-// 압축을 풀어 파일별로 raw.documents 에 넣는다. 파싱은 별도 단계.
+// 원문을 받아 필요한 값만 뽑아 raw.doc_fields 에 넣는다 (원문 전체는 저장하지 않음, 무료 DB 용량 보호).
 // rceptNos 를 주면 그 공시만, 아니면 DB 대기 목록(ref.document_fetch_rules)에서 가져온다.
+// keepRaw: true 면 원문도 raw.documents 에 저장 (파서 개발용 샘플)
 const MAX_DOC_CHARS = 1_000_000;
 
 function decodeXml(bytes) {
@@ -250,34 +252,56 @@ function decodeXml(bytes) {
   }
 }
 
-export async function documents(env, { rceptNos = null, maxDocs = 500 } = {}) {
-  return withRun(env, 'documents', { rceptNos, maxDocs }, async (ctx) => {
-    let queue = rceptNos ? rceptNos.map((r) => ({ rcept_no: r })) : null;
+function guessPurpose(xml) {
+  const name = xml.match(/<DOCUMENT-NAME[^>]*>([^<]+)</)?.[1] ?? '';
+  if (/채무증권/.test(name)) return 'bond';
+  if (/지분증권/.test(name)) return 'ipo';
+  if (/전환사채|신주인수권부사채|교환사채/.test(name)) return 'mezz';
+  return null;
+}
+
+export async function documents(env, { rceptNos = null, maxDocs = 500, keepRaw = false } = {}) {
+  return withRun(env, 'documents', { rceptNos, maxDocs, keepRaw }, async (ctx) => {
+    let queue = rceptNos ? rceptNos.map((r) => ({ rcept_no: r, purpose: null })) : null;
     let done = 0;
+    const counts = {};
     while (done < maxDocs) {
       if (!queue || !queue.length) {
         if (rceptNos) break;
         queue = await env.db.rpc('ingest_pending_documents', { p_limit: 100 });
         if (!queue.length) break;
       }
-      const { rcept_no } = queue.shift();
+      const { rcept_no, purpose: given } = queue.shift();
       done++;
       try {
         const zip = await env.dart.binary('document.xml', { rcept_no });
         const files = unzipSync(zip);
+        const names = Object.keys(files).sort();
         let bytes = 0;
-        const names = Object.keys(files);
-        for (const name of names) {
-          const text = decodeXml(files[name]);
+        // 본문 파일(접수번호.xml)을 먼저, 첨부는 뒤에. 필드는 모든 파일에서 뽑아 합친다.
+        const main = names.find((n) => n.startsWith(rcept_no)) ?? names[0];
+        const ordered = [main, ...names.filter((n) => n !== main)];
+        const fields = [];
+        let purpose = given;
+        for (const name of ordered) {
+          const xml = decodeXml(files[name]);
           bytes += files[name].length;
-          await env.db.rpc('ingest_put_document', {
-            p_run_id: ctx.runId, p_rcept_no: rcept_no, p_section: `file:${name}`,
-            p_content: text.slice(0, MAX_DOC_CHARS),
-          });
+          purpose ??= guessPurpose(xml);
+          if (keepRaw) {
+            await env.db.rpc('ingest_put_document', { p_run_id: ctx.runId, p_rcept_no: rcept_no, p_section: `file:${name}`, p_content: xml.slice(0, MAX_DOC_CHARS) });
+          }
+          if (purpose) {
+            for (const f of parseByPurpose(purpose, xml)) {
+              if (!fields.some((x) => x.field === f.field && (x.series ?? '') === (f.series ?? ''))) fields.push(f);
+            }
+          }
         }
+        if (purpose && fields.length) {
+          ctx.written += await env.db.rpc('ingest_put_doc_fields', { p_run_id: ctx.runId, p_rcept_no: rcept_no, p_purpose: purpose, p_items: fields });
+        }
+        counts[purpose ?? 'unknown'] = (counts[purpose ?? 'unknown'] ?? 0) + 1;
         await env.db.rpc('ingest_mark_document', { p_run_id: ctx.runId, p_rcept_no: rcept_no, p_status: 'ok', p_files: names.length, p_bytes: bytes });
         ctx.fetched += 1;
-        ctx.written += names.length;
       } catch (e) {
         if (!(e instanceof DocError)) throw e;
         await env.db.rpc('ingest_mark_document', {
@@ -285,8 +309,9 @@ export async function documents(env, { rceptNos = null, maxDocs = 500 } = {}) {
         });
         await env.db.rpc('ingest_log_issue', { p_stage: 'ingest', p_code: `document_${e.status}`, p_rcept_no: rcept_no, p_detail: { message: e.message } });
       }
-      if (done % 50 === 0) console.log(`documents: ${done}건`);
+      if (done % 50 === 0) console.log(`documents: ${done}건 ${JSON.stringify(counts)}`);
     }
+    console.log(`documents: 끝 ${done}건 ${JSON.stringify(counts)}, 필드 ${ctx.written}개`);
   });
 }
 

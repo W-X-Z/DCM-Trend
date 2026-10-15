@@ -13,7 +13,7 @@ const WINDOWS = { '0-3': [0, 3], '3-6': [3, 6], '6-12': [6, 12] } as const;
 type Win = keyof typeof WINDOWS;
 const TABS = { bond: '공모 회사채', mezz: '메자닌 만기·풋옵션', short: '사모채·CP·전단채 잔액' } as const;
 type Tab = keyof typeof TABS;
-type SP = { w?: string; t?: string; s?: string };
+type SP = { w?: string; t?: string; s?: string; fin?: string };
 
 function addMonths(d: Date, n: number) {
   const x = new Date(d);
@@ -27,6 +27,7 @@ function href(sp: SP, patch: SP) {
   if (n.t && n.t !== 'bond') q.set('t', n.t);
   if (n.w && n.w !== '3-6') q.set('w', n.w);
   if (n.s && n.s !== 'date') q.set('s', n.s);
+  if (n.fin === '1') q.set('fin', '1');
   const s = q.toString();
   return `/maturities${s ? `?${s}` : ''}`;
 }
@@ -146,6 +147,7 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
   const tab: Tab = (searchParams.t as Tab) in TABS ? (searchParams.t as Tab) : 'bond';
   const win: Win = (searchParams.w as Win) in WINDOWS ? (searchParams.w as Win) : '3-6';
   const sort = searchParams.s === 'amount' ? 'amount' : 'date';
+  const fin = searchParams.fin === '1';
   const now = new Date(Date.now() + 9 * 3600_000);
   const [a, b] = WINDOWS[win];
   const from = addMonths(now, a);
@@ -155,10 +157,12 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
   const [rows, monthly, shortDebt] = await Promise.all([
     tab === 'short' ? Promise.resolve([] as Maturity[]) : getMaturities({ from, to, product: tab }).catch(() => null),
     getMaturityMonthly(m0, addMonths(new Date(`${m0}T00:00:00Z`), 12)).catch(() => []),
-    tab === 'short' ? getShortDebt(200).catch(() => null) : Promise.resolve([] as ShortDebt[]),
+    tab === 'short' ? getShortDebt(200, undefined, fin).catch(() => null) : Promise.resolve([] as ShortDebt[]),
   ]);
 
-  const groups = rows ? groupByCorp(rows) : [];
+  // 금융사(은행·캐피탈·카드 등)는 기본으로 뺀다. 인더스트리 커버리지 기준
+  const filtered = rows ? rows.filter((r) => fin || r.sub_type !== '금융채') : null;
+  const groups = filtered ? groupByCorp(filtered) : [];
   groups.sort((x, y) => (sort === 'amount' ? y.amount - x.amount : x.first_dt.localeCompare(y.first_dt)));
   const months12 = Array.from({ length: 12 }, (_, i) => addMonths(new Date(`${m0}T00:00:00Z`), i));
   const bondMonthly = months12.map((mm) => {
@@ -195,13 +199,19 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
                 </span>
               </>
             )}
+            {tab !== 'mezz' && (
+              <span className="seg" aria-label="금융사">
+                <Link href={href(searchParams, { fin: '0' })} aria-current={!fin}>금융사 제외</Link>
+                <Link href={href(searchParams, { fin: '1' })} aria-current={fin}>금융사 포함</Link>
+              </span>
+            )}
           </div>
         </div>
 
         {tab !== 'short' && rows && (
           <dl className="stats">
             <div className="stat"><dt>회사</dt><dd>{num(groups.length)}<small>곳</small></dd></div>
-            <div className="stat"><dt>{tab === 'bond' ? '트랜치' : '건'}</dt><dd>{num(rows.length)}<small>건</small></dd></div>
+            <div className="stat"><dt>{tab === 'bond' ? '트랜치' : '건'}</dt><dd>{num(filtered!.length)}<small>건</small></dd></div>
             <div className="stat"><dt>금액</dt><dd>{won(groups.reduce((s, g) => s + g.amount, 0))}</dd></div>
             <div className="stat"><dt>NH 대표주관 이력</dt><dd>{num(groups.filter((g) => g.nh_lead).length)}<small>곳</small></dd></div>
             {tab === 'bond' && <div className="stat"><dt>차환 진행</dt><dd>{num(groups.filter((g) => g.refi).length)}<small>곳</small></dd></div>}

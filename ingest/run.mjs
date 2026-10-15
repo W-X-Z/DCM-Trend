@@ -69,6 +69,7 @@ async function run(command, opts) {
     case 'documents':  return documents(env, {
       rceptNos: opts.rceptNos ? [].concat(opts.rceptNos).join(',').split(',').filter(Boolean) : null,
       maxDocs: Number(opts.maxDocs ?? 500),
+      keepRaw: Boolean(opts.keepRaw),
     });
     case 'rates':      return rates(env);
     case 'insights':   return insights(env);
@@ -98,7 +99,7 @@ async function run(command, opts) {
       await details(env);
       await refresh(env);
       await periodic(env, { maxCalls: 2000 }).catch((e) => console.error(`periodic: ${e.message}`));
-      await documents(env, { maxDocs: 300 }).catch((e) => console.error(`documents: ${e.message}`));
+      await documents(env, { maxDocs: 1500 }).catch((e) => console.error(`documents: ${e.message}`));
       await rates(env).catch((e) => console.error(`rates: ${e.message}`));
       await refresh(env);
       await insights(env).catch((e) => console.error(`insights: ${e.message}`));

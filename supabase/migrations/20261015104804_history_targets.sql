@@ -21,7 +21,7 @@ as $$
     select a.corp_code
     from raw.api_items a
     where a.endpoint = 'cprndNrdmpBlce'
-      and coalesce(a.item ->> 'remndr_exprtn1', '') ~ '공모'
+      and coalesce(a.item ->> 'remndr_exprtn2', '') ~ '공모'   -- remndr_exprtn1 = '미상환잔액', remndr_exprtn2 = 공모·사모·합계
       and coalesce(core.parse_numeric(a.item ->> 'sm'), 0) > 0
   )
   select c.corp_code

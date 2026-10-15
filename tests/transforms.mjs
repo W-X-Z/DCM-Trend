@@ -44,7 +44,7 @@ async function check(name, sql, expected) {
   results.push({ ok: JSON.stringify(actual) === JSON.stringify(expected), name, actual, expected });
 }
 
-await check('변환 건수', `select '${JSON.stringify(refreshed).replace(/'/g, "''")}'::jsonb - 'companies'`,
+await check('변환 건수', `select '${JSON.stringify(refreshed).replace(/'/g, "''")}'::jsonb - 'companies' - 'docs'`,
   { ipo: 1, bond: 2, mezz: 3, equity: 1 });
 await check('회사 보강: corpCode 없이 공시만으로 회사 생성·시장 구분',
   `select market from core.companies where corp_code = '01764099'`, '코스닥');
@@ -96,7 +96,34 @@ await check('메자닌 월간 트렌드 (2026-09, 코스닥 사모)',
   `select kind || ':' || deal_count || ':' || zero_coupon_count from mart.v_mezz_trend_monthly where month = '2026-09-01' order by kind`,
   ['BW:1:1', 'CB:1:1']);
 await check('변환 재실행해도 결과 동일 (멱등)',
-  `select (public.ingest_refresh() - 'companies')::text`, '{"ipo": 1, "bond": 2, "mezz": 3, "equity": 1}');
+  `select (public.ingest_refresh() - 'companies' - 'docs')::text`, '{"ipo": 1, "bond": 2, "mezz": 3, "equity": 1}');
+
+// 원문 파싱 결과 반영 (GS 제22회 발행조건확정 신고서에서 파서가 뽑은 값)
+await db.exec('set role service_role');
+await db.query(`select public.ingest_put_doc_fields(null, '20261015000311', 'bond', $1::jsonb)`, [JSON.stringify([
+  { field: 'rating_raw', series: null, value: 'AA0' },
+  { field: 'band_type', series: null, value: '개별민평' },
+  { field: 'band_low_bp', series: null, value: '-30' },
+  { field: 'band_high_bp', series: null, value: '30' },
+  { field: 'final_spread_bp_by_tenor', series: '2', value: '-11' },
+  { field: 'final_spread_bp_by_tenor', series: '3', value: '-10' },
+  { field: 'amount_initial', series: '22-1', value: '50000000000' },
+  { field: 'amount_initial', series: '22-2', value: '50000000000' },
+  { field: 'demand_count', series: '22-1', value: '36' },
+  { field: 'demand_krw', series: '22-1', value: '650000000000' },
+  { field: 'competition_ratio', series: '22-1', value: '13' },
+  { field: 'competition_ratio', series: '22-2', value: '10.2' },
+])]);
+const docs = (await db.query(`select (public.ingest_refresh() -> 'docs')::text as d`)).rows[0].d;
+await db.exec('reset role');
+await check('원문 값 반영 건수', `select '${docs}'::jsonb ->> 'bond_docs'`, '2');
+await check('원문: 등급·밴드·확정 가산금리·경쟁률',
+  `select deal_key || '|' || rating || '|' || band_type || '|' || band_low || '~' || band_high || '|' || final_spread_bp || '|' || competition_ratio
+     from mart.v_deals where product_type = 'bond' order by deal_key`,
+  ['bond:00500254:22-1|AA0|개별민평|-30~30|-11|13', 'bond:00500254:22-2|AA0|개별민평|-30~30|-10|10.2']);
+await check('원문: 증액 판단 (22-2 500억 → 1,000억)',
+  `select string_agg(deal_key || ':' || is_increased, ',' order by deal_key) from mart.v_deals where product_type = 'bond'`,
+  'bond:00500254:22-1:false,bond:00500254:22-2:true');
 
 let failed = 0;
 for (const r of results) {

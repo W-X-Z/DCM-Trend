@@ -55,7 +55,7 @@ export default async function Home() {
     getMaturities({ from: addMonths(3), to: addMonths(6), product: 'bond', eventType: '만기' }).catch(() => null),
   ]);
   const examples = recentIssuers(recentBonds);
-  const mat = maturing ? topMaturing(maturing) : [];
+  const mat = maturing ? topMaturing(maturing.filter((m) => m.sub_type !== '금융채')) : [];
 
   return (
     <>
@@ -85,7 +85,7 @@ export default async function Home() {
           {maturing && (
             <section className="section" aria-labelledby="mat-h">
               <div className="section-head">
-                <h2 id="mat-h">3~6개월 뒤 공모채 만기가 돌아오는 회사</h2>
+                <h2 id="mat-h">3~6개월 뒤 공모채 만기가 돌아오는 회사 (금융사 제외)</h2>
                 <p>
                   {mat.length}곳, {won(mat.reduce((s, g) => s + g.amount, 0))}. <Link href="/maturities">전체 목록 보기</Link>
                 </p>

@@ -194,4 +194,5 @@ export type ShortDebt = {
   corp_code: string; corp_name: string; market: string | null; period_key: string; stlm_dt: string | null;
   bond_1y_krw: number | null; bond_private_1y_krw: number | null; bond_total_krw: number | null;
   cp_1y_krw: number | null; cp_3m_krw: number | null; stb_krw: number | null; total_1y_krw: number | null;
+  is_financial: boolean;
 };
