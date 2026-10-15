@@ -300,11 +300,11 @@ export async function documents(env, { rceptNos = null, maxDocs = 500, keepRaw =
           ctx.written += await env.db.rpc('ingest_put_doc_fields', { p_run_id: ctx.runId, p_rcept_no: rcept_no, p_purpose: purpose, p_items: fields });
         }
         counts[purpose ?? 'unknown'] = (counts[purpose ?? 'unknown'] ?? 0) + 1;
-        await env.db.rpc('ingest_mark_document', { p_run_id: ctx.runId, p_rcept_no: rcept_no, p_status: 'ok', p_files: names.length, p_bytes: bytes });
+        await env.db.rpc('ingest_mark_document_v2', { p_run_id: ctx.runId, p_rcept_no: rcept_no, p_status: 'ok', p_files: names.length, p_bytes: bytes });
         ctx.fetched += 1;
       } catch (e) {
         if (!(e instanceof DocError)) throw e;
-        await env.db.rpc('ingest_mark_document', {
+        await env.db.rpc('ingest_mark_document_v2', {
           p_run_id: ctx.runId, p_rcept_no: rcept_no, p_status: e.status === '014' ? 'missing' : 'error', p_files: 0, p_bytes: 0,
         });
         await env.db.rpc('ingest_log_issue', { p_stage: 'ingest', p_code: `document_${e.status}`, p_rcept_no: rcept_no, p_detail: { message: e.message } });
