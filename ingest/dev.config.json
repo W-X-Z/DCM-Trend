@@ -1,1 +1,1 @@
-{"command":"sequence","maxCalls":"100","steps":[{"command":"insights"}]}
+{"command":"sequence","maxCalls":"600","steps":[{"command":"details","maxGroups":"400"}]}
