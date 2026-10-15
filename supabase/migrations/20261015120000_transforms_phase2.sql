@@ -17,34 +17,7 @@ begin
 
   drop table if exists _ipo;
   create temp table _ipo on commit drop as
-  with stk as (
-    -- 증권의종류: 공모 주식 (신고서 1건 = 공모 1건)
-    select
-      a.corp_code, a.rcept_no,
-      sum(core.parse_krw(a.item ->> 'slta'))                                         as amount,
-      sum(core.parse_numeric(a.item ->> 'stkcnt'))                                   as shares,
-      max(core.parse_numeric(a.item ->> 'slprc')) filter (where a.item ->> 'stksen' ~ '보통')  as price,
-      max(core.parse_numeric(a.item ->> 'fv'))                                       as fv,
-      max(a.item ->> 'corp_cls')                                                     as corp_cls,
-      bool_or(coalesce(a.item ->> 'slmthn', '') ~ '공모')                             as is_public
-    from raw.api_items a
-    where a.endpoint = 'estkRs' and a.group_title = '증권의종류'
-    group by a.corp_code, a.rcept_no
-  )
-  select
-    'ipo:' || s.corp_code || ':' || s.rcept_no                                       as deal_key,
-    s.*,
-    to_date(left(s.rcept_no, 8), 'YYYYMMDD')                                         as first_dt,
-    g.item                                                                           as gen,
-    c.corp_name
-  from stk s
-  join core.companies c on c.corp_code = s.corp_code
-  left join lateral (
-    select x.item from raw.api_items x
-    where x.endpoint = 'estkRs' and x.group_title = '일반사항' and x.rcept_no = s.rcept_no
-    order by x.item_id desc limit 1
-  ) g on true
-  where s.corp_cls in ('E', 'N') and s.is_public;
+  select * from core.v_ipo_offers;   -- 판정 규칙은 뷰에 (20261015112209_ipo_offers_view.sql)
 
   insert into core.deals (deal_key, product_type, sub_type, corp_code, series, is_public, status,
                           announce_dt, pricing_dt, payment_dt, amount_krw, initial_amount_krw,
@@ -53,7 +26,6 @@ begin
     i.deal_key, 'ipo',
     case when i.corp_name ~ '스팩|기업인수목적' then '스팩'
          when i.corp_name ~ '리츠|부동산투자회사' then '리츠'
-         when i.corp_cls = 'N' then '이전상장'
          else '일반' end,
     i.corp_code, null, true,
     case when fl.withdrawn then 'withdrawn'
