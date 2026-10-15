@@ -50,7 +50,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api/list.json') {
-    const all = listData[p.get('pblntf_detail_ty')] ?? [];
+    const all = listData[p.get('pblntf_detail_ty') ?? (p.get('pblntf_ty') === 'C' ? 'C002' : '')] ?? [];
     if (!all.length) return json({ status: '013', message: '조회된 데이타가 없습니다.' });
     const size = Number(p.get('page_count')), page = Number(p.get('page_no'));
     return json({ status: '000', message: '정상', page_no: page, page_count: size, total_count: all.length,
@@ -131,7 +131,7 @@ const checks = [
   ['bdRs 는 회사 단위 1회 호출', calls.filter((c) => c === '/api/bdRs.json').length, 1],
   ['무관 공시(자기주식)는 상세 호출 안 함', calls.filter((c) => c.includes('IsDecsn') && !c.includes('cvbd')).length, 0],
   ['대기 목록 소진', (await q(`select count(*)::int c from public.ingest_pending_details()`))[0].c, 0],
-  ['회사 변환 (core.companies)', (await q(`select count(*)::int c from core.companies`))[0].c, 1202],
+  ['회사 변환: corpCode 1,202 + 공시에만 있는 회사 149', (await q(`select count(*)::int c from core.companies`))[0].c, 1351],
   ['법인구분 반영 (코스닥)', (await q(`select market from core.companies where corp_code='00000002'`))[0].market, '코스닥'],
   ['실행 기록 성공', (await q(`select string_agg(job || ':' || status, ',' order by run_id) s from ops.ingest_runs`))[0].s,
     'probe:success,corp-codes:success,filings:success,details:success,refresh:success'],

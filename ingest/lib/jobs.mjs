@@ -4,10 +4,10 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { XMLParser } from 'fast-xml-parser';
 import { STATUS, DartStopError, BudgetError } from './dart.mjs';
 
-// 공시검색 대상: 발행공시(지분·채무증권 신고서) + 주요사항보고서
+// 공시검색 대상: 발행공시 전체 + 주요사항보고서
+// 실측: 발행공시는 상세유형(C001/C002)을 줘도 발행공시 전체가 돌아와서 유형(C)만 지정한다.
 export const FILING_TYPES = [
-  { ty: 'C', detail: 'C001' },   // 증권신고서(지분증권)
-  { ty: 'C', detail: 'C002' },   // 증권신고서(채무증권)
+  { ty: 'C' },                   // 발행공시 (증권신고서·정정·발행조건확정·실적보고 등)
   { ty: 'B', detail: 'B001' },   // 주요사항보고서
 ];
 
@@ -123,7 +123,7 @@ export async function filings(env, { from, to }) {
             break;
           }
           totalPage = Number(body.total_page ?? 1);
-          const items = (body.list ?? []).map((x) => ({ ...x, _pblntf_ty: t.ty, _pblntf_detail_ty: t.detail }));
+          const items = (body.list ?? []).map((x) => ({ ...x, _pblntf_ty: t.ty, _pblntf_detail_ty: t.detail ?? null }));
           ctx.fetched += items.length;
           if (items.length) ctx.written += await env.db.rpc('ingest_put_filings', { p_run_id: ctx.runId, p_items: items });
           page++;
