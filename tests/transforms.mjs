@@ -162,6 +162,23 @@ await check('보정: 납입일 ≥ 만기일이면 청약일로, 만기 개월 �
   `select '${fixed}' || '|' || payment_dt || '|' || tenor_months from mart.v_deals where deal_key = 'bond:00500254:22-1'`,
   '1|2026-10-21|24');
 
+// 유상증자: API 값이 최종 정정본에만 있는 경우, 결정일은 원 결정 공시(비고 '정') 날짜
+await db.exec('set role service_role');
+const runEq = (await db.query(`select public.ingest_start_run('test-eq') as id`)).rows[0].id;
+await db.query(`select public.ingest_put_filings($1, $2::jsonb)`, [runEq, JSON.stringify([
+  { rm: '정', flr_nm: '테스트', corp_cls: 'K', rcept_dt: '20260801', rcept_no: '20260801000001', corp_code: '01764099', corp_name: '테스트', report_nm: '주요사항보고서(유상증자결정)', stock_code: '' },
+  { rm: '', flr_nm: '테스트', corp_cls: 'K', rcept_dt: '20260910', rcept_no: '20260910000002', corp_code: '01764099', corp_name: '테스트', report_nm: '[기재정정]주요사항보고서(유상증자결정)', stock_code: '' },
+])]);
+await db.query(`select public.ingest_put_api_items($1, 'piicDecsn', '01764099', '000', $2::jsonb, $3::text[])`, [runEq, JSON.stringify([
+  { group_title: null, item: { rcept_no: '20260910000002', corp_code: '01764099', ic_mthn: '제3자배정증자', nstk_ostk_cnt: '100,000', bfic_tisstk_ostk: '10,000,000', fdpp_op: '1,000,000,000' } },
+]), '{20260910000002}']);
+await db.query(`select public.ingest_refresh()`);
+await db.exec('reset role');
+await check('유상증자 정정본만 있는 딜: 결정일 = 원 결정 공시일, 원 공시 연결',
+  `select v.deal_dt || '|' || (select string_agg(rcept_no || ':' || role, ',' order by rcept_no) from core.deal_filings df where df.deal_key = v.deal_key)
+     from mart.v_deals v where v.deal_key = 'equity:01764099:20260910000002'`,
+  '2026-08-01|20260801000001:decision,20260910000002:amendment');
+
 let failed = 0;
 for (const r of results) {
   if (!r.ok) failed++;

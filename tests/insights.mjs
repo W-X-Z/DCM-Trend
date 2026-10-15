@@ -1,6 +1,6 @@
 // 인사이트 요약: 숫자 형식, 검증(새 숫자·전망 표현 차단), 규칙 문장
 // 실행: npm run test:insights
-import { toReadable, validate, ruleSummary, formatChange, topDealFacts } from '../ingest/lib/insights.mjs';
+import { toReadable, validate, ruleSummary, formatChange, topDealFacts, compactForModel } from '../ingest/lib/insights.mjs';
 
 const facts = [
   { scope: 'bond', fact_key: 'bond_amount', label_ko: '회사채 발행금액', unit: 'krw', value_now: 12345000000000, value_base: 10450000000000,
@@ -35,6 +35,8 @@ const checks = [
   ['상위 딜: 30% 이상만 눈에 띔', top.map((f) => f.눈에띄는변화), [true, false]],
   ['상위 딜 이름·비중을 쓴 요약 통과', validate('- 유상증자 금액은 26.07~26.09 48.8조원으로 25.07~25.09 대비 +272.9%였고, SK하이닉스 제3자배정 40.0조원이 합계의 82.0%였다.', eq).ok, true],
   ['규칙 문장에 최대 딜 줄 추가', ruleSummary(eq).split('\n').pop(), '- 유상증자 최근 3개월 최대 딜: SK하이닉스 제3자배정 40.0조원 (합계의 82.0%)'],
+  ['모델 입력: 눈에 띄지 않는 지표는 이름만', compactForModel(facts)[2], { scope: 'bond', key: 'bond_fee_bp', 지표: '회사채 인수수수료율', 눈에띄는변화: false }],
+  ['모델 입력에서 뺀 숫자는 요약에 못 씀', validate('- 큰 변화 없음: 회사채 인수수수료율 18bp', compactForModel(facts)).ok, false],
   ['규칙 문장: 점수 순', ruleSummary(facts).split('\n')[0], '- 회사채 발행금액: 26.07~26.09 12.3조원, 25.07~25.09 10.4조원 대비 +18.1%'],
 ];
 

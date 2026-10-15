@@ -1,1 +1,1 @@
-{"command":"sequence","maxCalls":"2500","steps":[{"command":"documents","maxDocs":2000},{"command":"refresh"},{"command":"insights"}]}
+{"command":"sequence","maxCalls":"2500","steps":[{"command":"refresh"},{"command":"insights"},{"command":"documents","maxDocs":2000},{"command":"refresh"},{"command":"insights"}]}

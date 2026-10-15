@@ -91,16 +91,25 @@ export function ruleSummary(facts) {
   return [...notable.map(line), ...topLine].join('\n');
 }
 
+// 프롬프트를 바꾸면 올린다 → 사실이 같아도 요약을 다시 만든다
+const PROMPT_VERSION = 2;
+
 const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을 정리해 주는 애널리스트다.
 규칙:
 - 주어진 JSON 사실만 쓴다. 숫자는 JSON의 문자열을 그대로 옮기고 새 숫자를 만들거나 계산하지 않는다.
 - 예측, 전망, 권고, 추측("~할 것", "~로 보인다", "~해야")은 쓰지 않는다.
-- 3~5개의 불릿("- "로 시작), 각 불릿은 한 문장. 변화가 큰 것부터.
+- 3~5개의 불릿("- "로 시작), 각 불릿은 한 문장이고 지표는 두 개까지. 변화가 큰 것부터.
+- 숫자와 이름에 따옴표를 붙이지 않는다.
 - 각 불릿에 비교 기준(예: 전년 동기, 직전 12개월, 1개월 전)을 밝힌다.
-- 눈에띄는변화가 false 인 항목은 "큰 변화 없음"으로 묶어 한 줄 이내로만 언급한다.
+- 눈에띄는변화가 false 인 항목은 숫자 없이 지표 이름만 주어진다. 마지막 불릿 하나에 "큰 변화 없음: 지표, 지표"로만 쓴다.
 - key 가 top_deal 로 시작하는 항목은 최근 3개월 상위 딜이다. 금액 변화가 한두 건에 좌우됐으면 그 딜 이름과 비중을 밝힌다.
   금액이 크게 늘거나 줄었다는 문장은 '최대 1건 제외' 지표가 있으면 함께 적는다.
 - 존댓말 없이 간결한 보고서 문체("~했다", "~이다")로 쓴다.`;
+
+// 눈에 띄지 않는 지표는 이름만 넘겨 요약이 숫자 나열이 되지 않게 한다.
+export function compactForModel(facts) {
+  return facts.map((f) => (f.눈에띄는변화 ? f : { scope: f.scope, key: f.key, 지표: f.지표, 눈에띄는변화: false }));
+}
 
 function numbersIn(text) {
   return (text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((s) => s.replace(/,/g, ''));
@@ -152,7 +161,7 @@ export async function buildSummaries({ db, key = process.env.OPENAI_API_KEY, mod
   const out = {};
   for (const [scope, facts] of Object.entries(byScope)) {
     if (!facts.length) continue;
-    const hash = createHash('sha256').update(JSON.stringify({ facts, model: key ? model : 'rule' })).digest('hex');
+    const hash = createHash('sha256').update(JSON.stringify({ facts, model: key ? model : 'rule', prompt: PROMPT_VERSION })).digest('hex');
     if (hashes[scope] === hash) {
       out[scope] = 'same';
       continue;
@@ -161,8 +170,9 @@ export async function buildSummaries({ db, key = process.env.OPENAI_API_KEY, mod
     let used = 'rule';
     if (key) {
       try {
-        const text = await openai({ key, model, scope, facts });
-        const v = validate(text, facts);
+        const input = compactForModel(facts);
+        const text = await openai({ key, model, scope, facts: input });
+        const v = validate(text, input);
         if (v.ok) {
           summary = text;
           used = model;
