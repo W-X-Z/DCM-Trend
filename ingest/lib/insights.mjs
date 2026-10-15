@@ -92,7 +92,7 @@ export function ruleSummary(facts) {
 }
 
 // 프롬프트를 바꾸면 올린다 → 사실이 같아도 요약을 다시 만든다
-const PROMPT_VERSION = 2;
+const PROMPT_VERSION = 3;
 
 const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을 정리해 주는 애널리스트다.
 규칙:
