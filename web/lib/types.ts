@@ -201,3 +201,27 @@ export type ShortDebt = {
   cp_1y_krw: number | null; cp_3m_krw: number | null; stb_krw: number | null; total_1y_krw: number | null;
   is_financial: boolean;
 };
+
+export type FeedItem = {
+  asof: string; model: string | null; created_at: string; rank: number;
+  tag: '발행' | '공시'; kind: string; kind_label: string | null;
+  corp_code: string; corp_name: string; headline: string; body: string; point: string;
+  event_dt: string | null; rcept_no: string | null; ref_key: string | null; label: string | null;
+  flags: string[] | null; tone: 'alert' | null; written_by: string | null;
+};
+
+export type BondTranche = {
+  deal_key: string; series: string | null; tenor_months: number | null; tenor_label: string | null; tenor_bucket: string;
+  amount_krw: number | null; initial_amount_krw: number | null; demand_krw: number | null; competition_ratio: number | null;
+  final_spread_bp: number | null; coupon_pct: number | null; band_low: number | null; band_high: number | null;
+  is_increased: boolean | null; is_undersubscribed: boolean | null; lead_managers: string | null; nh_lead: boolean | null;
+};
+
+export type BondIssue = {
+  issue_key: string; corp_code: string; corp_name: string; market: string | null; sub_type: string | null; base_series: string;
+  pricing_dt: string | null; deal_dt: string | null; rating: string | null; rating_group: string | null; rating_notch: number | null;
+  tranche_count: number; amount_krw: number | null; initial_amount_krw: number | null; demand_krw: number | null;
+  competition_ratio: number | null; is_increased: boolean | null; increase_pct: number | null; is_undersubscribed: boolean | null;
+  tenor_combo: string; tenor_min: number | null; tenor_max: number | null; spread_min_bp: number | null; spread_max_bp: number | null;
+  tranches: BondTranche[]; lead_managers: string | null; nh_lead: boolean | null; nh_involved: boolean | null; latest_rcept_no: string | null;
+};

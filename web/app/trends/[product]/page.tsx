@@ -1,15 +1,15 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { Header } from '@/components/Chrome';
 import { BarChart, InlineBar } from '@/components/BarChart';
 import { DealTable } from '@/components/DealTable';
 import { byKey, byMonth, monthList, share, sum, weightedAvg, type Slice } from '@/lib/agg';
 import { month, num, pct, won } from '@/lib/format';
 import { DATE_BASIS } from '@/lib/labels';
-import { getFees, getLeague, getMetrics, getRecentDeals, getTrend, getUiParam } from '@/lib/queries';
+import { getBondIssues, getFees, getLeague, getMetrics, getRecentDeals, getTrend, getUiParam } from '@/lib/queries';
 import { PRODUCTS, type BondTrendRow, type EquityTrendRow, type FeeRow, type IpoTrendRow, type MezzTrendRow, type ProductType } from '@/lib/types';
 import { ChangeTiles } from '@/components/Insights';
+import { BondIssueTable, TrancheSection } from '@/components/Tranche';
 import { Info, PageHead, ProductTabs, SectionHead } from '@/components/Ui';
 
 export const dynamic = 'force-dynamic';
@@ -127,7 +127,11 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
   const subTypes = product === 'bond' && cat !== 'all' ? [cat] : null;
   const rows = subTypes ? rowsAll.filter((r) => subTypes.includes(r.category ?? '')) : rowsAll;
 
-  const recent = await getRecentDeals(product, { subTypes: subTypes ?? undefined, limit: 30 }).catch(() => []);
+  const [recent, issues] = await Promise.all([
+    product === 'bond' ? Promise.resolve([]) : getRecentDeals(product, { subTypes: subTypes ?? undefined, limit: 30 }).catch(() => []),
+    product === 'bond' ? getBondIssues(since, subTypes).catch(() => []) : Promise.resolve([]),
+  ]);
+  const periodLabel = `${month(since)}~${month(months.at(-1)!)}`;
 
   const series = byMonth(rows, months);
   const amount = sum(rows, (r) => r.amount_krw);
@@ -140,7 +144,6 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
 
   return (
     <>
-      <Header active={product} />
       <main id="main" className="wrap">
         <PageHead title="발행 동향" info={`${SUBS[product]} ${DATE_BASIS[product]}으로 월을 나눕니다.`}>
           <ProductTabs active={product} query={m === 24 ? '?m=24' : ''} />
@@ -164,6 +167,12 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
           </div>
         </PageHead>
 
+        <section className="section period-head" aria-labelledby="period-h">
+          <SectionHead
+            id="period-h"
+            title={`최근 ${m}개월`}
+            right={<span className="muted small tnum">{periodLabel}</span>}
+          />
         <dl className="stats">
           <Stat label="발행금액">{won(amount)}</Stat>
           <Stat label="건수">{num(count)}<small>건</small></Stat>
@@ -205,11 +214,7 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
             </>
           )}
         </dl>
-        <ChangeTiles scope={product} title="최근 3개월 변화" color={color} />
-
-        <section className="section" aria-labelledby="monthly-h">
-          <SectionHead id="monthly-h" title="월별 추이" />
-          <div className="chart-pair">
+          <div className="chart-pair monthly">
             <div className="chart-card">
               <h3>발행금액</h3>
               <BarChart
@@ -234,6 +239,15 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
             </div>
           </div>
         </section>
+
+        {product === 'bond' && <TrancheSection issues={issues} period={periodLabel} />}
+
+        <ChangeTiles
+          scope={product}
+          title="최근 3개월 변화"
+          color={color}
+          info="위 기간 선택과 별개로 늘 최근 3개월(이번 달 제외)을 전년 같은 기간 또는 직전 12개월 평균과 비교합니다. 회색 막대가 비교 기간, 색 막대가 최근 3개월입니다. 기준 이상 바뀐 지표를 먼저 보여 줍니다."
+        />
 
         <section className="section" aria-labelledby="mix-h">
           <SectionHead id="mix-h" title={`구성 (최근 ${m}개월)`} />
@@ -338,8 +352,16 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
         )}
 
         <section className="section" aria-labelledby="recent-h">
-          <SectionHead id="recent-h" title="최근 딜" info={`${DATE_BASIS[product]} 최근 30건. 왼쪽 선은 NH투자증권 대표주관.`} />
-          {recent.length ? (
+          <SectionHead
+            id="recent-h"
+            title={product === 'bond' ? '최근 발행' : '최근 딜'}
+            info={product === 'bond'
+              ? '납입일 기준 최근 30건. 트랜치를 한 발행으로 묶었습니다. 금리는 민평 방식이면 확정 가산금리, 고정금리 방식이면 확정 금리입니다. 왼쪽 선은 NH투자증권 대표주관.'
+              : `${DATE_BASIS[product]} 최근 30건. 왼쪽 선은 NH투자증권 대표주관.`}
+          />
+          {product === 'bond' ? (
+            issues.length ? <BondIssueTable issues={issues.slice(0, 30)} caption="최근 회사채 발행" /> : <p className="empty">아직 집계된 발행이 없습니다.</p>
+          ) : recent.length ? (
             <DealTable deals={recent} layout={product} caption={`최근 ${meta!.label} 딜`} />
           ) : (
             <p className="empty">아직 집계된 딜이 없습니다.</p>

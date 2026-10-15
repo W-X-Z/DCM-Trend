@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { Header } from '@/components/Chrome';
 import { DealTable } from '@/components/DealTable';
 import { Disclosures } from '@/components/Disclosures';
 import { Tombstone } from '@/components/Tombstone';
@@ -91,7 +90,6 @@ export default async function CompanyPage({ params }: { params: { corp: string }
 
   return (
     <>
-      <Header />
       <main id="main" className="wrap">
         <div className="page-head">
           <h1 className="page-title">{company.corp_name}</h1>

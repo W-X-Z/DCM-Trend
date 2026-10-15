@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { Header } from '@/components/Chrome';
 import { ChangeTiles } from '@/components/Insights';
 import { PageHead, SectionHead } from '@/components/Ui';
 import { LineChart, type LineSeries } from '@/components/LineChart';
@@ -53,7 +52,6 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
 
   return (
     <>
-      <Header active="rates" />
       <main id="main" className="wrap">
         <PageHead
           title="금리 추이"

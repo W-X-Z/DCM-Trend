@@ -68,28 +68,32 @@ for (let back = 24; back >= 0; back--) {
   const mo = today.getUTCMonth() - back;
   const day = (d) => new Date(Date.UTC(y, mo, d)).toISOString().slice(0, 10);
   const maxDay = back === 0 ? Math.min(today.getUTCDate() + 6, 28) : 28;
-  // 회사채
-  for (let i = 0, k = between(28, 52); i < k; i++) {
+  // 회사채: 한 발행에 트랜치 1~3개 (같은 본 회차·같은 납입일)
+  for (let i = 0, k = between(14, 26); i < k; i++) {
     const c = pick(corps);
-    const key = `bond:${c.code}:${++n}`;
-    const amt = between(3, 30) * 1e10;
-    const inc = rnd() < 0.25;
-    const tenor = pick([24, 36, 36, 60, 12]);
-    const cat = c.name.endsWith('캐피탈') ? '금융채' : rnd() < 0.06 ? '신종자본증권' : '일반회사채';
+    const combo = pick([[24, 36], [24, 36], [24, 36], [36], [36, 60], [24, 36, 60], [12, 24], [36, 60, 120], [18, 24]]);
+    const base = between(10, 120);
     const pay = day(between(2, maxDay));
-    sql.push(`insert into core.deals (deal_key, product_type, sub_type, corp_code, series, is_public, status, announce_dt, pricing_dt, payment_dt, amount_krw, initial_amount_krw, latest_rcept_no)
-      values (${q(key)}, 'bond', ${q(cat)}, ${q(c.code)}, ${q(`${between(10, 120)}-${between(1, 2)}`)}, true, 'completed', ${q(pay)}::date - 14, ${q(pay)}::date - 7, ${q(pay)}, ${amt}, ${inc ? amt * 0.6 : amt}, null);`);
+    const cat = c.name.endsWith('캐피탈') ? '금융채' : rnd() < 0.06 ? '신종자본증권' : '일반회사채';
     const rating = pick(['AA+', 'AA0', 'AA0', 'AA-', 'A+', 'A0', 'A-', 'BBB+', 'BBB0']);
     const fixedBand = rating.startsWith('BBB');
-    const ratio = Math.round((rnd() < 0.08 ? rnd() * 0.9 : 1 + rnd() * 9) * 100) / 100;
-    sql.push(`insert into core.bond_terms (deal_key, tenor_months, maturity_dt, rating_raw, rating, band_type, band_low, band_high, competition_ratio, final_spread_bp, coupon_pct, demand_krw)
-      values (${q(key)}, ${tenor}, (${q(pay)}::date + make_interval(months => ${tenor}))::date, ${q(rating)}, ${q(rating)},
-              ${q(fixedBand ? '고정금리' : '개별민평')}, ${fixedBand ? 5.5 : -30}, ${fixedBand ? 6.8 : 30}, ${ratio},
-              ${fixedBand ? 'null' : between(-25, 20)}, ${fixedBand ? (between(560, 680) / 100) : 'null'}, ${Math.round(amt * ratio)});`);
     const lead = pick(firms);
-    sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(lead)}, ${q(lead)}, '대표주관', '총액인수', ${amt * 0.6}, ${Math.round(amt * 0.6 * between(10, 32) / 1e4)});`);
-    const co = pick(firms.filter((f) => f !== lead));
-    sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(co)}, ${q(co)}, '인수', '총액인수', ${amt * 0.4}, ${Math.round(amt * 0.4 * between(10, 30) / 1e4)});`);
+    combo.forEach((tenor, t) => {
+      const key = `bond:${c.code}:${++n}`;
+      const amt = between(3, 15) * 1e10;
+      const inc = rnd() < 0.6;
+      const ratio = Math.round((rnd() < 0.08 ? rnd() * 0.9 : 1 + rnd() * 9) * 100) / 100;
+      const init = inc ? Math.round(amt * 0.6 / 1e9) * 1e9 : amt;
+      sql.push(`insert into core.deals (deal_key, product_type, sub_type, corp_code, series, is_public, status, announce_dt, pricing_dt, payment_dt, amount_krw, initial_amount_krw, latest_rcept_no)
+        values (${q(key)}, 'bond', ${q(cat)}, ${q(c.code)}, ${q(combo.length > 1 ? `${base}-${t + 1}` : String(base))}, true, 'completed', ${q(pay)}::date - 14, ${q(pay)}::date - 7, ${q(pay)}, ${amt}, ${init}, null);`);
+      sql.push(`insert into core.bond_terms (deal_key, tenor_months, maturity_dt, rating_raw, rating, band_type, band_low, band_high, competition_ratio, final_spread_bp, coupon_pct, demand_krw)
+        values (${q(key)}, ${tenor}, (${q(pay)}::date + make_interval(months => ${tenor}))::date, ${q(rating)}, ${q(rating)},
+                ${q(fixedBand ? '고정금리' : '개별민평')}, ${fixedBand ? 5.5 : -30}, ${fixedBand ? 6.8 : 30}, ${ratio},
+                ${fixedBand ? 'null' : between(-25, 35)}, ${fixedBand ? (between(560, 680) / 100) : 'null'}, ${Math.round(init * ratio)});`);
+      sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(lead)}, ${q(lead)}, '대표주관', '총액인수', ${amt * 0.6}, ${Math.round(amt * 0.6 * between(10, 32) / 1e4)});`);
+      const co = pick(firms.filter((f) => f !== lead));
+      sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(co)}, ${q(co)}, '인수', '총액인수', ${amt * 0.4}, ${Math.round(amt * 0.4 * between(10, 30) / 1e4)});`);
+    });
   }
   // 메자닌
   for (let i = 0, k = between(30, 70); i < k; i++) {
@@ -174,9 +178,34 @@ console.log(`mock: 가상 딜 ${n}건 적재`);
   for (let i = 0; i < rows.length; i += 5000) await db.exec(`insert into raw.rates (series_key, dt, value) values ${rows.slice(i, i + 5000).join(',')};`);
 }
 
-// 눈여겨볼 회사 (수집기와 같은 코드, AI 키 없이 규칙으로 고름)
+// 가상 주요사항보고서 (최근 2주) + 상세 API 값
+{
+  const d = (back) => new Date(today.getTime() + 9 * 3600_000 - back * 86400_000).toISOString().slice(0, 10);
+  const ymdk = (s) => s.replaceAll('-', '');
+  const kdate = (s) => `${s.slice(0, 4)}년 ${s.slice(5, 7)}월 ${s.slice(8, 10)}일`;
+  const ev = [
+    { c: corps[3], back: 1, nm: '주요사항보고서(유형자산양수결정)', ep: 'tgastInhDecsn', item: { ast_sen: '토지 및 건물', ast_nm: '경기 화성시 동탄 첨단산업단지 내 공장 부지', inhdtl_inhprc: '184,000,000,000', inhdtl_tast_vs: '38.2', inh_pp: '2차전지 소재 생산능력 확대', dlptn_cmpnm: '동탄도시개발(주)', inh_prd_inh_std: kdate(d(-90)) } },
+    { c: corps[8], back: 2, nm: '주요사항보고서(타법인주식및출자증권양수결정)', ep: 'otcprStkInvscrInhDecsn', item: { iscmp_cmpnm: '그린모터스(주)', iscmp_mbsn: '전기차 구동모터 제조', inhdtl_inhprc: '326,000,000,000', inhdtl_ecpt_vs: '41.7', atinh_eqrt: '100', inh_pp: '전동화 부품 수직계열화', inh_prd: kdate(d(-60)) } },
+    { c: corps[15], back: 4, nm: '주요사항보고서(회사합병결정)', ep: 'cmpMgDecsn', item: { mg_stn: '소규모합병', mgptncmp_cmpnm: '솔빛로지스(주)', mgptncmp_rl_cmpn: '자회사', mg_pp: '경영 효율성 제고', rbsnfdtl_tast: '21,000,000,000', mgsc_mgdt: kdate(d(-70)) } },
+    { c: corps[21], back: 3, nm: '주요사항보고서(영업정지)', ep: 'bsnSp', item: { bsnsp_rm: '국내 진단검사 서비스', bsnsp_amt: '6,100,000,000', sl_vs: '62.4', bsnsp_rs: '신의료기술평가 결과 통보', bsnspd: kdate(d(3)) } },
+    { c: corps[27], back: 6, nm: '주요사항보고서(유형자산양도결정)', ep: 'tgastTrfDecsn', item: { ast_sen: '토지 및 건물', ast_nm: '서울 중구 본사 사옥', trfdtl_trfprc: '212,000,000,000', trfdtl_tast_vs: '24.6', trf_pp: '재무구조 개선', dlptn_cmpnm: '한강리얼티(주)', trf_prd_trf_std: kdate(d(-120)) } },
+    { c: corps[33], back: 8, nm: '주요사항보고서(회사분할결정)', ep: 'cmpDvDecsn', item: { dv_mth: '물적분할', dvfcmp_cmpnm: '누리배터리(주)', dvfcmp_mbsn: '배터리 소재', dv_impef: '전문성 제고 및 투자 유치 기반 마련', dvdt: kdate(d(-80)) } },
+  ];
+  const filings = ev.map((e, i) => ({ rm: '', flr_nm: e.c.name, corp_cls: 'Y', rcept_dt: ymdk(d(e.back)), rcept_no: `${ymdk(d(e.back))}9${String(i).padStart(5, '0')}`, corp_code: e.c.code, corp_name: e.c.name, report_nm: e.nm, stock_code: '' }));
+  await db.exec('set role service_role');
+  const rid = (await db.query(`select public.ingest_start_run('mock-disc') as id`)).rows[0].id;
+  await db.query(`select public.ingest_put_filings($1, $2::jsonb)`, [rid, JSON.stringify(filings)]);
+  for (const [i, e] of ev.entries()) {
+    await db.query(`select public.ingest_put_api_items($1, $2, $3, '000', $4::jsonb, $5::text[])`,
+      [rid, e.ep, e.c.code, JSON.stringify([{ group_title: null, item: { ...e.item, rcept_no: filings[i].rcept_no, corp_code: e.c.code } }]), `{${filings[i].rcept_no}}`]);
+  }
+  await db.exec('reset role');
+}
+
+// 눈여겨볼 회사·홈 피드 (수집기와 같은 코드, AI 키 없이 규칙으로 고름)
 {
   const { buildIssues } = await import('../ingest/lib/issues.mjs');
+  const { buildFeed } = await import('../ingest/lib/feed.mjs');
   const rpcDb = {
     rpc: async (fn, args = {}) => {
       const names = Object.keys(args);
@@ -186,6 +215,7 @@ console.log(`mock: 가상 딜 ${n}건 적재`);
   };
   await db.exec('set role service_role');
   await buildIssues({ db: rpcDb, key: '', log: (m) => console.log(`mock: ${m}`) });
+  await buildFeed({ db: rpcDb, key: '', log: (m) => console.log(`mock: ${m}`) });
   await db.exec('reset role');
 }
 

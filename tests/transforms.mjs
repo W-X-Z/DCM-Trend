@@ -179,7 +179,7 @@ await check('유상증자 정정본만 있는 딜: 결정일 = 원 결정 공시
      from mart.v_deals v where v.deal_key = 'equity:01764099:20260910000002'`,
   '2026-08-01|20260801000001:decision,20260910000002:amendment');
 
-// 눈여겨볼 회사 후보: 규칙별 후보가 만들어지고, 화면 뷰는 저장된 최신 묶음을 순서대로 펼친다
+// 홈 피드 후보: 최근 2주 주요사항보고서(정정 제외)에 상세 API 값을 한글 이름으로 붙인다. 오래된 공시는 뺀다.
 {
   await db.exec('set role service_role');
   const runSig = (await db.query(`select public.ingest_start_run('test-signal') as id`)).rows[0].id;
@@ -188,22 +188,38 @@ await check('유상증자 정정본만 있는 딜: 결정일 = 원 결정 공시
     { rm: '', flr_nm: 'GS', corp_cls: 'Y', rcept_dt: '20261011', rcept_no: '20261011000102', corp_code: '00500254', corp_name: 'GS', report_nm: '[기재정정]주요사항보고서(타법인주식및출자증권양수결정)', stock_code: '078930' },
     { rm: '', flr_nm: '테스트', corp_cls: 'K', rcept_dt: '20260801', rcept_no: '20260801000103', corp_code: '01764099', corp_name: '테스트', report_nm: '주요사항보고서(회생절차개시신청)', stock_code: '' },
   ])]);
+  await db.query(`select public.ingest_put_api_items($1, 'otcprStkInvscrInhDecsn', '00500254', '000', $2::jsonb, $3::text[])`, [runSig, JSON.stringify([
+    { group_title: null, item: { rcept_no: '20261010000101', corp_code: '00500254', corp_name: 'GS', iscmp_cmpnm: '테스트대상㈜', inhdtl_inhprc: '330,000,000,000', inhdtl_ecpt_vs: '12.50', inh_prd: '2026년 11월 30일', dlptn_cmpnm: '-' } },
+  ]), '{20261010000101}']);
   await db.exec('reset role');
-  const cands = (await db.query(`select public.ingest_signal_candidates('2026-10-15') as c`)).rows[0].c;
+  const all = (await db.query(`select public.ingest_feed_candidates('2026-10-15', 14) as c`)).rows[0].c;
+  const disc = all.filter((c) => c.tag === '공시');
   results.push({
-    name: '후보: 투자 결정 공시(정정 제외)는 접점, 30일 지난 회생 공시는 제외',
-    ok: JSON.stringify(cands.map((c) => `${c.signal_key}:${c.kind}:${c.corp_code}:${c.rcept_no}`)) === JSON.stringify(['invest:touchpoint:00500254:20261010000101']),
-    actual: cands.map((c) => `${c.signal_key}:${c.kind}:${c.corp_code}:${c.rcept_no}`), expected: ['invest:touchpoint:00500254:20261010000101'],
+    name: '피드 후보: 지분 인수 공시(정정 제외)만, 14일 지난 회생 공시는 제외',
+    ok: JSON.stringify(disc.map((c) => `${c.kind}:${c.corp_code}:${c.rcept_no}`)) === JSON.stringify(['d_stake_buy:00500254:20261010000101']),
+    actual: disc.map((c) => `${c.kind}:${c.corp_code}:${c.rcept_no}`), expected: ['d_stake_buy:00500254:20261010000101'],
   });
-  results.push({ name: '후보: 회사 맥락(공모채 이력) 포함', ok: cands[0]?.context?.['공모채 발행 이력(건)'] === 2, actual: cands[0]?.context, expected: { '공모채 발행 이력(건)': 2 } });
+  const f = disc[0]?.facts ?? {};
+  const want = { 양수금액: '3,300억원', '자기자본 대비': '12.5%', 양수예정일: '2026.11.30', '대상 회사': '테스트대상㈜' };
+  results.push({
+    name: '피드 후보: 상세 값 한글 이름·서식 ("-" 값은 뺌)',
+    ok: Object.entries(want).every(([k, v]) => f[k] === v) && !('거래상대방' in f),
+    actual: f, expected: want,
+  });
+  results.push({ name: '피드 후보: 회사 맥락(공모채 이력) 포함', ok: disc[0]?.context?.['공모채 발행 이력(건)'] === 2, actual: disc[0]?.context, expected: { '공모채 발행 이력(건)': 2 } });
   await db.exec('set role service_role');
-  await db.query(`select public.ingest_put_issue_set('2026-10-15', $1::jsonb, 'rule', 'h1')`, [JSON.stringify([
-    { kind: 'touchpoint', corp_code: '00500254', corp_name: 'GS', title: 't1', why: 'w1', angle: 'a1', signal_key: 'invest', signal_label: 'l', event_dt: '2026-10-10', rcept_no: '20261010000101' },
-    { kind: 'issue', corp_code: 'X', corp_name: 'Y', title: 't2', why: 'w2', angle: 'a2', signal_key: 'distress', signal_label: 'l', event_dt: '2026-10-01', rcept_no: null },
+  await db.query(`select public.ingest_put_feed_set('2026-10-15', $1::jsonb, 'rule', 'h1')`, [JSON.stringify([
+    { tag: '공시', kind: 'd_stake_buy', kind_label: '지분 인수', corp_code: '00500254', corp_name: 'GS', headline: 'h1', body: 'b1', point: 'p1', event_dt: '2026-10-10', rcept_no: '20261010000101', flags: ['d_stake_buy'] },
+    { tag: '발행', kind: 'bond', kind_label: '회사채', corp_code: 'X', corp_name: 'Y', headline: 'h2', body: 'b2', point: 'p2', event_dt: '2026-10-01', rcept_no: null, tone: 'alert', flags: [] },
   ])]);
   await db.exec('reset role');
-  await check('화면 뷰: 최신 묶음 순서', `select string_agg(rank || ':' || title, ',' order by rank) from mart.v_insight_issues`, '1:t1,2:t2');
+  await check('피드 화면 뷰: 최신 묶음 순서·색', `select string_agg(rank || ':' || headline || ':' || coalesce(tone, '-'), ',' order by rank) from mart.v_feed`, '1:h1:-,2:h2:alert');
 }
+
+// 회사채 발행(트랜치 묶음) 뷰: 금액 합이 트랜치 합과 같다
+await check('회사채 발행 묶음: 금액 합 = 트랜치 합',
+  `select (select sum(amount_krw) from mart.v_bond_issues) = (select sum(amount_krw) from mart.v_deals where product_type = 'bond' and status <> 'withdrawn')`,
+  true);
 
 // 금리 조사 값: ECOS 값이 오면 덮어쓰고, 조사 값은 ECOS 값을 덮어쓰지 않는다
 await db.exec('set role service_role');
@@ -219,6 +235,15 @@ await check('금리: 조사 값·ECOS 우선순위',
   `select string_agg(dt || ':' || value || ':' || source, ',' order by dt) from raw.rates where series_key = 'ktb3y'`,
   '2026-10-12:3.921:research,2026-10-13:3.940:ecos');
 await check('금리 최신값에 출처', `select source || '|' || coalesce(source_url, '-') from mart.v_rate_latest where series_key = 'ktb3y'`, 'ecos|-');
+await db.exec('set role service_role');
+const blocked = (await db.query(`select public.ingest_put_rates_research($1::jsonb) as n`, [JSON.stringify([
+  { series_key: 'ktb10y', dt: '2026-10-12', value: 4.1, source_url: 'https://www.xn--vj4b13a.com/interest/treasury-10y/' },
+  { series_key: 'ktb10y', dt: '2026-10-12', value: 4.1 },
+])])).rows[0].n;
+await db.exec('reset role');
+results.push({ name: '금리 조사: 차단 출처·출처 없는 값은 받지 않음', ok: blocked === 0, actual: blocked, expected: 0 });
+await db.exec(`insert into raw.rates (series_key, dt, value, source, source_url) values ('ktb10y', '2026-10-13', 4.2, 'research', 'https://www.xn--vj4b13a.com/x')`);
+await check('금리 화면: 차단 출처 값은 숨김', `select count(*) from mart.v_rates_daily where series_key = 'ktb10y' and dt = '2026-10-13'`, 0);
 
 let failed = 0;
 for (const r of results) {

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Header, SearchForm } from '@/components/Chrome';
+import { SearchForm } from '@/components/Chrome';
 import { date } from '@/lib/format';
 import { searchCompanies } from '@/lib/queries';
 import type { CompanyHit } from '@/lib/types';
@@ -19,7 +19,6 @@ export default async function SearchPage({ searchParams }: { searchParams: { q?:
 
   return (
     <>
-      <Header />
       <main id="main" className="wrap">
         <div className="page-head">
           <h1 className="page-title">발행사 찾기</h1>

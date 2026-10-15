@@ -21,3 +21,4 @@ jobs:
       - run: npm run test:insights
       - run: npm run test:docparse
       - run: npm run test:issues
+      - run: npm run test:feed
