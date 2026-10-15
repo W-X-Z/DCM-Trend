@@ -120,17 +120,19 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
               </div>
             </section>
 
-            <section className="section" aria-labelledby="spread-h">
-              <SectionHead id="spread-h" title="스프레드" info="단위 bp. 등급 간 차이는 크기가 달라 따로 그립니다." />
-              <div className="chart-pair">
-                <div className="chart-card">
-                  <LineChart title="AA- 스프레드와 장단기 금리차" unit="bp" series={spread} height={220} />
+            {(spread.length > 0 || gap.length > 0) && (
+              <section className="section" aria-labelledby="spread-h">
+                <SectionHead id="spread-h" title="스프레드" info="단위 bp. 등급 간 차이는 크기가 달라 따로 그립니다." />
+                <div className="chart-pair">
+                  <div className="chart-card">
+                    <LineChart title="AA- 스프레드와 장단기 금리차" unit="bp" series={spread} height={220} />
+                  </div>
+                  <div className="chart-card">
+                    <LineChart title="BBB- 와 AA- 금리 차이" unit="bp" series={gap} height={220} />
+                  </div>
                 </div>
-                <div className="chart-card">
-                  <LineChart title="BBB- 와 AA- 금리 차이" unit="bp" series={gap} height={220} />
-                </div>
-              </div>
-            </section>
+              </section>
+            )}
           </>
         )}
 
