@@ -1,0 +1,26 @@
+# 개발 브랜치 검증용 수집. ingest/dev.config.json 의 명령을 실행한다.
+name: ingest-dev
+on:
+  push:
+    branches: ['feat/ingest']
+    paths: ['ingest/**', '.github/workflows/ingest-dev.yml']
+  workflow_dispatch:
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --omit=dev
+      - run: node ingest/run.mjs --config ingest/dev.config.json
+        env:
+          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

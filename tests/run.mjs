@@ -114,7 +114,51 @@ await check('회사 개요: 이랜드월드 회사채 5건·최근 등급 BBB0',
   `select row(bond_deal_count, latest_bond_rating)::text from mart.v_company_overview where corp_code = 'FX_ELAND'`,
   '(5,BBB0)', one);
 
-// 6. 권한 (화면 = anon 은 mart 만) --------------------------------------
+// 6. 수집 경로 (service_role 이 public.ingest_* 로 적재) -----------------
+await db.exec('set role service_role');
+await check('수집: 실행 시작', `select public.ingest_start_run('test', '{"days":31}') > 0 as ok`, true, one);
+await check('수집: 공시 목록 적재',
+  `select public.ingest_put_filings(1, '[
+     {"corp_code":"T0000001","corp_name":"이랜드월드","stock_code":" ","corp_cls":"E","report_nm":"증권신고서(채무증권)",
+      "rcept_no":"T20260413000001","flr_nm":"이랜드월드","rcept_dt":"20260413","rm":"",
+      "_pblntf_ty":"C","_pblntf_detail_ty":"C002"},
+     {"corp_code":"T0000001","corp_name":"이랜드월드","stock_code":" ","corp_cls":"E","report_nm":"[발행조건확정]증권신고서(채무증권)",
+      "rcept_no":"T20260417000001","flr_nm":"이랜드월드","rcept_dt":"20260417","rm":"정",
+      "_pblntf_ty":"C","_pblntf_detail_ty":"C002"},
+     {"corp_code":"T0000002","corp_name":"레이크머티리얼즈","stock_code":"281740","corp_cls":"K","report_nm":"주요사항보고서(전환사채권발행결정)",
+      "rcept_no":"T20260513000001","flr_nm":"레이크머티리얼즈","rcept_dt":"20260513","rm":"",
+      "_pblntf_ty":"B","_pblntf_detail_ty":"B001"},
+     {"corp_code":"T0000003","corp_name":"무관회사","stock_code":"","corp_cls":"E","report_nm":"주요사항보고서(자기주식취득결정)",
+      "rcept_no":"T20260513000002","flr_nm":"무관회사","rcept_dt":"20260513","rm":"",
+      "_pblntf_ty":"B","_pblntf_detail_ty":"B001"}
+   ]'::jsonb)`, 4, one);
+await check('수집: 상세 API 대기 = 회사·API별로 묶음 (무관 공시 제외)',
+  `select endpoint || ':' || corp_code || ':' || bgn_de || '~' || end_de || ':' || array_length(rcept_nos, 1)
+     from public.ingest_pending_details() order by endpoint`,
+  ['bdRs:T0000001:2026-04-13~2026-04-17:2', 'cvbdIsDecsn:T0000002:2026-05-13~2026-05-13:1'], col);
+await check('수집: 상세 응답 적재 (그룹형)',
+  `select public.ingest_put_api_items(1, 'bdRs', 'T0000001', '000',
+     '[{"group_title":"일반사항","item":{"rcept_no":"T20260417000001","tm":"108","fta":"50,000,000,000"}},
+       {"group_title":"인수인정보","item":{"rcept_no":"T20260417000001","actnmn":"엔에이치투자증권","udtamt":"30,000,000,000"}}]'::jsonb,
+     array['T20260413000001','T20260417000001'])`, 2, one);
+await check('수집: 같은 응답 재적재 시 중복 없음',
+  `select public.ingest_put_api_items(1, 'bdRs', 'T0000001', '000',
+     '[{"group_title":"일반사항","item":{"rcept_no":"T20260417000001","tm":"108","fta":"50,000,000,000"}}]'::jsonb,
+     array['T20260417000001'])`, 0, one);
+await check('수집: 호출 완료 공시는 대기에서 빠짐',
+  `select string_agg(endpoint, ',') from public.ingest_pending_details()`, 'cvbdIsDecsn', one);
+await db.query(`select public.ingest_put_api_items(1, 'cvbdIsDecsn', 'T0000002', '013', '[]'::jsonb, array['T20260513000001'])`);
+await check('수집: 데이터 없음(013)도 재호출 안 함',
+  `select count(*)::int from public.ingest_pending_details()`, 0, one);
+await db.exec('reset role');
+await db.exec('set role anon');
+await check('수집 함수는 anon 호출 불가', `select public.ingest_stats()`, 'permission denied', () => 'allowed');
+results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');
+if (results[results.length - 1].ok) failed--;
+await db.exec('reset role');
+await db.exec(`delete from raw.detail_fetches; delete from raw.api_items; delete from raw.filings; delete from ops.ingest_runs;`);
+
+// 7. 권한 (화면 = anon 은 mart 만) --------------------------------------
 await db.exec('set role anon');
 await check('anon: mart 뷰 조회 가능', `select count(*)::int from mart.v_deals`, 17, one);
 await check('anon: mart 함수 실행 가능',
