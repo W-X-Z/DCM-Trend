@@ -44,7 +44,7 @@ async function check(name, sql, expected) {
   results.push({ ok: JSON.stringify(actual) === JSON.stringify(expected), name, actual, expected });
 }
 
-await check('변환 건수', `select '${JSON.stringify(refreshed).replace(/'/g, "''")}'::jsonb - 'companies' - 'docs'`,
+await check('변환 건수', `select '${JSON.stringify(refreshed).replace(/'/g, "''")}'::jsonb - 'companies' - 'docs' - 'fixes'`,
   { ipo: 1, bond: 2, mezz: 3, equity: 1 });
 await check('회사 보강: corpCode 없이 공시만으로 회사 생성·시장 구분',
   `select market from core.companies where corp_code = '01764099'`, '코스닥');
@@ -96,7 +96,7 @@ await check('메자닌 월간 트렌드 (2026-09, 코스닥 사모)',
   `select kind || ':' || deal_count || ':' || zero_coupon_count from mart.v_mezz_trend_monthly where month = '2026-09-01' order by kind`,
   ['BW:1:1', 'CB:1:1']);
 await check('변환 재실행해도 결과 동일 (멱등)',
-  `select (public.ingest_refresh() - 'companies' - 'docs')::text`, '{"ipo": 1, "bond": 2, "mezz": 3, "equity": 1}');
+  `select (public.ingest_refresh() - 'companies' - 'docs' - 'fixes')::text`, '{"ipo": 1, "bond": 2, "mezz": 3, "equity": 1}');
 
 // 원문 파싱 결과 반영 (GS 제22회 발행조건확정 신고서에서 파서가 뽑은 값)
 await db.exec('set role service_role');
@@ -153,6 +153,14 @@ await check('다시 읽은 공시: 새 값만 사용',
 await check('파서 버전을 올린 규칙의 공시는 다시 대기열로',
   `select count(*)::int from public.ingest_pending_documents(1000) p where p.purpose in ('bond', 'ipo')`,
   (await db.query(`select count(*)::int as n from raw.filings f join ref.document_fetch_rules r on r.is_active and r.purpose in ('bond', 'ipo') and f.report_nm ~ r.report_pattern and (r.lookback_days is null or f.rcept_dt >= current_date - r.lookback_days)`)).rows[0].n);
+
+// 원천 입력 오류 보정: 납입일 칸에 만기일을 적은 회사채 → 청약일
+await db.exec(`update core.deals set payment_dt = '2028-10-21' where deal_key = 'bond:00500254:22-1'`);
+await db.exec(`update core.bond_terms set tenor_months = 0 where deal_key = 'bond:00500254:22-1'`);
+const fixed = (await db.query(`select core.apply_sanity_fixes() ->> 'bond_payment_dt' as n`)).rows[0].n;
+await check('보정: 납입일 ≥ 만기일이면 청약일로, 만기 개월 다시 계산',
+  `select '${fixed}' || '|' || payment_dt || '|' || tenor_months from mart.v_deals where deal_key = 'bond:00500254:22-1'`,
+  '1|2026-10-21|24');
 
 let failed = 0;
 for (const r of results) {
