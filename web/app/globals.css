@@ -1438,3 +1438,18 @@ details.metrics dd {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* 좁은 화면: 탭 묶음이 넘치면 가로로 스크롤 */
+.seg {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seg::-webkit-scrollbar {
+  display: none;
+}
+
+.seg a {
+  flex: none;
+}
