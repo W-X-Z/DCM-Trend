@@ -19,6 +19,8 @@ const ENT = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "
 
 export function stripXml(xml) {
   return xml
+    // 거래소 공시 원문은 HTML 이라 <STYLE> 블록이 본문 앞에 온다 → 내용째 지운다
+    .replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<(TD|TH|TE|TU)\b[^>]*>/gi, '|')
     .replace(/<[^>]+>/g, '')
     .replace(/&(amp|lt|gt|quot|apos|nbsp|#160);/g, (m) => ENT[m] ?? m)
@@ -202,10 +204,155 @@ export function parseMezz(text, issueDate = null) {
   return out;
 }
 
+// 거래소 공시 (단기차입금·시설투자·최대주주변경·양수도·채무보증·담보제공·손익구조·단일판매) -----------
+// 서식이 "라벨 칸 | 값 칸" 표라서 칸으로 나눈 뒤 라벨을 찾고 다음 칸을 읽는다.
+// 필드 이름은 '화면 라벨:단위'(krw/pct/date/count/text) → SQL(core.fmt_field)이 표시 형식을 만든다.
+// 실측 (2026-10): 에스엠국일 단기차입금, HMM 신규시설투자, 비츠로시스 채무보증, 에이프로젠 담보제공, 풍강 손익구조,
+//                 제일엠앤에스 최대주주변경, 블루엠텍 주식양수도, 서울전자통신 경영권변경, HDC 단일판매
+const labelKey = (c) => c.replace(/^[\s\d.\-ㆍ·]+/, '').replace(/\s+/g, '');
+const TEXT_MAX = 80;
+
+export function disclosureKind(head) {
+  const h = head.replace(/\s+/g, '');
+  if (/원리금(미지급|지급불능)|기한의이익/.test(h)) return 'bond_default';
+  if (/단기차입금증가/.test(h)) return 'stdebt';
+  if (/신규시설투자/.test(h)) return 'capex';
+  if (/주식양수도/.test(h)) return 'transfer';
+  if (/경영권변경/.test(h)) return 'control_contract';
+  if (/주식담보제공/.test(h)) return null;
+  if (/최대주주변경/.test(h)) return 'control';
+  if (/채무보증결정/.test(h)) return 'guarantee';
+  if (/담보제공결정/.test(h)) return 'collateral';
+  if (/손익구조/.test(h)) return 'pl';
+  if (/단일판매|공급계약/.test(h)) return 'contract';
+  if (/횡령|배임/.test(h)) return 'embezzle';
+  return null;
+}
+
+export function parseDisclosure(text) {
+  const cells = text.split('|').map((c) => c.trim());
+  const keys = cells.map(labelKey);
+  const out = [];
+  const seen = new Set();
+  const push = (field, value) => {
+    if (value === null || value === undefined) return;
+    const v = String(value).trim();
+    if (!v || v === '-' || seen.has(field)) return;
+    seen.add(field);
+    out.push({ field, series: null, value: v.length > TEXT_MAX ? `${v.slice(0, TEXT_MAX - 1)}…` : v });
+  };
+  const at = (re, from = 0) => keys.findIndex((k, i) => i >= from && re.test(k));
+  // 라벨 다음 n번째 칸
+  const val = (re, n = 1, from = 0) => {
+    const i = at(re, from);
+    return i >= 0 ? cells[i + n] ?? null : null;
+  };
+  const krw = (s, mult = 1) => {
+    const v = num(s);
+    return v === null ? null : String(v * mult);
+  };
+  const pct = (s) => (num(s) === null ? null : String(num(s)));
+  const date = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(String(s ?? '').trim()) ? String(s).trim() : ymdKr(s));
+
+  // 종류는 제목('회사/공시명/(날짜)')으로만 판단한다. 본문 앞부분(변경사유 '주식양수도계약에 따른 …')에 끌려가지 않게
+  const title = text.match(/\/\s*([^/|]{2,120}?)\s*\/\s*\(\d{4}\.\d{2}\.\d{2}\)/)?.[1] ?? text.slice(0, 200);
+  const kind = disclosureKind(title);
+  if (!kind) return out;
+  const equityRatio = () => push('자기자본 대비:pct', pct(val(/^자기자본대비\(%\)$/)));
+
+  if (kind === 'stdebt') {
+    push('차입금액:krw', krw(val(/^차입금액\(원\)$/)));
+    equityRatio();
+    push('차입 후 단기차입금:krw', krw(val(/^단기차입금합계\(원\)$/, 2)));
+    push('차입 목적:text', val(/^차입목적$/));
+    push('차입 형태:text', val(/^차입형태$/));
+  } else if (kind === 'capex') {
+    push('투자 대상:text', val(/^투자대상$/));
+    push('투자금액:krw', krw(val(/^투자금액\(원\)$/)));
+    equityRatio();
+    push('투자 목적:text', val(/^투자목적$/));
+    push('투자 종료일:date', date(val(/^종료일$/, 1, Math.max(0, at(/^투자기간$/)))));
+  } else if (kind === 'guarantee' || kind === 'collateral') {
+    push('채무자:text', val(/^채무자$/));
+    push('채무자와의 관계:text', val(/^회사와의관계$/));
+    push('채권자:text', val(/^채권자$/));
+    push('채무금액:krw', krw(val(/^채무\(차입\)금액\(원\)$/)));
+    if (kind === 'guarantee') {
+      push('채무보증금액:krw', krw(val(/^채무보증금액\(원\)$/)));
+      equityRatio();
+      push('채무보증 총잔액:krw', krw(val(/^채무보증총잔액\(원\)$/)));
+    } else {
+      push('담보제공금액:krw', krw(val(/^담보(설정|제공)금액\(원\)$/)));
+      equityRatio();
+      push('담보 재산:text', val(/^담보제공재산$/));
+      push('담보제공 총잔액:krw', krw(val(/^담보제공총잔액\(원\)$/)));
+    }
+  } else if (kind === 'pl') {
+    const u = text.match(/변동내용\s*\(\s*단위\s*:\s*(백만원|천원|원)\s*\)/)?.[1] ?? '원';
+    const mult = u === '백만원' ? 1e6 : u === '천원' ? 1e3 : 1;
+    push('재무제표:text', val(/^재무제표의종류$/));
+    const start = Math.max(0, at(/변동내용/));
+    const row = (re) => {
+      const i = at(re, start);
+      return i >= 0 ? { cur: cells[i + 1], prev: cells[i + 2], rate: cells[i + 4], turn: cells[i + 5] } : null;
+    };
+    const turns = [];
+    for (const [label, re] of [['매출액', /^매출액$/], ['영업이익', /^영업이익$/], ['당기순이익', /^당기순이익$/]]) {
+      const r = row(re);
+      if (!r) continue;
+      push(`${label}:krw`, krw(r.cur, mult));
+      push(`직전 ${label}:krw`, krw(r.prev, mult));
+      push(`${label} 증감률:pct`, pct(r.rate));
+      if (r.turn && /전환/.test(r.turn)) turns.push(`${label} ${r.turn}`);
+    }
+    push('흑자·적자 전환:text', turns.join(', '));
+    push('변동 주요원인:text', val(/변동주요원인$/));
+  } else if (kind === 'control') {
+    const before = at(/^변경전$/);
+    const after = at(/^변경후$/, before + 1);
+    if (before >= 0) {
+      push('변경 전 최대주주:text', val(/^최대주주등$/, 1, before));
+      push('변경 전 지분율:pct', pct(val(/^소유비율\(%\)$/, 1, before)));
+    }
+    if (after >= 0) {
+      push('변경 후 최대주주:text', val(/^최대주주등$/, 1, after));
+      push('변경 후 지분율:pct', pct(val(/^소유비율\(%\)$/, 1, after)));
+    }
+    push('변경 사유:text', val(/^변경사유$/));
+    push('인수자금 차입금:krw', krw(val(/^차입금\(원\)$/)));
+    push('차입처:text', val(/^차입처$/));
+  } else if (kind === 'transfer' || kind === 'control_contract') {
+    push('양도인:text', val(/^양도인$/));
+    push('양수인:text', val(/^양수인$/));
+    if (kind === 'control_contract') push('계약 목적물:text', val(/^계약의목적물$/));
+    push('양수도 주식수:count', pct(val(/^양수도주식수\(주\)$/)));
+    push('양수금액:krw', krw(val(/^양수도대금\(원\)$/)));
+    push('예정 지분율:pct', pct(val(/^예정소유비율\(%\)$/)));
+    push('변경 예정일:date', date(val(/^변경예정일자$/)));
+  } else if (kind === 'contract') {
+    push('계약명:text', val(/^체결계약명$/));
+    push('계약금액:krw', krw(val(/^계약금액\(원\)$/)));
+    push('매출액 대비:pct', pct(val(/^매출액대비\(%\)$/)));
+    push('계약 상대:text', val(/^계약상대$/));
+  } else if (kind === 'embezzle') {
+    push('발생 금액:krw', krw(val(/금액\(원\)$/)));
+    equityRatio();
+  } else if (kind === 'bond_default') {
+    // "1. 미지급금액 | 원금(원) | … | 합계(원) | 3,500,000,000" , 내역 표 "사채종류 … | 전환사채 | 제8회 |"
+    push('미지급 금액:krw', krw(val(/^합계\(원\)$/)) ?? krw(val(/(미지급|지급불능).*금액.*\(원\)$/)));
+    equityRatio();
+    const kindRow = text.match(/(전환사채|신주인수권부사채|교환사채|무보증사채|회사채|사채)\s*\|\s*(제?\s*[\d-]+\s*회)\s*\|/);
+    push('사채 종류:text', kindRow ? `${kindRow[1]} ${kindRow[2].replace(/\s+/g, '')}` : null);
+    push('미지급 사유:text', val(/^미지급사유(및대책)?$/)?.replace(/^1\)\s*미지급\s*사유\s*/, ''));
+  }
+  return out;
+}
+
 export function parseByPurpose(purpose, xml) {
   const text = stripXml(xml);
   if (purpose === 'bond') return parseBond(text);
   if (purpose === 'ipo') return parseIpo(text);
   if (purpose === 'mezz') return parseMezz(text);
+  if (purpose === 'disclosure') return parseDisclosure(text);
   return [];
 }

@@ -59,7 +59,8 @@ export class Dart {
         if (!res.ok) throw new DartStopError(`HTTP ${res.status} (${path})`);
         return await parse(res);
       } catch (e) {
-        if (e instanceof DartStopError) throw e;
+        // 한도·키 문제와 문서 하나의 오류(파일 없음 등)는 다시 시도하지 않는다
+        if (e instanceof DartStopError || e instanceof DocError) throw e;
         lastErr = e;
         if (attempt < 4) await sleep(1000 * 2 ** attempt);
       }

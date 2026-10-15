@@ -5,7 +5,7 @@
 
 import { createHash } from 'node:crypto';
 
-const PROMPT_VERSION = 2;
+const PROMPT_VERSION = 3;
 const TARGET = 10;
 const MIN_ITEMS = 6;
 const MAX_ITEMS = 12;
@@ -18,9 +18,12 @@ export const KIND_LABEL = {
   d_asset_buy: '자산 취득', d_asset_sell: '자산 매각', d_stake_buy: '지분 인수', d_stake_sell: '지분 매각',
   d_capcut: '감자', d_rehab: '회생', d_dissolve: '해산', d_suspend: '영업정지', d_default: '부도',
   d_noncurrent: '자산 취득·처분',
+  d_stdebt: '단기차입', d_capex: '시설투자', d_control: '최대주주 변경', d_pledge: '주식담보',
+  d_guarantee: '채무보증·담보', d_plshock: '실적 급변', d_halt: '상장 위험', d_embezzle: '횡령·배임',
+  d_bankmgmt: '채권은행 관리', d_bond_default: '원리금 미지급', d_treasury_sell: '자사주 처분', d_cb_buyback: 'CB 풋 취득',
 };
 
-const DISTRESS = new Set(['d_rehab', 'd_dissolve', 'd_suspend', 'd_default']);
+const DISTRESS = new Set(['d_rehab', 'd_dissolve', 'd_suspend', 'd_default', 'd_halt', 'd_embezzle', 'd_bankmgmt', 'd_bond_default']);
 
 export function kindLabel(c) {
   if (c.kind === 'mezz') return c.facts?.['종류'] ?? '메자닌';
@@ -84,14 +87,22 @@ export function ro(word) {
   const jong = code % 28;
   return jong === 0 || jong === 8 ? '로' : '으로';
 }
+// '…이다/…다': 받침이 있으면 '이다' (숫자·기호로 끝나면 '이다')
+export function ida(word) {
+  const ch = String(word ?? '').trim().slice(-1);
+  const code = ch.charCodeAt(0) - 0xac00;
+  if (code < 0 || code > 11171) return '이다';
+  return code % 28 === 0 ? '다' : '이다';
+}
 const has = (c, f) => (c._raw.flags ?? []).includes(f);
 // '2026.10.13' → '10월 13일'
 export const kd = (s) => {
   const m = String(s ?? '').match(/(\d{4})[.-](\d{2})[.-](\d{2})/);
   return m ? `${Number(m[2])}월 ${Number(m[3])}일` : String(s ?? '');
 };
-const amountOf = (f) => f['양수금액'] ?? f['양도금액'] ?? f['양수가액'] ?? f['양도가액'] ?? f['정지 영업 매출'] ?? f['부도금액'] ?? null;
-const partyOf = (f) => f['대상 회사'] ?? f['합병 상대회사'] ?? f['거래상대방'] ?? f['분할설립회사'] ?? null;
+const amountOf = (f) => f['양수금액'] ?? f['양도금액'] ?? f['양수가액'] ?? f['양도가액'] ?? f['차입금액'] ?? f['투자금액']
+  ?? f['채무보증금액'] ?? f['담보제공금액'] ?? f['미지급 금액'] ?? f['발생 금액'] ?? f['정지 영업 매출'] ?? f['부도금액'] ?? null;
+const partyOf = (f) => f['대상 회사'] ?? f['합병 상대회사'] ?? f['거래상대방'] ?? f['분할설립회사'] ?? f['양수인'] ?? f['변경 후 최대주주'] ?? f['채무자'] ?? null;
 
 const DISC_POINT = {
   d_merger: '합병 후 재무구조와 자금 수요 확인',
@@ -109,6 +120,18 @@ const DISC_POINT = {
   d_suspend: '매출 공백과 유동성 영향 점검',
   d_default: '기존 발행 채권·거래 노출 점검',
   d_noncurrent: '취득·처분 재원과 목적 확인',
+  d_stdebt: '차입 만기와 회사채·CP 차환 수요 확인',
+  d_capex: '투자 재원과 장기 조달 계획 확인',
+  d_control: '새 최대주주의 인수 재원과 리파이낸싱 수요 확인',
+  d_pledge: '주식담보 대출 조건과 반대매매 위험 점검',
+  d_guarantee: '보증 대상 계열사·PF 노출 점검',
+  d_plshock: '실적 변화가 등급·조달 여건에 주는 영향 확인',
+  d_halt: '기존 발행 채권·메자닌 노출 점검',
+  d_embezzle: '기한이익상실 조항과 기존 거래 노출 점검',
+  d_bankmgmt: '기존 발행 채권·거래 노출 점검',
+  d_bond_default: '기존 발행 채권·거래 노출 점검',
+  d_treasury_sell: '교환사채 발행 등 후속 조달 확인',
+  d_cb_buyback: '풋 상환 재원과 재발행 수요 확인',
 };
 
 export function ruleCard(c) {
@@ -117,6 +140,8 @@ export function ruleCard(c) {
   if (k === 'bond') {
     const headline = has(c, 'i_undersub') ? '회사채 수요예측 미달'
       : has(c, 'i_first') ? '첫 공모 회사채 발행'
+      : has(c, 'i_lost_client') ? `${f['대표주관'] ?? '타사'} 대표주관으로 회사채 발행`
+      : has(c, 'i_downgrade') ? `등급 ${f['직전 회차 등급'] ?? ''}→${f['등급'] ?? ''} 하향 후 발행`
       : has(c, 'i_big_increase') ? `회사채 ${f['최초 모집액']}→${f['확정 발행액']} 증액`
       : has(c, 'i_wide_spread') ? '가산금리 높은 회사채 발행'
       : `${f['만기 구성'] ?? ''} 회사채 ${f['확정 발행액'] ?? ''}`.trim();
@@ -124,7 +149,9 @@ export function ruleCard(c) {
       `${kd(f['수요예측일'] ?? c.날짜)} 수요예측을 거쳐 ${f['만기 구성'] ?? ''} 구조로 ${f['확정 발행액'] ?? ''}을 확정했다.`.replace(/\s+/g, ' ').replace('만기 미상 구조로 ', ''),
       f['전체 수요예측 경쟁률'] ? `전체 경쟁률은 ${f['전체 수요예측 경쟁률']}였다.` : null,
     ].filter(Boolean).join(' ');
-    return { headline, body, point: '트랜치 구성과 증액 배경 확인' };
+    const point = has(c, 'i_lost_client') ? '이번 딜 주관사 선정 배경 확인'
+      : has(c, 'i_downgrade') ? '등급 하락 뒤 수요와 금리 수준 확인' : '트랜치 구성과 증액 배경 확인';
+    return { headline, body, point };
   }
   if (k === 'mezz') {
     const body = [
@@ -147,13 +174,35 @@ export function ruleCard(c) {
     ].filter(Boolean).join(' ');
     return { headline: `IPO 공모가 ${f['확정공모가'] ?? ''} 확정`.trim(), body, point: '상장 후 추가 조달 계획 확인' };
   }
+  const when = kd(f['공시일'] ?? c.날짜);
+  const ratio = f['자기자본 대비'];
+  const point = DISC_POINT[k] ?? '자금 수요로 이어지는지 확인';
+  if (k === 'd_control' && (f['변경 후 최대주주'] || f['양수인'])) {
+    const to = f['변경 후 최대주주'] ?? f['양수인'];
+    const share = f['변경 후 지분율'] ?? f['예정 지분율'];
+    const body = [
+      `${when} 최대주주가 ${f['변경 전 최대주주'] ?? f['양도인'] ?? '기존 주주'}에서 ${to}${share ? `(지분율 ${share})` : ''}${ro(share ? ')' : to)} 바뀌는 공시를 냈다.`,
+      f['양수금액'] ? `양수 금액은 ${f['양수금액']}이다.` : f['변경 사유'] ? `사유는 ${f['변경 사유']}${ida(f['변경 사유'])}.` : null,
+    ].filter(Boolean).join(' ');
+    return { headline: c.특징, body, point };
+  }
+  if (k === 'd_plshock' && (f['영업이익 증감률'] || f['매출액 증감률'])) {
+    const body = [
+      `${when} 매출·손익 구조 변동 공시를 냈다.`,
+      [f['매출액 증감률'] ? `매출액 ${f['매출액 증감률']}` : null, f['영업이익 증감률'] ? `영업이익 ${f['영업이익 증감률']}` : null].filter(Boolean).join(', ') + ' 변동했다.',
+      f['흑자·적자 전환'] ? `${f['흑자·적자 전환']}${ida(f['흑자·적자 전환'])}.` : null,
+    ].filter(Boolean).join(' ');
+    return { headline: c.특징, body, point };
+  }
   const amt = amountOf(f);
   const party = partyOf(f);
+  const purpose = f['차입 목적'] ?? f['투자 대상'] ?? f['투자 목적'] ?? null;
   const body = [
-    `${kd(f['공시일'] ?? c.날짜)} ${f['공시'] ?? c.특징} 공시를 냈다.`,
-    amt ? `금액은 ${amt}${party ? `, 상대는 ${party}` : ''}이다.` : party ? `상대는 ${party}이다.` : null,
+    `${when} ${f['공시'] ?? c.특징} 공시를 냈다.`,
+    amt ? `금액은 ${amt}${ratio ? `${ro(amt)} 자기자본의 ${ratio}` : ''}${party ? `, 상대는 ${party}` : ''}${ida(party ?? (ratio ? '%' : amt))}.` : party ? `상대는 ${party}${ida(party)}.` : null,
+    purpose ? `${f['차입 목적'] ? '목적은' : '대상은'} ${purpose}${ida(purpose)}.` : null,
   ].filter(Boolean).join(' ');
-  return { headline: c.특징, body, point: DISC_POINT[k] ?? '자금 수요로 이어지는지 확인' };
+  return { headline: c.특징, body, point };
 }
 
 function toCard(cand, text, model) {
@@ -181,7 +230,8 @@ const SYSTEM = `너는 증권사 IB 커버리지 본부 RM(기업 영업 담당)
 입력은 최근 2주의 공시·발행 데이터에서 규칙으로 뽑은 후보다(구분: 발행 또는 공시, 특징: 규칙이 붙인 이유). RM이 오늘 알아야 할 것을 ${TARGET}건 골라 카드로 써라.
 고르는 기준:
 - 발행: 이례적인 발행 (수요예측 미달, 큰 증액, 첫 공모채, 장기물·저등급, 높은 가산금리, 대형·공모 메자닌, 공모가 밴드 밖 확정, 대규모 희석 증자).
-- 공시: 자금 수요로 이어질 사건 (큰 자산·지분 취득, 영업양수, 합병·분할) 과 위기 신호 (회생, 영업정지, 해산, 부도).
+- 발행 중 '이전 NH 대표주관 고객의 타사 주관'(예전에 NH가 대표주관한 회사가 이번엔 다른 주관사로 발행)과 '직전 회차보다 등급 하락'은 RM이 꼭 알아야 하므로 우선한다.
+- 공시: 자금 수요로 이어질 사건 (단기차입금 증가, 신규 시설투자, 최대주주 변경·경영권 양수도, 큰 자산·지분 취득, 영업양수, 합병·분할) 과 위기 신호 (사채 원리금 미지급, 채권은행 관리, 회생, 부도, 상장폐지 사유·실질심사, 횡령·배임, 영업정지, 해산).
 - 발행과 공시를 각각 ${MIN_PER_TAG}건 이상 넣는다(후보가 있으면). 같은 '종류'는 ${PER_KIND}건까지. 같은 회사는 한 번.
 - 자회사 소규모합병, 소액(100억원 미만) 사건, 같은 사업지·같은 거래상대방이 반복되는 공시는 다른 후보가 충분하면 하나만 고르거나 뺀다.
 - 금액이 크고 RM이 먼저 연락할 이유가 분명한 것을 앞에 둔다. 배열 순서가 곧 중요도다. 금융지주·은행·증권·카드·캐피탈의 발행은 다른 후보가 충분하면 뒤에 둔다.
@@ -191,7 +241,8 @@ const SYSTEM = `너는 증권사 IB 커버리지 본부 RM(기업 영업 담당)
 - body: 1~2문장, 110자 안팎. 그 후보의 '사실'에서 2~4개를 골라 자연스러운 기사 문장으로 쓴다.
   · 날짜는 '10월 6일'처럼 쓰고, '수요예측일 2026.10.06에', '공시일 …에'처럼 항목 이름을 붙이지 않는다.
   · 회사채는 만기별 트랜치 금액, 경쟁률, 가산금리(또는 금리)를 중심으로. 최초 모집액과 확정 발행액이 같으면 증액이라고 쓰지 않는다.
-  · 공시는 금액, 상대방·대상, 목적, 자산·자기자본 대비 비율을 중심으로.
+  · 공시는 금액, 상대방·대상, 목적, 자산·자기자본 대비 비율을 중심으로. 최대주주 변경은 변경 전·후 최대주주와 지분율을 쓴다.
+  · '이전 NH 대표주관 딜(건)'이 있으면 이번 대표주관사와 함께 쓴다. 예: '이전 NH 대표주관 딜이 2건 있는 회사로, 이번엔 KB증권이 대표주관을 맡았다.'
   · 사실이 부족하면 한 문장만 쓴다. '세부사항은 공시를 확인해야 한다' 같은 빈 문장은 쓰지 않는다.
   · 숫자는 주어진 문자열 그대로 쓴다(1,500억원, 13.7배, 40.19%). 쉼표로 항목을 나열하지 않는다.
   좋은 예(회사채): "10월 15일 수요예측에서 2년물 500억원, 3년물 1,000억원에 경쟁률 13.7배가 몰려 1,000억원 모집을 1,500억원으로 늘렸다."

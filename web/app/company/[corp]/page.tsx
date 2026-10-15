@@ -2,11 +2,14 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { DealTable } from '@/components/DealTable';
 import { Disclosures } from '@/components/Disclosures';
-import { Tombstone } from '@/components/Tombstone';
+import { KeyFilingRow } from '@/components/KeyFilingList';
+import { ProposalPrep } from '@/components/ProposalPrep';
+import { WatchButton } from '@/components/Watch';
 import { Info, SectionHead } from '@/components/Ui';
 import { date, pct, won } from '@/lib/format';
 import { FEATURE_LABEL, PRODUCT_LABEL, dealTitle } from '@/lib/labels';
-import { getCompany, getCompanyDeals, getMaturities, getShortDebt, getSimilar } from '@/lib/queries';
+import { daysAgo } from '@/lib/filings';
+import { getCompany, getCompanyDeals, getKeyFilings, getMaturities, getShortDebt, getSimilar } from '@/lib/queries';
 import type { Deal, Maturity, ProductType } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -67,11 +70,12 @@ export default async function CompanyPage({ params }: { params: { corp: string }
   if (!valid(params.corp)) notFound();
   const corp = params.corp;
   const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
-  const [company, deals, upcoming, shortDebt] = await Promise.all([
+  const [company, deals, upcoming, shortDebt, keyFilings] = await Promise.all([
     getCompany(corp),
     getCompanyDeals(corp),
     getMaturities({ from: today, to: addYears(5), corp }).catch(() => [] as Maturity[]),
     getShortDebt(1, corp).catch(() => []),
+    getKeyFilings({ since: daysAgo(120), corps: [corp] }).catch(() => []),
   ]);
   if (!company) notFound();
 
@@ -92,7 +96,10 @@ export default async function CompanyPage({ params }: { params: { corp: string }
     <>
       <main id="main" className="wrap">
         <div className="page-head">
-          <h1 className="page-title">{company.corp_name}</h1>
+          <div className="page-head-row">
+            <h1 className="page-title">{company.corp_name}</h1>
+            <WatchButton corp={company.corp_code} name={company.corp_name} />
+          </div>
           <p className="company-meta">
             <span>{listed ? company.market : '비상장'}</span>
             {company.stock_code && <span className="tnum">종목코드 {company.stock_code}</span>}
@@ -147,19 +154,23 @@ export default async function CompanyPage({ params }: { params: { corp: string }
           </section>
         )}
 
-        {latest.length > 0 && (
-          <section className="section" aria-labelledby="latest-h">
-            <SectionHead id="latest-h" title="상품별 최근 발행" />
-            <div className="tombstones">
-              {latest.map((d) => (
-                <Tombstone key={d.deal_key} deal={d} linkCompany={false} />
-              ))}
-            </div>
-          </section>
-        )}
+        <ProposalPrep corp={corp} deals={deals} />
 
         <section className="section" aria-labelledby="disc-h">
           <SectionHead id="disc-h" title="최근 공시" info="최근 6개월. 자금조달, 지배구조, 리스크, 계약·투자 공시를 먼저 보여 줍니다." />
+          {keyFilings.length > 0 && (
+            <div className="company-kf">
+              <h3 className="sub-h">
+                주요 공시 요약
+                <Info>최근 120일 주요 공시에서 원문 값(금액·상대방·자기자본 대비)을 읽어 정리했습니다.</Info>
+              </h3>
+              <ul className="kf-list">
+                {keyFilings.slice(0, 8).map((f) => (
+                  <KeyFilingRow key={f.rcept_no} f={f} showCorp={false} />
+                ))}
+              </ul>
+            </div>
+          )}
           <Disclosures corp={corp} />
         </section>
 

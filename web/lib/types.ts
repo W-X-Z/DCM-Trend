@@ -225,3 +225,11 @@ export type BondIssue = {
   tenor_combo: string; tenor_min: number | null; tenor_max: number | null; spread_min_bp: number | null; spread_max_bp: number | null;
   tranches: BondTranche[]; lead_managers: string | null; nh_lead: boolean | null; nh_involved: boolean | null; latest_rcept_no: string | null;
 };
+
+// 주요 공시 (mart.v_key_filings) — facts 는 '라벨 → 표시 문자열'
+export type KeyFiling = {
+  rcept_no: string; rcept_dt: string; corp_code: string; corp_name: string; report_nm: string;
+  rule_key: string; label: string; grp: string; weight: number; facts: Record<string, string>; size_krw: number | null;
+  market: string | null; latest_bond_rating: string | null; bond_deal_count: number | null; mezz_deal_count: number | null;
+  outstanding_bond_krw: number | null; dart_url: string;
+};

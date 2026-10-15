@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { BarChart } from '@/components/BarChart';
 import { FeedSection, TouchpointSection, type FeedFilter } from '@/components/Feed';
 import { SectionHead } from '@/components/Ui';
+import { WatchPanel } from '@/components/Watch';
 import { byMonth, monthList, sum } from '@/lib/agg';
 import { factChange, month, won } from '@/lib/format';
 import { getInsightFacts, getTrend, getUiParam } from '@/lib/queries';
@@ -30,6 +31,7 @@ export default async function Home({ searchParams }: { searchParams: { feed?: st
   return (
     <main id="main" className="wrap home">
       <h1 className="sr-only">발행시장 트렌드 홈</h1>
+      <WatchPanel />
       <FeedSection filter={filter} />
       <TouchpointSection />
 
