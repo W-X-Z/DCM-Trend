@@ -1,9 +1,12 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { CompanySearch } from '@/components/CompanySearch';
-import { PageHead } from '@/components/Ui';
+import { MaturityTable, groupByCorp } from '@/components/MaturityTable';
+import { PageHead, SectionHead } from '@/components/Ui';
 import { DRAFT_TYPES, STATUS_LABEL, buildDraft, needsOf, type DraftType, type Section, type Status } from '@/lib/proposal';
-import { getFeed, getInsightIssues } from '@/lib/queries';
+import { kstToday } from '@/lib/filings';
+import { date, num, won } from '@/lib/format';
+import { getMaturities } from '@/lib/queries';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: '제안서 초안' };
@@ -62,51 +65,80 @@ function Slide({ s, i }: { s: Section; i: number }) {
   );
 }
 
-async function Start() {
-  const [issues, feed] = await Promise.all([getInsightIssues().catch(() => []), getFeed().catch(() => [])]);
-  const touch = issues.filter((i) => i.kind === 'touchpoint');
-  const seen = new Set<string>();
-  const feedCorps = feed.filter((f) => !seen.has(f.corp_code) && seen.add(f.corp_code));
+// 첫 화면: 회사 검색 + 만기도래 회사 목록(오른쪽 버튼으로 바로 초안)
+const WINDOWS = { '0-3': [0, 3], '3-6': [3, 6], '6-12': [6, 12] } as const;
+type Win = keyof typeof WINDOWS;
+const KINDS = { bond: '공모 회사채 만기', mezz: '메자닌 만기·풋옵션' } as const;
+type SP = { corp?: string; type?: string; t?: string; w?: string };
+
+function addMonths(base: string, n: number) {
+  const x = new Date(`${base}T00:00:00Z`);
+  x.setUTCMonth(x.getUTCMonth() + n);
+  return x.toISOString().slice(0, 10);
+}
+
+function startHref(sp: SP, patch: SP) {
+  const n = { ...sp, ...patch };
+  const q = new URLSearchParams();
+  if (n.t === 'mezz') q.set('t', 'mezz');
+  if (n.w && n.w !== '3-6') q.set('w', n.w);
+  const s = q.toString();
+  return `/proposal${s ? `?${s}` : ''}`;
+}
+
+async function Start({ sp }: { sp: SP }) {
+  const kind: DraftType = sp.t === 'mezz' ? 'mezz' : 'bond';
+  const win: Win = (sp.w as Win) in WINDOWS ? (sp.w as Win) : '3-6';
+  const today = kstToday();
+  const from = addMonths(today, WINDOWS[win][0]);
+  const to = addMonths(today, WINDOWS[win][1]);
+  const rows = await getMaturities({ from, to, product: kind }).catch(() => null);
+  // 금융사(은행·캐피탈·카드 등) 금융채는 뺀다. 인더스트리 커버리지 기준
+  const groups = rows ? groupByCorp(rows.filter((r) => r.sub_type !== '금융채')) : [];
+  groups.sort((x, y) => x.first_dt.localeCompare(y.first_dt));
   return (
     <div className="pp-start">
       <div className="pp-search">
         <CompanySearch mode="proposal" placeholder="제안할 회사 이름" />
       </div>
-      {touch.length > 0 && (
-        <section className="pp-picks" aria-labelledby="pk-touch">
-          <h2 id="pk-touch" className="sub-h">다가오는 영업 접점에서 고르기</h2>
-          <ul>
-            {touch.map((t) => (
-              <li key={t.corp_code}>
-                <Link href={`/proposal?corp=${t.corp_code}`}>
-                  <span className="pk-name">{t.corp_name}</span>
-                  <span className="pk-why">{t.title}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {feedCorps.length > 0 && (
-        <section className="pp-picks" aria-labelledby="pk-feed">
-          <h2 id="pk-feed" className="sub-h">최근 2주 피드에 나온 회사</h2>
-          <ul>
-            {feedCorps.map((f) => (
-              <li key={f.corp_code}>
-                <Link href={`/proposal?corp=${f.corp_code}`}>
-                  <span className="pk-name">{f.corp_name}</span>
-                  <span className="pk-why">{f.kind_label ?? f.tag}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <section aria-labelledby="pk-mat">
+        <SectionHead
+          id="pk-mat"
+          title="만기도래 회사에서 고르기"
+          info="공모 회사채는 트랜치별 만기일, 메자닌은 사채 만기일과 조기상환청구(풋) 시작일 기준입니다. 금융사 금융채는 뺐습니다. 오른쪽 '초안 만들기'를 누르면 해당 딜 유형의 초안이 열립니다."
+          right={
+            <div className="controls">
+              <span className="seg" aria-label="종류">
+                {(Object.keys(KINDS) as DraftType[]).map((k) => (
+                  <Link key={k} href={startHref(sp, { t: k })} aria-current={kind === k} scroll={false}>{KINDS[k]}</Link>
+                ))}
+              </span>
+              <span className="seg" aria-label="기간">
+                {(Object.keys(WINDOWS) as Win[]).map((w) => (
+                  <Link key={w} href={startHref(sp, { w })} aria-current={win === w} scroll={false}>{w.replace('-', '~')}개월 뒤</Link>
+                ))}
+              </span>
+            </div>
+          }
+        />
+        {rows === null ? (
+          <p className="empty">만기 목록을 불러오지 못했습니다. 잠시 뒤 새로고침하세요.</p>
+        ) : groups.length === 0 ? (
+          <p className="empty">이 기간에 도래하는 건이 없습니다.</p>
+        ) : (
+          <>
+            <p className="pp-count">
+              {date(from)} ~ {date(to)} 도래 <strong className="tnum">{num(groups.length)}곳</strong>, {won(groups.reduce((a, g) => a + g.amount, 0))}
+            </p>
+            <MaturityTable groups={groups} kind={kind} ctaLabel="초안 만들기" />
+          </>
+        )}
+      </section>
     </div>
   );
 }
 
-export default async function ProposalPage({ searchParams }: { searchParams: { corp?: string; type?: string } }) {
+export default async function ProposalPage({ searchParams }: { searchParams: SP }) {
   const corp = searchParams.corp && /^[0-9A-Za-z_]{1,20}$/.test(searchParams.corp) ? searchParams.corp : null;
   const type = searchParams.type === 'bond' || searchParams.type === 'mezz' ? (searchParams.type as DraftType) : undefined;
   const head = (
@@ -119,7 +151,7 @@ export default async function ProposalPage({ searchParams }: { searchParams: { c
     return (
       <main id="main" className="wrap proposal">
         {head}
-        <Start />
+        <Start sp={searchParams} />
       </main>
     );
   }
@@ -129,7 +161,7 @@ export default async function ProposalPage({ searchParams }: { searchParams: { c
       <main id="main" className="wrap proposal">
         {head}
         <p className="empty">회사를 찾지 못했거나 데이터를 불러오지 못했습니다. 다른 회사를 골라 보세요.</p>
-        <Start />
+        <Start sp={{}} />
       </main>
     );
   }

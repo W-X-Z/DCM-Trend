@@ -3033,40 +3033,6 @@ a.watch-btn {
   gap: 26px;
 }
 
-.pp-picks ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-}
-
-.pp-picks a {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: var(--surface);
-  text-decoration: none;
-  color: var(--ink);
-}
-
-.pp-picks a:hover {
-  border-color: var(--accent);
-}
-
-.pk-name {
-  font-weight: 600;
-}
-
-.pk-why {
-  font-size: var(--s-1);
-  color: var(--muted);
-}
-
 .pp-head {
   display: flex;
   flex-wrap: wrap;
@@ -3623,4 +3589,56 @@ a.watch-btn {
   .fb {
     display: none;
   }
+}
+
+/* 만기도래 표의 '제안서 초안' 버튼: 가로 스크롤해도 오른쪽에 붙어 있다 */
+.cta-sm {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent-ink);
+  font-size: var(--s-1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+table.data td a.cta-sm {
+  text-decoration: none;
+}
+
+table.data td a.cta-sm:hover {
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+}
+
+table.data .col-cta {
+  position: sticky;
+  right: 0;
+  width: 1%;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  text-align: right;
+  background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--rule);
+}
+
+table.data th.col-cta {
+  background: var(--paper);
+}
+
+.pp-count {
+  margin: 4px 0 10px;
+  font-size: var(--s-1);
+  color: var(--ink-2);
+}
+
+.pp-start > * {
+  min-width: 0;
+}
+
+.section-right .controls {
+  margin-top: 0;
 }

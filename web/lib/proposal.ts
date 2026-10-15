@@ -1,11 +1,11 @@
 // 제안서 초안: 딜 유형별 제안서 구성(장표)에 맞춰 공개 데이터로 채울 수 있는 부분을 채우고,
 // 채울 수 없는 부분은 '추가로 받아야 할 데이터'와 받을 곳을 적는다.
 // 장표 구성 근거: 이랜드월드 108 대표주관 제안서(14쪽), 레이크머티리얼즈 2CB 제안서 v1.0·vf, GI·SME 인터뷰.
-// 문장은 규칙으로 만든다(숫자는 조회 값 그대로). 전망·권유 문장은 쓰지 않는다.
+// 문장은 규칙으로 만든다(숫자는 조회 값 그대로). 제안서에 옮겨 쓸 수 있게 '합니다'체로 쓰고, 전망·권유 문장은 쓰지 않는다.
 import 'server-only';
 import { bp, date, num, won } from './format';
 import { daysAgo, factLine, kstToday } from './filings';
-import { eun, ida, ro } from './josa';
+import { eul, eun, ro } from './josa';
 import { feeByQuarter, leagueOf, type TrendDeal } from './period';
 import {
   getBondIssuesBy, getCompany, getCompanyDeals, getKeyFilings, getMaturities, getRateLatest, getShortDebt, getTrend, getTrendDeals,
@@ -67,6 +67,20 @@ const spreadRange = (i: BondIssue) =>
   i.spread_min_bp == null ? '–' : i.spread_min_bp === i.spread_max_bp ? bp(i.spread_min_bp) : `${bp(i.spread_min_bp)}~${bp(i.spread_max_bp)}`;
 const amountPair = (i: { initial_amount_krw: number | null; amount_krw: number | null }) =>
   i.initial_amount_krw && i.amount_krw && i.initial_amount_krw !== i.amount_krw ? `${won(i.initial_amount_krw)} → ${won(i.amount_krw)}` : won(i.amount_krw);
+// 직전 회차 문장: 증액·감액이면 최초 신고 금액을 함께 쓴다
+const lastIssueLine = (i: BondIssue) => {
+  const head = `직전 회차는 ${date(i.pricing_dt ?? i.deal_dt)} 수요예측을 거쳐 ${i.tenor_combo ? `${i.tenor_combo} 구조로 ` : ''}`;
+  const a = won(i.amount_krw);
+  const init = i.initial_amount_krw ? Number(i.initial_amount_krw) : null;
+  const fin = i.amount_krw ? Number(i.amount_krw) : null;
+  const body = init && fin && fin > init
+    ? `발행했으며, 최초 신고 금액 ${won(init)}에서 ${a}${ro(a)} 증액했습니다.`
+    : init && fin && fin < init
+      ? `${a}${eul(a)} 발행했습니다(최초 신고 금액 ${won(init)}).`
+      : `${a}${eul(a)} 발행했습니다.`;
+  return `${head}${body}${i.competition_ratio != null ? ` 수요예측 경쟁률은 ${ratio(i.competition_ratio)}였습니다.` : ''}`;
+};
+const mkt = (m: string | null | undefined) => (m === '유가증권' ? '유가증권시장' : m ?? '');
 const sum = <T,>(xs: T[], f: (x: T) => number | null | undefined) => xs.reduce((s, x) => s + Number(f(x) ?? 0), 0);
 
 // 공통 장표 ----------------------------------------------------------------------
@@ -74,13 +88,13 @@ function filingsSection(filings: KeyFiling[]): Section {
   if (!filings.length) {
     return {
       key: 'filings', title: '최근 주요 공시', status: 'filled',
-      lines: ['최근 120일 동안 자금 수요·지배구조·신용 위험과 관련한 주요 공시가 없다.'], basis: 'DART 주요사항보고서·거래소 공시',
+      lines: ['최근 120일간 자금 수요, 지배구조, 신용 위험과 관련한 주요 공시는 없습니다.'], basis: 'DART 주요사항보고서·거래소 공시',
     };
   }
   const kinds = [...new Set(filings.map((f) => f.label))];
   return {
     key: 'filings', title: '최근 주요 공시', status: 'filled',
-    lines: [`최근 120일 주요 공시는 ${filings.length}건이다(${kinds.slice(0, 4).join(', ')}${kinds.length > 4 ? ' 등' : ''}). 자금 수요와 리스크를 제안 전에 확인한다.`],
+    lines: [`최근 120일간 주요 공시는 ${filings.length}건(${kinds.slice(0, 4).join(', ')}${kinds.length > 4 ? ' 등' : ''})입니다. 제안 전에 자금 수요와 리스크 요인을 확인하시기 바랍니다.`],
     table: {
       head: ['공시일', '종류', '내용'],
       rows: filings.slice(0, 8).map((f) => [date(f.rcept_dt), f.label, factLine(f, 3).map((x) => `${x.k} ${x.v}`).join(', ') || f.report_nm]),
@@ -115,9 +129,9 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
     out.push({
       key: 'issuer', title: '발행사 현황', status: 'filled',
       lines: [
-        `${name}${eun(name)} ${rating} 등급으로, 수집 기간(2019년~)에 공모 회사채를 ${own.length}회 발행했다.`,
-        `직전 발행은 ${date(last.pricing_dt ?? last.deal_dt)} 수요예측을 거친 ${last.tenor_combo || '만기 미상'} ${amountPair(last)}${last.competition_ratio != null ? `, 전체 경쟁률 ${ratio(last.competition_ratio)}` : ''}${ida(last.competition_ratio != null ? '배' : '억')}.`,
-        ...(c.outstanding_bond_krw ? [`정기보고서 기준 회사채 미상환 잔액은 ${won(c.outstanding_bond_krw)}${ida('억')}.`] : []),
+        `${name}${eun(name)} 2019년 이후 공모 회사채를 ${own.length}회 발행했으며, 최근 신용등급은 ${rating}입니다.`,
+        lastIssueLine(last),
+        ...(c.outstanding_bond_krw ? [`정기보고서 기준 회사채 미상환 잔액은 ${won(c.outstanding_bond_krw)}입니다.`] : []),
       ],
       table: {
         head: ['수요예측일', '등급', '구조', '최초 → 확정', '경쟁률', '가산금리', '대표주관'],
@@ -129,7 +143,7 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   } else {
     out.push({
       key: 'issuer', title: '발행사 현황', status: 'partial',
-      lines: [`${name}${eun(name)} 수집 기간(2019년~)에 공모 회사채 발행 이력이 없다. 첫 공모채라면 신용등급 본평가부터 필요하다.`],
+      lines: [`${name}${eun(name)} 2019년 이후 공모 회사채 발행 이력이 없습니다. 첫 공모채 발행이라면 신용등급 본평가 절차가 먼저 필요합니다.`],
       needs: [{ data: '신용등급(예비 평가)', from: '신용평가사' }, { data: '재무 현황·자금 사용 계획', from: '발행사' }],
     });
   }
@@ -142,13 +156,13 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
     key: 'refi', title: '만기 구조와 차환 수요', status: 'filled',
     lines: [
       mats.length
-        ? `앞으로 2년 안에 공모 회사채 ${mats.length}건, ${won(sum(mats, (m) => m.amount_krw))}의 만기가 돌아온다. 그중 1년 안은 ${in1y.length ? won(sum(in1y, (m) => m.amount_krw)) : '없'}${in1y.length ? '이다' : '다'}.`
-        : '앞으로 2년 안에 돌아오는 공모 회사채 만기가 없다.',
+        ? `향후 2년 내 공모 회사채 ${mats.length}건, ${won(sum(mats, (m) => m.amount_krw))}의 만기가 도래하며, ${in1y.length ? `이 중 1년 내 도래분은 ${won(sum(in1y, (m) => m.amount_krw))}입니다` : '1년 내 도래분은 없습니다'}.`
+        : '향후 2년 내 만기가 도래하는 공모 회사채는 없습니다.',
       ...(sd?.total_1y_krw != null
         ? [(() => {
           const parts = [['회사채', sd.bond_1y_krw], ['CP', sd.cp_1y_krw], ['단기사채', sd.stb_krw]]
             .filter(([, v]) => v != null && Number(v) > 0).map(([k, v]) => `${k} ${won(Number(v))}`);
-          return `정기보고서(${date(sd.stlm_dt)}) 기준 1년 안에 만기가 돌아오는 차입은 ${won(sd.total_1y_krw)}${parts.length ? `(${parts.join(', ')})` : ''}${ida(parts.length ? ')' : '억')}.`;
+          return `${date(sd.stlm_dt)} 정기보고서 기준 1년 내 만기가 도래하는 차입금은 ${won(sd.total_1y_krw)}${parts.length ? `(${parts.join(', ')})` : ''}입니다.`;
         })()]
         : []),
     ],
@@ -181,8 +195,11 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'market', title: '시장 동향', status: 'filled',
     lines: [
-      `최근 3개월(${curMonths[0].replace('-', '.')}~${curMonths[2].replace('-', '.')}) 일반 공모 회사채 발행은 ${won(a1)}, ${cnt(curMonths)}건${chg == null ? '이다' : `으로 전년 같은 기간보다 ${Math.abs(Math.round(chg))}% ${chg >= 0 ? '늘었다' : '줄었다'}`}.`,
-      ...(aa && ktb ? [`${aa.label_ko} 금리는 ${num(Number(aa.value), 3)}%로 ${ktb.label_ko}보다 ${Math.round((Number(aa.value) - Number(ktb.value)) * 100)}bp 높다(${date(aa.dt)}).`] : []),
+      `최근 3개월(${curMonths[0].replace('-', '.')}~${curMonths[2].replace('-', '.')}) 일반 공모 회사채 발행 규모는 ${won(a1)}(${cnt(curMonths)}건)${chg == null ? '입니다' : `${ro(won(a1))}, 전년 동기 대비 ${Math.abs(Math.round(chg))}% ${chg >= 0 ? '증가했습니다' : '감소했습니다'}`}.`,
+      ...(aa && ktb ? [(() => {
+        const gap = Math.round((Number(aa.value) - Number(ktb.value)) * 100);
+        return `${date(aa.dt)} 기준 ${aa.label_ko} 금리는 ${num(Number(aa.value), 3)}%로, ${ktb.label_ko} 대비 ${Math.abs(gap)}bp ${gap >= 0 ? '높은' : '낮은'} 수준입니다.`;
+      })()] : []),
     ],
     table: rates.length
       ? {
@@ -198,7 +215,7 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   // 5. 금리 전망
   out.push({
     key: 'outlook', title: '금리 전망', status: 'needed',
-    lines: ['공개 데이터로는 금리 전망을 만들지 않는다. 리서치 전망을 받아 넣는다.'],
+    lines: ['금리 전망은 공개 데이터로 작성하지 않으며, 리서치센터의 전망 자료를 받아 반영합니다.'],
     needs: [{ data: '기준금리·국고채 금리 전망', from: '리서치센터' }],
   });
 
@@ -206,7 +223,7 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   if (!group) {
     out.push({
       key: 'peers', title: '같은 등급 수요예측 사례', status: 'needed',
-      lines: ['등급을 알 수 없어 비교할 등급군을 정하지 못했다.'],
+      lines: ['신용등급을 확인할 수 없어 비교 대상 등급군을 정하지 못했습니다.'],
       needs: [{ data: '예상 신용등급', from: '신용평가사·발행사' }],
     });
   } else {
@@ -217,11 +234,11 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
       lines: recent.length
         ? [
           known.length
-            ? `최근 6개월 ${group}급 공모 회사채는 ${recent.length}건이고, 경쟁률이 공시된 ${known.length}건의 중간값은 ${ratio(median(known.map((p) => p.competition_ratio)))}다.`
-            : `최근 6개월 ${group}급 공모 회사채는 ${recent.length}건이고, 경쟁률이 공시된 건은 없다.`,
-          ...(initKnown.length ? [`최초 신고 금액이 있는 ${initKnown.length}건 중 증액 발행 비율은 ${pct0(share(initKnown.filter((p) => p.is_increased).length, initKnown.length))}${ida('%')}.`] : []),
+            ? `최근 6개월간 ${group}급 공모 회사채는 ${recent.length}건 발행되었으며, ${known.length === recent.length ? '' : `경쟁률이 공시된 ${known.length}건 기준 `}수요예측 경쟁률 중간값은 ${ratio(median(known.map((p) => p.competition_ratio)))}입니다.`
+            : `최근 6개월간 ${group}급 공모 회사채는 ${recent.length}건 발행되었으나, 경쟁률이 공시된 건은 없습니다.`,
+          ...(initKnown.length ? [`최초 신고 금액이 확인되는 ${initKnown.length}건 중 증액 발행 비율은 ${pct0(share(initKnown.filter((p) => p.is_increased).length, initKnown.length))}입니다.`] : []),
         ]
-        : [`최근 6개월 ${group}급 공모 회사채 발행이 없다.`],
+        : [`최근 6개월간 ${group}급 공모 회사채 발행은 없습니다.`],
       table: recent.length
         ? {
           head: ['수요예측일', '발행사', '등급', '구조', '최초 → 확정', '경쟁률', '가산금리'],
@@ -240,8 +257,12 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
     out.push({
       key: 'under', title: '미달·미매각 사례', status: 'filled',
       lines: [under.length
-        ? `최근 12개월 ${group}급 공모 회사채 ${peers.length}건 중 경쟁률이 공시된 ${known12.length}건을 보면 미달은 ${under.length}건(${pct0(share(under.length, known12.length))})${ida('%')}.`
-        : `최근 12개월 ${group}급 공모 회사채 ${peers.length}건 중 경쟁률이 공시된 ${known12.length}건에서 미달 사례가 없다.`],
+        ? known12.length === peers.length
+          ? `최근 12개월간 ${group}급 공모 회사채 ${peers.length}건 중 미달은 ${under.length}건(${pct0(share(under.length, known12.length))})입니다.`
+          : `최근 12개월간 ${group}급 공모 회사채 ${peers.length}건 중 경쟁률이 공시된 ${known12.length}건을 기준으로 보면, 미달은 ${under.length}건(${pct0(share(under.length, known12.length))})입니다.`
+        : known12.length === peers.length
+          ? `최근 12개월간 ${group}급 공모 회사채 ${peers.length}건 중 미달 사례는 없습니다.`
+          : `최근 12개월간 ${group}급 공모 회사채 ${peers.length}건 중 경쟁률이 공시된 ${known12.length}건에서는 미달 사례가 없습니다.`],
       table: under.length
         ? {
           head: ['수요예측일', '발행사', '등급', '모집액', '미달 트랜치', '대표주관'],
@@ -260,7 +281,7 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   // 8. 수요예측 참여기관
   out.push({
     key: 'investors', title: '수요예측 참여기관 분석', status: 'needed',
-    lines: ['공시의 수요예측 결과는 기관 유형별 합계만 있고 기관명이 없어 기관별 분석을 할 수 없다.'],
+    lines: ['수요예측 결과 공시에는 기관 유형별 합계만 있고 기관명은 공개되지 않아, 기관별 분석에는 내부 자료가 필요합니다.'],
     needs: [{ data: '기관별 수요예측 참여 이력(실명)', from: '신디케이션본부' }],
   });
 
@@ -269,9 +290,9 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'structure', title: '발행 구조안', status: 'partial',
     lines: [
-      ...(combos[0] ? [`${group}급 최근 6개월에 가장 많이 쓴 구조는 ${combos[0].combo}(${pct0(combos[0].share)})${ida('%')}.`] : []),
-      ...(last ? [`직전 회차는 ${last.tenor_combo || '만기 미상'} 구조였다.`] : []),
-      '금액·만기 구성·금리밴드는 RM이 발행사 자금 계획을 보고 정한다. 아래 표는 근거 자료다.',
+      ...(combos[0] ? [`최근 6개월간 ${group}급에서 가장 많이 쓰인 만기 구조는 ${combos[0].combo}(${pct0(combos[0].share)})입니다.`] : []),
+      ...(last?.tenor_combo ? [`직전 회차는 ${last.tenor_combo} 구조로 발행했습니다.`] : []),
+      '발행 금액, 만기 구성, 금리밴드는 발행사의 자금 계획을 반영해 결정합니다. 아래 표를 판단 근거로 활용하시기 바랍니다.',
     ],
     table: combos.length
       ? {
@@ -292,8 +313,8 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'schedule', title: '발행 일정안', status: 'partial',
     lines: filed && priced && paid
-      ? [`직전 회차는 증권신고서 제출(${date(filed)}) 후 ${weekdaysBetween(filed, priced)}영업일에 수요예측, ${weekdaysBetween(filed, paid)}영업일에 납입했다(평일 기준).`]
-      : ['직전 회차 일정이 없어 일정표 규칙으로 계산해야 한다.'],
+      ? [`직전 회차는 증권신고서 제출(${date(filed)}) 후 ${weekdaysBetween(filed, priced)}영업일째에 수요예측을, ${weekdaysBetween(filed, paid)}영업일째에 납입을 진행했습니다(공휴일 미반영).`]
+      : ['직전 회차 일정 정보가 없어, 일정표 규칙에 따라 별도로 산정해야 합니다.'],
     needs: [{ data: '공휴일을 반영한 발행 일정표(이사회·신고서·수요예측·납입)', from: 'RA 일정표 규칙(I-21)' }],
     basis: 'DART 공시 접수일·수요예측일·납입일',
   });
@@ -307,8 +328,8 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'terms', title: '인수 조건·수수료', status: 'partial',
     lines: [
-      ...(feeAll != null ? [`최근 12개월 공모 회사채 인수수수료율 중간값은 ${num(feeAll, 1)}bp${feeGrp != null ? `, ${group}급은 ${num(feeGrp, 1)}bp` : ''}다.`] : []),
-      ...(lowGrade ? [`${group}급은 인수 심사(투자실무협의회·리스크관리협의회) 대상이라 심사 일정을 함께 잡는다.`] : []),
+      ...(feeAll != null ? [`최근 12개월 공모 회사채 인수수수료율 중간값은 전체 ${num(feeAll, 1)}bp${feeGrp != null ? `, ${group}급 ${num(feeGrp, 1)}bp` : ''}입니다.`] : []),
+      ...(lowGrade ? [`${group}급 딜은 인수 심사(투자실무협의회·리스크관리협의회) 대상이므로, 심사 일정을 함께 계획해야 합니다.`] : []),
     ],
     table: quarters.length
       ? {
@@ -331,10 +352,10 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'track', title: '대표주관 실적·트랙레코드', status: 'filled',
     lines: [
-      ...(nhIdx >= 0 ? [`최근 12개월 일반 공모 회사채 대표주관 실적에서 NH투자증권은 ${nhIdx + 1}위(점유율 ${num(share(league[nhIdx].credit, total), 1)}%)다.`] : []),
-      ...(group ? [`같은 기간 ${group}급 NH 대표주관은 ${nhGroup}건이다.`] : []),
-      ...(own.length ? [`${name}의 공모채 ${own.length}회 중 NH 대표주관은 ${nhOwn}회다.`] : []),
-      'NH 대표주관 딜 목록은 발행 동향 화면에서 CSV로 내려받는다.',
+      ...(nhIdx >= 0 ? [`최근 12개월 일반 공모 회사채 대표주관 실적에서 NH투자증권은 ${nhIdx + 1}위(점유율 ${num(share(league[nhIdx].credit, total), 1)}%)입니다.`] : []),
+      ...(group ? [`같은 기간 ${group}급 공모 회사채 중 NH투자증권이 대표주관을 맡은 딜은 ${nhGroup}건입니다.`] : []),
+      ...(own.length ? [`${name}의 공모 회사채 ${own.length}회 중 NH투자증권이 대표주관을 맡은 회차는 ${nhOwn}회입니다.`] : []),
+      'NH투자증권 대표주관 딜 목록은 발행 동향 화면에서 CSV로 내려받을 수 있습니다.',
     ],
     table: league.length
       ? {
@@ -369,7 +390,7 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   // 1. 회사 현황
   out.push({
     key: 'company', title: '회사 현황', status: 'partial',
-    lines: [`${name}${eun(name)} ${listed ? `${c.market} 상장사` : '비상장사'}다. 수집 기간 발행 이력은 공모 회사채 ${c.bond_deal_count}건, 메자닌 ${c.mezz_deal_count}건, 유상증자 ${c.equity_deal_count}건이다.`],
+    lines: [`${name}${eun(name)} ${listed ? `${mkt(c.market)} 상장사` : '비상장사'}입니다. 수집 기간 중 발행 이력은 공모 회사채 ${c.bond_deal_count}건, 메자닌 ${c.mezz_deal_count}건, 유상증자 ${c.equity_deal_count}건입니다.`],
     needs: [{ data: '시가총액·주가·발행주식수', from: 'KRX 시세(연동 예정)' }],
   });
 
@@ -377,7 +398,7 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   out.push(mz.length
     ? {
       key: 'history', title: '기존 메자닌 발행 이력', status: 'filled',
-      lines: [`수집 기간(2020년~)에 메자닌을 ${mz.length}회 발행했다. 직전은 ${date(lastMz.announce_dt ?? lastMz.deal_dt)} ${lastMz.sub_type ?? '메자닌'} ${won(lastMz.amount_krw)}${ida('억')}.`],
+      lines: [`2020년 이후 메자닌을 ${mz.length}회 발행했으며, 직전 발행은 ${date(lastMz.announce_dt ?? lastMz.deal_dt)} ${lastMz.sub_type ?? '메자닌'} ${won(lastMz.amount_krw)}입니다.`],
       table: {
         head: ['결정일', '종류', '금액', '표면/만기', '전환가', '리픽싱 하한', '풋 시작'],
         rows: mz.slice(0, 6).map((d) => [
@@ -391,7 +412,7 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
     }
     : {
       key: 'history', title: '기존 메자닌 발행 이력', status: 'filled',
-      lines: ['수집 기간(2020년~)에 메자닌 발행 이력이 없다(첫 발행).'],
+      lines: ['2020년 이후 메자닌 발행 이력은 없습니다.'],
     });
 
   // 3. 풋옵션·만기 일정
@@ -399,8 +420,8 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'puts', title: '풋옵션·만기 일정', status: 'filled',
     lines: [ev.length
-      ? `앞으로 2년 안에 메자닌 풋옵션·만기가 ${ev.length}건 돌아온다. 첫 일정은 ${date(ev[0].event_dt)} ${ev[0].event_type}${ida(ev[0].event_type)}. 상환 재원과 재발행 수요를 함께 본다.`
-      : '앞으로 2년 안에 돌아오는 메자닌 풋옵션·만기가 없다.'],
+      ? `향후 2년 내 메자닌 풋옵션·만기 일정이 ${ev.length}건 있으며, 가장 빠른 일정은 ${date(ev[0].event_dt)} ${ev[0].event_type}입니다. 상환 재원과 재발행 수요를 함께 검토하시기 바랍니다.`
+      : '향후 2년 내 도래하는 메자닌 풋옵션·만기 일정은 없습니다.'],
     table: ev.length
       ? { head: ['날짜', '구분', '증권', '금액'], rows: ev.slice(0, 6).map((m) => [date(m.event_dt), m.event_type, `${m.sub_type ?? ''}${m.series && m.series.length <= 6 ? ` 제${m.series}회` : ''}`.trim(), won(m.amount_krw)]), num: [3] }
       : undefined,
@@ -411,11 +432,11 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   out.push(c.articles_remaining_krw != null
     ? {
       key: 'articles', title: '정관상 발행 한도', status: 'filled',
-      lines: [`직전 발행 공시 기준 정관상 메자닌 잔여 한도는 ${won(c.articles_remaining_krw)}${ida('억')}.`], basis: 'DART 발행결정 공시(정관상 발행 한도·기발행액)',
+      lines: [`직전 발행 공시 기준 정관상 메자닌 잔여 발행 한도는 ${won(c.articles_remaining_krw)}입니다.`], basis: 'DART 발행결정 공시(정관상 발행 한도·기발행액)',
     }
     : {
       key: 'articles', title: '정관상 발행 한도', status: 'needed',
-      lines: ['발행 공시가 없어 정관상 잔여 한도를 알 수 없다.'], needs: [{ data: '정관상 CB·BW 발행 한도', from: '정관(사업보고서 첨부)·발행사' }],
+      lines: ['발행 공시가 없어 정관상 잔여 발행 한도를 확인할 수 없습니다.'], needs: [{ data: '정관상 CB·BW 발행 한도', from: '정관(사업보고서 첨부)·발행사' }],
     });
 
   // 5. 최근 주요 공시
@@ -433,8 +454,8 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'market', title: `메자닌 시장 동향${listed ? `(${c.market})` : ''}`, status: 'filled',
     lines: [
-      `최근 6개월 ${listed ? `${c.market} ` : ''}메자닌 발행은 ${sameMarket.length}건, ${won(sum(sameMarket, (d) => d.amount_krw))}${ida('억')}.`,
-      `표면·만기 0% 비중은 ${pct0(share(zero, sameMarket.length))}, 만기이자율 중간값은 ${num(median(sameMarket.map((d) => d.ytm_pct)), 1)}%, 리픽싱 하한 70% 이하 비중은 ${pct0(share(refixLow, refixKnown.length))}, 공모 비중은 ${pct0(share(pub, sameMarket.length))}${ida('%')}.`,
+      `최근 6개월간 ${listed ? `${mkt(c.market)} ` : ''}메자닌 발행은 ${sameMarket.length}건, ${won(sum(sameMarket, (d) => d.amount_krw))} 규모입니다.`,
+      `표면·만기 이자율이 모두 0%인 비중은 ${pct0(share(zero, sameMarket.length))}, 만기 이자율 중간값은 ${num(median(sameMarket.map((d) => d.ytm_pct)), 1)}%, 리픽싱 하한 70% 이하 비중은 ${pct0(share(refixLow, refixKnown.length))}, 공모 비중은 ${pct0(share(pub, sameMarket.length))}입니다.`,
     ],
     table: byKind.length
       ? { head: ['종류', '건수', '금액', '0%/0% 비중'], rows: byKind.map((r) => [r.k, `${r.n}건`, won(r.amt), pct0(share(r.zero, r.n))]), num: [1, 2, 3] }
@@ -451,8 +472,8 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'comps', title: '비슷한 규모의 최근 발행', status: comps.length ? 'filled' : 'partial',
     lines: [comps.length
-      ? `같은 시장 최근 6개월 발행 중 규모가 ${won(refAmt)}의 0.5~2배인 ${comps.length}건이다.`
-      : '같은 시장에서 비슷한 규모의 최근 발행을 찾지 못했다.'],
+      ? `같은 시장의 최근 6개월 발행 중 규모가 ${won(refAmt)}의 0.5~2배인 사례는 ${comps.length}건입니다.`
+      : '같은 시장에서 비슷한 규모의 최근 발행 사례를 찾지 못했습니다.'],
     table: comps.length
       ? {
         head: ['결정일', '발행사', '종류', '금액', '표면/만기', '리픽싱 하한', '방식'],
@@ -468,7 +489,7 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   // 8. 제안 조건안
   out.push({
     key: 'terms', title: '제안 조건안', status: 'partial',
-    lines: ['규모·만기·할증률·콜/풋 조건은 RM이 정한다. 위 시장 동향과 비슷한 규모 사례를 근거로 쓴다.'],
+    lines: ['발행 규모, 만기, 할증률, 콜·풋 조건은 발행사의 자금 계획을 반영해 결정합니다. 앞의 시장 동향과 비슷한 규모의 발행 사례를 근거로 활용하시기 바랍니다.'],
     needs: [{ data: '발행 규모·만기·할증률·콜/풋 조건', from: 'RM 판단(발행사 자금 계획 반영)' }],
   });
 
@@ -478,8 +499,8 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   out.push({
     key: 'dilution', title: '예상 전환가·지분 희석', status: srW != null ? 'partial' : 'needed',
     lines: [
-      ...(srW != null ? [`최근 6개월 같은 시장 메자닌의 발행주식 대비 전환주식 비율은 평균 ${num(srW, 1)}%${ida('%')}.`] : []),
-      '예상 전환가와 이 회사의 희석률은 기준주가와 발행주식수가 있어야 계산할 수 있다.',
+      ...(srW != null ? [`최근 6개월간 같은 시장 메자닌의 발행주식 대비 전환주식 비율은 평균 ${num(srW, 1)}%입니다.`] : []),
+      '이 회사의 예상 전환가와 지분 희석률은 기준주가와 발행주식수를 확보한 뒤 산정할 수 있습니다.',
     ],
     needs: [{ data: '기준주가·발행주식수', from: 'KRX 시세(연동 예정)' }],
   });
@@ -489,28 +510,28 @@ async function mezzSections(c: CompanyOverview): Promise<Section[]> {
   out.push(ctrl
     ? {
       key: 'owner', title: '최대주주 지분율', status: 'partial',
-      lines: [`${date(ctrl.rcept_dt)} 최대주주 변경 공시 기준 최대주주는 ${ctrl.facts['변경 후 최대주주'] ?? ctrl.facts['양수인']}${ctrl.facts['변경 후 지분율'] ?? ctrl.facts['예정 지분율'] ? `(지분율 ${ctrl.facts['변경 후 지분율'] ?? ctrl.facts['예정 지분율']})` : ''}${ida(')')}.`],
+      lines: [`${date(ctrl.rcept_dt)} 최대주주 변경 공시 기준 최대주주는 ${ctrl.facts['변경 후 최대주주'] ?? ctrl.facts['양수인']}${ctrl.facts['변경 후 지분율'] ?? ctrl.facts['예정 지분율'] ? `(지분율 ${ctrl.facts['변경 후 지분율'] ?? ctrl.facts['예정 지분율']})` : ''}입니다.`],
       needs: [{ data: '최신 최대주주·특수관계인 지분율', from: 'OpenDART 정기보고서 최대주주 현황(수집 예정)' }],
     }
     : {
       key: 'owner', title: '최대주주 지분율', status: 'needed',
-      lines: ['최대주주 지분율은 아직 수집하지 않는다.'],
+      lines: ['최대주주 지분율 데이터는 아직 수집하지 않고 있습니다.'],
       needs: [{ data: '최대주주·특수관계인 지분율', from: 'OpenDART 정기보고서 최대주주 현황(수집 예정)' }],
     });
 
   // 11~13. 내부·비공개 자료
   out.push({
     key: 'demand', title: '투자자 수요', status: 'needed',
-    lines: ['투자 의향(LOC)은 공시되지 않는다.'], needs: [{ data: 'LOC·투자 의향', from: 'RM·투자자 접촉(비공개)' }],
+    lines: ['투자 의향(LOC)은 공시 대상이 아니어서, 투자자 접촉을 통해 확인해야 합니다.'], needs: [{ data: 'LOC·투자 의향', from: 'RM·투자자 접촉(비공개)' }],
   });
   out.push({
     key: 'track', title: '트랙레코드', status: 'needed',
-    lines: ['사모 메자닌은 공시에 주선사가 거의 없어(최근 1년 635건 중 11건) 공개 데이터로 실적을 만들 수 없다.'],
+    lines: ['사모 메자닌은 공시에 주선사가 거의 기재되지 않아(최근 1년 635건 중 11건), 공개 데이터로는 실적을 산출할 수 없습니다.'],
     needs: [{ data: 'NH 메자닌 주선 실적', from: 'SME부 내부 실적' }],
   });
   out.push({
     key: 'legal', title: '규제·회계 검토', status: 'needed',
-    lines: ['콜옵션·리픽싱 관련 감독 기준과 회계처리는 과거 제안서와 법무 검토 자료로 채운다.'],
+    lines: ['콜옵션·리픽싱 관련 감독 기준과 회계 처리는 과거 제안서와 법무 검토 자료로 보완합니다.'],
     needs: [{ data: '콜옵션 감독지침·회계처리·관련 사례', from: '법무·과거 제안서' }],
   });
 
@@ -542,7 +563,7 @@ export function toMarkdown(d: Draft) {
     `# ${d.company.corp_name} ${label} 제안서 초안`,
     '',
     `- 기준일 ${d.asof} · 출처: DART(OpenDART), 한국은행 ECOS · 장표 ${d.sections.length}개 중 채움 ${cnt('filled')}, 일부 ${cnt('partial')}, 추가 필요 ${cnt('needed')}`,
-    '- 숫자는 공시 값 그대로다. 제안서에 옮기기 전에 공시 원문을 확인한다.',
+    '- 숫자는 공시 값 그대로입니다. 제안서에 옮기기 전에 공시 원문을 확인하시기 바랍니다.',
     '',
   ];
   d.sections.forEach((s, i) => {
