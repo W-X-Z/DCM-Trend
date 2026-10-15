@@ -108,7 +108,7 @@ Vercel (Next.js) ── RA·RM
 
 - 공개 데이터만 적재한다. 고객 커버리지 리스트, 사내 딜 파이프라인, 수요예측 실명 데이터는 넣지 않는다.
 - OpenDART 키·Supabase service_role 키는 GitHub Actions Secrets 에만 둔다. 화면(Vercel)에는 anon 키만 둔다.
-- anon 은 `mart` 만 읽을 수 있다. 로그인 필수로 바꾸려면 `20261015000500_api_grants.sql` 의 anon 권한만 회수한다.
+- anon 은 `mart` 만 읽을 수 있다. 로그인 필수로 바꾸려면 `20261015074609_api_grants.sql` 의 anon 권한만 회수한다.
 
 ## 9. 후속 개발 요건
 

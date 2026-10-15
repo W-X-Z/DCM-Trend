@@ -28,10 +28,14 @@ npm test
 
 이랜드월드 제108회 증권신고서의 'BBB0 최근 1년 발행사례 14건' 표를 유사 딜 로직이 그대로 재현하는지 등 33개 항목을 검증한다.
 
-## 배포 (환경 준비 후)
+## DB
+
+- Supabase 프로젝트 `dcm-trend` (서울 리전, Postgres 17). 마이그레이션 5개 적용 완료.
+- 로컬 `supabase/migrations` 파일명의 버전은 원격 이력과 같다. 새 마이그레이션은 이 뒤에 추가한다.
 
 ```bash
-supabase link --project-ref <ref>
-supabase db push            # 마이그레이션 적용
-# Supabase 대시보드: API > Exposed schemas 에 mart 추가
+supabase link --project-ref byajhicukluhlbzafclh
+supabase db push            # 새 마이그레이션 적용
 ```
+
+- 대시보드 설정: API > Exposed schemas 에 `mart` 추가 (화면이 mart 를 읽기 위해 필요)
