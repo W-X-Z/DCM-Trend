@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Header } from '@/components/Chrome';
-import { InsightPanel } from '@/components/Insights';
+import { ChangeTiles } from '@/components/Insights';
+import { PageHead, SectionHead } from '@/components/Ui';
 import { LineChart, type LineSeries } from '@/components/LineChart';
 import { bp, date } from '@/lib/format';
 import { getPolicyEvents, getRateLatest, getRates, getSpreads } from '@/lib/queries';
@@ -54,11 +55,10 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
     <>
       <Header active="rates" />
       <main id="main" className="wrap">
-        <div className="page-head">
-          <h1 className="page-title">금리 추이</h1>
-          <p className="page-sub">
-            한국은행 ECOS 일별 시장금리입니다. 제안서의 시장상황 장표에 쓰는 지표와 금통위 일정만 보여 주고, 금리 예측은 하지 않습니다.
-          </p>
+        <PageHead
+          title="금리 추이"
+          info="영업일 장 마감 금리입니다. 한국은행 ECOS 값이 있으면 그것을, 없으면 마감 기사·공개 자료에서 조사한 값을 출처와 함께 씁니다. 예측은 하지 않습니다."
+        >
           <div className="controls">
             <span className="seg" aria-label="기간">
               {(Object.keys(RANGES) as Range[]).map((r) => (
@@ -68,12 +68,10 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
               ))}
             </span>
           </div>
-        </div>
+        </PageHead>
 
         {latest.length === 0 ? (
-          <p className="empty">
-            금리 데이터가 아직 없습니다. GitHub 저장소에 ECOS_API_KEY 를 등록하면 다음 수집(매일 07:10)부터 채워집니다.
-          </p>
+          <p className="empty">금리 데이터를 모으고 있습니다. 영업일 저녁마다 채워집니다.</p>
         ) : (
           <>
             <div className="table-wrap">
@@ -87,6 +85,7 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
                     <th className="num">1개월</th>
                     <th className="num">3개월</th>
                     <th className="num">1년</th>
+                    <th>출처</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -101,46 +100,44 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
                       <td className="num">{bp(l.chg_1m_bp)}</td>
                       <td className="num">{bp(l.chg_3m_bp)}</td>
                       <td className="num">{bp(l.chg_1y_bp)}</td>
+                      <td className="nowrap">
+                        {l.source === 'research'
+                          ? l.source_url ? <a href={l.source_url} target="_blank" rel="noreferrer">조사</a> : '조사'
+                          : 'ECOS'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            <InsightPanel scope="rates" title="최근 1개월 변화" />
+            <ChangeTiles scope="rates" title="최근 1개월 변화" color="var(--bond)" />
 
             <section className="section" aria-labelledby="level-h">
-              <div className="section-head">
-                <h2 id="level-h">금리 수준</h2>
-                <p>기준금리는 점선</p>
-              </div>
+              <SectionHead id="level-h" title="금리 수준" />
               <div className="chart-card">
                 <LineChart title="기준금리, 국고채, 회사채 AA- 금리" unit="%" series={level} />
               </div>
             </section>
 
-            <section className="section" aria-labelledby="spread-h">
-              <div className="section-head">
-                <h2 id="spread-h">스프레드</h2>
-                <p>단위 bp. 등급 간 차이는 크기가 달라 따로 그립니다</p>
-              </div>
-              <div className="chart-pair">
-                <div className="chart-card">
-                  <LineChart title="AA- 스프레드와 장단기 금리차" unit="bp" series={spread} height={220} />
+            {(spread.length > 0 || gap.length > 0) && (
+              <section className="section" aria-labelledby="spread-h">
+                <SectionHead id="spread-h" title="스프레드" info="단위 bp. 등급 간 차이는 크기가 달라 따로 그립니다." />
+                <div className="chart-pair">
+                  <div className="chart-card">
+                    <LineChart title="AA- 스프레드와 장단기 금리차" unit="bp" series={spread} height={220} />
+                  </div>
+                  <div className="chart-card">
+                    <LineChart title="BBB- 와 AA- 금리 차이" unit="bp" series={gap} height={220} />
+                  </div>
                 </div>
-                <div className="chart-card">
-                  <LineChart title="BBB- 와 AA- 금리 차이" unit="bp" series={gap} height={220} />
-                </div>
-              </div>
-            </section>
+              </section>
+            )}
           </>
         )}
 
         <section className="section" aria-labelledby="events-h">
-          <div className="section-head">
-            <h2 id="events-h">금통위 일정</h2>
-            <p>통화정책방향 결정회의</p>
-          </div>
+          <SectionHead id="events-h" title="금통위 일정" info={`통화정책방향 결정회의. 출처: ${events[0]?.source ?? '한국은행'}`} />
           {events.length === 0 ? (
             <p className="empty">등록된 일정이 없습니다.</p>
           ) : (
@@ -156,7 +153,7 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
                     ))}
                   </ul>
                 ) : (
-                  <p className="note">올해 남은 회의가 없습니다. 내년 일정은 한국은행 발표 후 추가합니다.</p>
+                  <p className="note">올해 남은 회의 없음</p>
                 )}
               </div>
               <div>
@@ -171,7 +168,6 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
               </div>
             </div>
           )}
-          <p className="note">일정 출처: {events[0]?.source ?? '한국은행'}</p>
         </section>
       </main>
     </>

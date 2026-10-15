@@ -178,11 +178,16 @@ export type InsightFact = {
   value_now: number | null; value_base: number | null; change: number | null;
   period_now: string; period_base: string; score: number | null; is_notable: boolean; priority: number; rule_status: string;
 };
-export type InsightSummary = { scope: string; asof: string; summary: string; model: string | null; created_at: string };
+export type InsightIssue = {
+  asof: string; model: string | null; created_at: string; rank: number; kind: 'issue' | 'touchpoint';
+  corp_code: string; corp_name: string; title: string; why: string; angle: string;
+  signal_key: string; signal_label: string; event_dt: string | null; rcept_no: string | null;
+};
 
 export type RateLatest = {
   series_key: string; label_ko: string; grp: string; sort_order: number; dt: string; value: number;
   chg_1w_bp: number | null; chg_1m_bp: number | null; chg_3m_bp: number | null; chg_1y_bp: number | null;
+  source: 'ecos' | 'research'; source_url: string | null;
 };
 export type RatePoint = { series_key: string; dt: string; value: number };
 export type SpreadPoint = { dt: string; aa_spread_bp: number | null; bbb_aa_gap_bp: number | null; term_spread_bp: number | null };

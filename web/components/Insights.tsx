@@ -1,81 +1,120 @@
-import { factChange, factValue, kstDateTime } from '@/lib/format';
-import { getInsightFacts, getInsightSummaries } from '@/lib/queries';
-import type { InsightFact } from '@/lib/types';
+import Link from 'next/link';
+import { date, factChange, factValue } from '@/lib/format';
+import { getInsightFacts, getInsightIssues } from '@/lib/queries';
+import type { InsightFact, InsightIssue } from '@/lib/types';
+import { SectionHead } from './Ui';
 
-// 인사이트: 위는 요약(AI 또는 규칙 문장), 아래는 근거 수치 카드.
-// 요약은 아래 카드의 숫자만 쓰도록 수집 단계에서 검증한다.
+// 지표 변화: SQL(mart.insight_facts)이 계산한 값을 그대로 그린다. AI 문장은 쓰지 않는다.
+const BASE_LABEL: Record<string, string> = { yoy: '전년 동기', trail: '직전 12개월', m1: '1개월 전' };
+const BAR_UNITS = new Set(['krw', 'count', 'pct', 'months']);
 
-function Card({ f }: { f: InsightFact }) {
+function Tile({ f, color }: { f: InsightFact; color: string }) {
   const dir = f.change == null ? 0 : Math.sign(Number(f.change));
+  const now = Number(f.value_now ?? 0);
+  const base = f.value_base == null ? null : Number(f.value_base);
+  const showBars = BAR_UNITS.has(f.unit) && base != null && now >= 0 && base >= 0;
+  const max = Math.max(now, base ?? 0) || 1;
+  const baseLabel = f.scope === 'maturity' ? '1년 전' : BASE_LABEL[f.compare] ?? f.period_base;
   return (
-    <li className={`fact${f.is_notable ? ' is-notable' : ''}`}>
-      <span className="fact-label">{f.label_ko}</span>
-      <span className="fact-value">{factValue(f.unit, f.value_now, f.scope)}</span>
-      <span className="fact-change">
-        <span className={`fact-dir dir-${dir > 0 ? 'up' : dir < 0 ? 'down' : 'flat'}`} aria-hidden>{dir > 0 ? '▲' : dir < 0 ? '▼' : '–'}</span>
-        {factChange(f.unit, f.change)}
-        <span className="fact-base"> {f.period_base} {factValue(f.unit, f.value_base, f.scope)} 대비</span>
+    <li className={`tile${f.is_notable ? ' is-notable' : ''}`}>
+      <span className="tile-label">{f.label_ko}</span>
+      <span className="tile-value">{factValue(f.unit, f.value_now, f.scope)}</span>
+      <span className={`tile-delta dir-${dir > 0 ? 'up' : dir < 0 ? 'down' : 'flat'}`}>
+        <span aria-hidden>{dir > 0 ? '▲' : dir < 0 ? '▼' : '–'}</span> {factChange(f.unit, f.change)}
+        <span className="tile-base"> {baseLabel} 대비</span>
       </span>
-      <span className="fact-period">{f.period_now}</span>
+      {showBars && (
+        <span className="tile-bars" aria-hidden>
+          <span className="tile-bar is-base" style={{ width: `${(base! / max) * 100}%` }} />
+          <span className="tile-bar" style={{ width: `${(now / max) * 100}%`, background: color }} />
+        </span>
+      )}
+      {showBars && (
+        <span className="sr-only">
+          {baseLabel} {factValue(f.unit, base, f.scope)}
+        </span>
+      )}
     </li>
   );
 }
 
-export async function InsightPanel({
+export async function ChangeTiles({
   scope,
   title = '최근 변화',
-  maxCards = 6,
+  color = 'var(--accent)',
+  max = 6,
+  info,
 }: {
   scope: string;
   title?: string;
-  maxCards?: number;
+  color?: string;
+  max?: number;
+  info?: string;
 }) {
-  const [facts, summaries] = await Promise.all([
-    getInsightFacts().catch(() => null),
-    getInsightSummaries().catch(() => []),
-  ]);
-  const summary = summaries.find((s) => s.scope === scope);
-  const pool = (facts ?? []).filter((f) => (scope === 'home' ? f.is_notable && f.scope !== 'rates' : f.scope === scope) && f.value_now != null);
-  const cards = [...pool]
+  const facts = await getInsightFacts().catch(() => null);
+  const pool = (facts ?? []).filter((f) => f.scope === scope && f.value_now != null);
+  if (!pool.length) return null;
+  const tiles = [...pool]
     .sort((a, b) => Number(b.is_notable) - Number(a.is_notable) || Number(b.score ?? 0) - Number(a.score ?? 0) || a.priority - b.priority)
-    .slice(0, maxCards);
-  if (!summary && !cards.length) return null;
-
-  const lines = summary?.summary.split('\n').map((l) => l.replace(/^-\s*/, '').trim()).filter(Boolean) ?? [];
-  const isAi = summary?.model && summary.model !== 'rule';
+    .slice(0, max);
+  const period = pool[0].period_now;
   return (
-    <section className="section insight" aria-labelledby={`insight-${scope}`}>
-      <div className="section-head">
-        <h2 id={`insight-${scope}`}>{title}</h2>
-        <p>
-          {scope === 'rates'
-            ? '최신값을 1개월 전과 비교'
-            : scope === 'maturity'
-              ? '3~6개월 뒤 만기를 1년 전 같은 시점과 비교'
-              : '최근 3개월을 전년 같은 기간 또는 직전 12개월과 비교'}
-        </p>
+    <section className="section" aria-labelledby={`chg-${scope}`}>
+      <SectionHead
+        id={`chg-${scope}`}
+        title={title}
+        info={info ?? `${period} 값을 비교 기간과 견줍니다. 회색 막대가 비교 기간, 색 막대가 최근입니다. 기준 이상 바뀐 지표를 먼저 보여 줍니다.`}
+        right={period && period !== '최신' ? <span className="muted small tnum">{period}</span> : undefined}
+      />
+      <ul className="tiles">
+        {tiles.map((f) => (
+          <Tile key={f.fact_key} f={f} color={color} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// 눈여겨볼 회사: 규칙으로 뽑은 후보 중 AI 가 고른 특이 이슈·고객 접점
+function IssueCard({ it }: { it: InsightIssue }) {
+  return (
+    <li className={`issue kind-${it.kind}`}>
+      <div className="issue-top">
+        <span className="issue-kind">{it.kind === 'issue' ? '이슈' : '접점'}</span>
+        <Link href={`/company/${it.corp_code}`} className="issue-corp">{it.corp_name}</Link>
       </div>
-      {lines.length > 0 && (
-        <div className="insight-summary">
-          <ul>
-            {lines.map((l, i) => (
-              <li key={i}>{l}</li>
-            ))}
-          </ul>
-          <p className="insight-meta">
-            {isAi ? 'AI 요약' : '자동 요약'}
-            {summary ? `, ${kstDateTime(summary.created_at)} 기준` : ''}
-            {isAi ? '. 아래 수치만 넣어 만들었고, 수치에 없는 숫자나 전망 문장은 걸러 냅니다.' : ''}
-          </p>
-        </div>
-      )}
-      {cards.length > 0 && (
-        <ul className="facts">
-          {cards.map((f) => (
-            <Card key={f.fact_key} f={f} />
-          ))}
-        </ul>
-      )}
+      <p className="issue-title">{it.title}</p>
+      <p className="issue-why">{it.why}</p>
+      <p className="issue-angle">{it.angle}</p>
+      <div className="issue-foot">
+        <span className="tnum">{date(it.event_dt)}</span>
+        {it.rcept_no && (
+          <a href={`https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${it.rcept_no}`} target="_blank" rel="noreferrer">공시</a>
+        )}
+      </div>
+    </li>
+  );
+}
+
+export async function IssueCards() {
+  const items = await getInsightIssues().catch(() => null);
+  if (!items?.length) return null;
+  const touch = items.filter((i) => i.kind !== 'issue');
+  const issues = items.filter((i) => i.kind === 'issue');
+  const isAi = items[0].model && items[0].model !== 'rule';
+  return (
+    <section className="section" aria-labelledby="issues-h">
+      <SectionHead
+        id="issues-h"
+        title="눈여겨볼 회사"
+        info={`공시·발행·만기·차입 잔액에서 규칙으로 뽑은 후보 가운데 ${isAi ? 'AI가 고르고 문장으로 정리했습니다' : '규칙 우선순위로 골랐습니다'}. 후보 데이터에 없는 회사나 숫자는 쓰지 않습니다. 접점은 자금 조달 수요로 이어질 수 있는 사건, 이슈는 시장에서 이례적인 사건입니다.`}
+        right={<span className="muted small tnum">{date(items[0].asof)}</span>}
+      />
+      <ul className="issues">
+        {[...touch, ...issues].map((it) => (
+          <IssueCard key={`${it.rank}-${it.corp_code}`} it={it} />
+        ))}
+      </ul>
     </section>
   );
 }

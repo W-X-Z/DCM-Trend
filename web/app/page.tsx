@@ -6,8 +6,10 @@ import { byMonth, monthList, sum } from '@/lib/agg';
 import { month, won } from '@/lib/format';
 import { getMaturities, getNotable, getRecentDeals, getTrend, getUiParam } from '@/lib/queries';
 import { PRODUCTS, type BondTrendRow, type Deal, type Maturity, type ProductType } from '@/lib/types';
-import { InsightPanel } from '@/components/Insights';
-import { date } from '@/lib/format';
+import { IssueCards } from '@/components/Insights';
+import { SectionHead } from '@/components/Ui';
+import { date, factChange } from '@/lib/format';
+import { getInsightFacts } from '@/lib/queries';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,12 +50,14 @@ function topMaturing(rows: Maturity[]) {
 export default async function Home() {
   const bondCats = (await getUiParam<string[]>('bond_trend_categories').catch(() => null)) ?? [];
   const since30 = new Date(Date.now() + 9 * 3600_000 - 30 * 86400_000).toISOString().slice(0, 10);
-  const [panels, notable, recentBonds, maturing] = await Promise.all([
+  const [panels, notable, recentBonds, maturing, facts] = await Promise.all([
     Promise.all(PRODUCTS.map((p) => productPanel(p.key, bondCats))).catch(() => null),
     getNotable(since30, 80).catch(() => null),
     getRecentDeals('bond', { subTypes: bondCats, limit: 40 }).catch(() => []),
     getMaturities({ from: addMonths(3), to: addMonths(6), product: 'bond', eventType: '만기' }).catch(() => null),
+    getInsightFacts().catch(() => []),
   ]);
+  const amountFact = (p: ProductType) => facts.find((f) => f.fact_key === `${p}_amount`);
   const examples = recentIssuers(recentBonds);
   const mat = maturing ? topMaturing(maturing.filter((m) => m.sub_type !== '금융채')) : [];
 
@@ -64,9 +68,6 @@ export default async function Home() {
         <section className="hero">
           <div className="wrap">
             <h1>어느 회사를 만나러 가시나요?</h1>
-            <p className="lede">
-              발행사 이름을 넣으면 그 회사의 공모 회사채, 메자닌, 유상증자 이력과 조건이 비슷한 다른 회사의 딜을 함께 보여줍니다.
-            </p>
             <SearchForm size="large" />
             {examples.length > 0 && (
               <p className="examples">
@@ -80,16 +81,21 @@ export default async function Home() {
         </section>
 
         <div className="wrap">
-          <InsightPanel scope="home" title="최근 3개월 눈에 띄는 변화" maxCards={6} />
+          <IssueCards />
 
           {maturing && (
             <section className="section" aria-labelledby="mat-h">
-              <div className="section-head">
-                <h2 id="mat-h">3~6개월 뒤 공모채 만기가 돌아오는 회사 (금융사 제외)</h2>
-                <p>
-                  {mat.length}곳, {won(mat.reduce((s, g) => s + g.amount, 0))}. <Link href="/maturities">전체 목록 보기</Link>
-                </p>
-              </div>
+              <SectionHead
+                id="mat-h"
+                title="3~6개월 뒤 공모채 만기"
+                info="금융사를 뺀 공모 회사채 기준. 차환 진행은 만기 전 120일 안에 새 회사채 신고서를 낸 회사입니다."
+                right={
+                  <>
+                    <span className="muted small tnum">{mat.length}곳, {won(mat.reduce((s, g) => s + g.amount, 0))}</span>
+                    <Link href="/maturities" className="small">전체 목록</Link>
+                  </>
+                }
+              />
               {mat.length === 0 ? (
                 <p className="empty">이 기간에 만기가 돌아오는 공모 회사채가 없습니다.</p>
               ) : (
@@ -109,10 +115,11 @@ export default async function Home() {
           )}
 
           <section className="section" aria-labelledby="market-h">
-            <div className="section-head">
-              <h2 id="market-h">최근 12개월 발행시장</h2>
-              <p>막대는 최근 24개월 월별 발행금액, 이번 달은 진행 중</p>
-            </div>
+            <SectionHead
+              id="market-h"
+              title="최근 12개월 발행시장"
+              info="숫자는 최근 12개월 합계, 막대는 24개월 월별 발행금액(이번 달은 진행 중). 아래 비율은 최근 3개월을 전년 같은 기간과 비교한 값입니다."
+            />
             {panels ? (
               <div className="panels">
                 {panels.map((p) => {
@@ -127,6 +134,11 @@ export default async function Home() {
                         <strong>{won(p.amount12)}</strong>
                         <span>{p.count12.toLocaleString('ko-KR')}건</span>
                       </div>
+                      {amountFact(p.product)?.change != null && (
+                        <p className="panel-delta">
+                          최근 3개월 <strong>{factChange('krw', amountFact(p.product)!.change)}</strong> 전년 대비
+                        </p>
+                      )}
                       <BarChart
                         compact
                         height={64}
@@ -139,7 +151,6 @@ export default async function Home() {
                           tip: [`${won(s.amount)}`, `${s.count}건`],
                         }))}
                       />
-                      <p className="note" style={{ marginTop: 0 }}>{meta.unitNote}</p>
                     </article>
                   );
                 })}
@@ -150,17 +161,14 @@ export default async function Home() {
           </section>
 
           <section className="section" aria-labelledby="notable-h">
-            <div className="section-head">
-              <h2 id="notable-h">최근 30일 눈에 띄는 딜</h2>
-              <p>대형, 증액, 미달, 수집 기간 내 첫 발행</p>
-            </div>
+            <SectionHead id="notable-h" title="최근 30일 눈에 띄는 딜" info="대형, 증액, 미달, 밴드 하단 미만, 수집 기간 중 첫 발행" />
             {notable === null ? (
               <p className="empty">딜 목록을 불러오지 못했습니다. 잠시 뒤 새로고침하세요.</p>
             ) : notable.length === 0 ? (
               <p className="empty">최근 30일 동안 기준에 해당하는 딜이 없습니다.</p>
             ) : (
               <div className="tombstones">
-                {notable.slice(0, 16).map(({ deal, reasons }) => (
+                {notable.slice(0, 8).map(({ deal, reasons }) => (
                   <Tombstone key={deal.deal_key} deal={deal} reasons={reasons} />
                 ))}
               </div>

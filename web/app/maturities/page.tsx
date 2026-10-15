@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { Header } from '@/components/Chrome';
 import { BarChart } from '@/components/BarChart';
-import { InsightPanel } from '@/components/Insights';
+import { ChangeTiles } from '@/components/Insights';
+import { PageHead, SectionHead } from '@/components/Ui';
 import { date, month, num, pct, won } from '@/lib/format';
 import { getMaturities, getMaturityMonthly, getShortDebt } from '@/lib/queries';
 import type { Maturity, ShortDebt } from '@/lib/types';
@@ -93,7 +94,7 @@ function MaturityTable({ groups, kind }: { groups: Group[]; kind: 'bond' | 'mezz
               <td className="col-lead">{g.leads.join(', ') || <span className="muted">–</span>}</td>
               <td>
                 <span className="match">
-                  {g.refi && <span className="badge hit" title="만기 전 120일 안에 새 회사채 신고서를 냈습니다">차환 진행</span>}
+                  {g.refi && <span className="badge hit">차환 진행</span>}
                   {g.nh_lead && <span className="badge">NH 대표주관 이력</span>}
                   {!g.nh_lead && g.nh_involved && <span className="badge">NH 인수 참여</span>}
                 </span>
@@ -174,12 +175,10 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
     <>
       <Header active="maturities" />
       <main id="main" className="wrap">
-        <div className="page-head">
-          <h1 className="page-title">만기도래 발행사</h1>
-          <p className="page-sub">
-            만기가 다가오는 회사는 차환 발행 수요가 생깁니다. 공모 회사채는 트랜치별 만기일, 메자닌은 사채 만기일과 조기상환청구(풋) 시작일,
-            사모채·CP·전단채는 정기보고서의 만기 구간별 잔액으로 봅니다.
-          </p>
+        <PageHead
+          title="만기도래 발행사"
+          info="공모 회사채는 트랜치별 만기일, 메자닌은 사채 만기일과 조기상환청구(풋) 시작일, 사모채·CP·전단채는 정기보고서의 만기 구간별 잔액으로 봅니다."
+        >
           <div className="controls">
             <span className="seg" aria-label="종류">
               {(Object.keys(TABS) as Tab[]).map((t) => (
@@ -206,7 +205,7 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
               </span>
             )}
           </div>
-        </div>
+        </PageHead>
 
         {tab !== 'short' && rows && (
           <dl className="stats">
@@ -218,24 +217,25 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
           </dl>
         )}
 
-        {tab === 'bond' && <InsightPanel scope="maturity" title="만기 규모 변화" maxCards={2} />}
+        {tab === 'bond' && <ChangeTiles scope="maturity" title="1년 전과 비교" color="var(--bond)" max={2} info="3~6개월 뒤 공모채 만기를 1년 전 같은 시점의 3~6개월 뒤 만기와 비교합니다(일반회사채)." />}
 
         <section className="section" aria-labelledby="list-h">
-          <div className="section-head">
-            <h2 id="list-h">
-              {tab === 'short' ? '1년 안에 만기가 돌아오는 잔액 상위 회사' : `${date(from)} ~ ${date(to)} 도래`}
-            </h2>
-            <p>
-              {tab === 'bond' && '2019년 이후 증권신고서를 낸 공모 회사채 기준. 조기상환·매입소각은 반영되지 않습니다. 왼쪽 선은 NH 대표주관 이력'}
-              {tab === 'mezz' && '2021년 이후 발행 결정 기준. 전환·조기상환으로 잔액이 줄었을 수 있습니다'}
-              {tab === 'short' && '최근 정기보고서의 미상환 잔액. 공모·사모 회사채, 기업어음(CP), 단기사채(전단채)'}
-            </p>
-          </div>
+          <SectionHead
+            id="list-h"
+            title={tab === 'short' ? '1년 안에 만기가 돌아오는 잔액 상위 회사' : `${date(from)} ~ ${date(to)} 도래`}
+            info={
+              tab === 'bond'
+                ? '2019년 이후 증권신고서를 낸 공모 회사채 기준. 조기상환·매입소각은 반영되지 않습니다. 왼쪽 선은 NH 대표주관 이력, 차환 진행은 만기 전 120일 안에 새 회사채 신고서를 낸 회사입니다.'
+                : tab === 'mezz'
+                  ? '2021년 이후 발행 결정 기준. 전환·조기상환으로 잔액이 줄었을 수 있습니다.'
+                  : '최근 정기보고서의 미상환 잔액. 공모·사모 회사채, 기업어음(CP), 단기사채(전단채).'
+            }
+          />
           {tab === 'short' ? (
             shortDebt === null ? (
               <p className="empty">잔액을 불러오지 못했습니다.</p>
             ) : shortDebt.length === 0 ? (
-              <p className="empty">정기보고서 잔액을 수집하고 있습니다. 상장사 전체를 받는 데 2~3일 걸립니다(하루 호출 한도).</p>
+              <p className="empty">정기보고서 잔액을 수집하고 있습니다.</p>
             ) : (
               <ShortDebtTable rows={shortDebt} />
             )
@@ -250,10 +250,7 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
 
         {tab === 'bond' && (
           <section className="section" aria-labelledby="cal-h">
-            <div className="section-head">
-              <h2 id="cal-h">앞으로 12개월 공모 회사채 만기</h2>
-              <p>월별 만기 금액</p>
-            </div>
+            <SectionHead id="cal-h" title="앞으로 12개월 공모 회사채 만기" />
             <div className="chart-card">
               <BarChart
                 title="월별 공모 회사채 만기 금액"

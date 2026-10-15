@@ -39,7 +39,7 @@ export async function Disclosures({ corp }: { corp: string }) {
           ))}
         </ul>
       ) : (
-        <p className="note">최근 6개월에 정기보고서·지분 변동 외 공시는 없습니다.</p>
+        <p className="note">정기보고서·지분 변동 외 공시 없음</p>
       )}
       {rest.length > 0 && (
         <details className="disc-more">

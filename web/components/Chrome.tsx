@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { PRODUCTS } from '@/lib/types';
 import { getDataStatus } from '@/lib/queries';
 import { kstDateTime } from '@/lib/format';
 
@@ -22,32 +21,26 @@ export function SearchForm({ defaultValue = '', size = 'small' }: { defaultValue
   );
 }
 
+// 머리글: 화면 이동만 둔다. 상품(회사채·메자닌·유상증자·IPO) 선택은 동향 화면 안의 탭으로.
+const NAV = [
+  { key: 'trends', href: '/trends/bond', label: '발행 동향' },
+  { key: 'maturities', href: '/maturities', label: '만기도래' },
+  { key: 'rates', href: '/rates', label: '금리' },
+] as const;
+
 export function Header({ active, showSearch = true }: { active?: string; showSearch?: boolean }) {
+  const current = active && ['bond', 'mezz', 'equity', 'ipo'].includes(active) ? 'trends' : active;
   return (
     <header className="site-header">
       <div className="wrap header-row">
-        <Link href="/" className="wordmark">DCM 트렌드</Link>
+        <Link href="/" className="wordmark">발행시장 트렌드</Link>
         <nav aria-label="주요 화면" className="nav">
-          {PRODUCTS.map((p) => (
-            <Link
-              key={p.key}
-              href={`/trends/${p.key}`}
-              className={`nav-link p-${p.key}${active === p.key ? ' is-active' : ''}`}
-              aria-current={active === p.key ? 'page' : undefined}
-            >
-              {p.label}
-            </Link>
-          ))}
-          <span className="nav-sep" aria-hidden />
-          {[
-            { key: 'maturities', label: '만기도래' },
-            { key: 'rates', label: '금리' },
-          ].map((x) => (
+          {NAV.map((x) => (
             <Link
               key={x.key}
-              href={`/${x.key}`}
-              className={`nav-link nav-plain${active === x.key ? ' is-active' : ''}`}
-              aria-current={active === x.key ? 'page' : undefined}
+              href={x.href}
+              className={`nav-link${current === x.key ? ' is-active' : ''}`}
+              aria-current={current === x.key ? 'page' : undefined}
             >
               {x.label}
             </Link>
@@ -59,22 +52,15 @@ export function Header({ active, showSearch = true }: { active?: string; showSea
   );
 }
 
-
 export async function Footer() {
   const s = await getDataStatus().catch(() => null);
   return (
     <footer className="site-footer">
       <div className="wrap footer-row">
         <p>
-          DART 공시(OpenDART)를 자동으로 읽어 집계한 값입니다. 제안서에 옮기기 전에 공시 원문을 확인하세요.
+          출처 DART 공시(OpenDART). 제안서에 옮기기 전에 공시 원문을 확인하세요.
+          {s?.last_refresh_at ? ` 마지막 갱신 ${kstDateTime(s.last_refresh_at)}` : ''}
         </p>
-        {s && (
-          <p className="muted">
-            {s.first_deal_dt ? `${s.first_deal_dt.slice(0, 7).replace('-', '.')} 이후 ` : ''}
-            회사채 {s.bond_deals.toLocaleString('ko-KR')}건, 메자닌 {s.mezz_deals.toLocaleString('ko-KR')}건, 유상증자 {s.equity_deals.toLocaleString('ko-KR')}건.
-            {s.last_refresh_at ? ` 마지막 갱신 ${kstDateTime(s.last_refresh_at)} (한국시간)` : ''}
-          </p>
-        )}
       </div>
     </footer>
   );

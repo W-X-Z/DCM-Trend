@@ -3,7 +3,7 @@ import './globals.css';
 import { Footer } from '@/components/Chrome';
 
 export const metadata: Metadata = {
-  title: { default: 'DCM 트렌드', template: '%s | DCM 트렌드' },
+  title: { default: '발행시장 트렌드', template: '%s | 발행시장 트렌드' },
   description: 'DART 공시 기반 회사채·메자닌·유상증자 발행시장 모니터',
   robots: { index: false, follow: false },
 };

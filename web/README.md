@@ -1,4 +1,4 @@
-# web — DCM 트렌드 화면
+# web — 발행시장 트렌드 화면
 
 Next.js 14 (App Router). 모든 조회는 서버 컴포넌트에서 Supabase REST 로 `mart` 스키마만 읽는다.
 키는 서버 환경변수로만 쓰고 브라우저로 보내지 않는다.
