@@ -1,1 +1,1 @@
-{"command":"sequence","maxCalls":"3000","steps":[{"command":"filings","types":"I","days":"75"}]}
+{"command":"sequence","maxCalls":"200","steps":[{"command":"documents","rceptNos":"20261015800543,20261008800456,20261015800403,20261014900687,20260922900618,20261008900913,20261015900804,20261012900281,20261014900552","keepRaw":"1"}]}

@@ -2437,3 +2437,77 @@ details.metrics dd {
   font-size: var(--s-1);
   color: var(--muted);
 }
+
+/* 월별 발행 패턴 히트맵 ----------------------------------------------------- */
+.season {
+  margin-top: 28px;
+}
+
+.season-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: var(--s-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.season-grid th {
+  font-weight: 500;
+  color: var(--muted);
+  padding: 4px 6px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.season-grid tbody th,
+.season-grid tfoot th {
+  text-align: left;
+  color: var(--ink-2);
+}
+
+.season-grid td {
+  padding: 7px 6px;
+  text-align: right;
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--ink);
+  min-width: 46px;
+}
+
+.season-grid td.is-future {
+  background: transparent;
+}
+
+.season-grid td.is-now {
+  outline: 1px dashed var(--ink-2);
+  outline-offset: -1px;
+}
+
+.season-grid td.season-total {
+  background: transparent;
+  font-weight: 600;
+}
+
+.season-grid tfoot td {
+  background: transparent;
+  vertical-align: bottom;
+  height: 64px;
+  position: relative;
+  padding-top: 18px;
+}
+
+.season-bar {
+  display: block;
+  width: 100%;
+  min-height: 2px;
+  max-height: 40px;
+  border-radius: 2px 2px 0 0;
+  opacity: 0.85;
+}
+
+.season-pct {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-2);
+  font-weight: 600;
+}

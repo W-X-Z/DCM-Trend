@@ -1,4 +1,5 @@
 import { select, selectAll, rpc, inList } from './db';
+import { TREND_DEAL_COLS, type TrendDeal } from './period';
 import type {
   BondIssue, BondTrendRow, Comp, FeedItem, CompanyHit, CompanyOverview, DataStatus, Deal, DisclosureRule, EquityTrendRow,
   FeeRow, InsightFact, InsightIssue, IpoTrendRow, LeagueRow, Maturity, MaturityMonth, Metric, MezzTrendRow,
@@ -130,6 +131,18 @@ export async function getInsightIssues(): Promise<InsightIssue[]> {
 
 export async function getFeed(): Promise<FeedItem[]> {
   return select<FeedItem>('v_feed', { order: 'rank.asc' });
+}
+
+// 발행 동향 기간 집계용 딜 (필요한 열만)
+export async function getTrendDeals(product: ProductType, since: string): Promise<TrendDeal[]> {
+  const rows = await selectAll<TrendDeal>('v_deals', {
+    select: TREND_DEAL_COLS,
+    product_type: `eq.${product}`,
+    deal_dt: `gte.${since}`,
+    status: product === 'ipo' ? 'neq.withdrawn' : undefined,
+    order: 'deal_dt.asc,deal_key.asc',
+  });
+  return rows;
 }
 
 // 회사채 발행(트랜치 묶음). since 는 납입일 기준
