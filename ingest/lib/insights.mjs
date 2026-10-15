@@ -108,7 +108,9 @@ const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을
 
 // 눈에 띄지 않는 지표는 이름만 넘겨 요약이 숫자 나열이 되지 않게 한다.
 export function compactForModel(facts) {
-  return facts.map((f) => (f.눈에띄는변화 ? f : { scope: f.scope, key: f.key, 지표: f.지표, 눈에띄는변화: false }));
+  return facts
+    .filter((f) => f.눈에띄는변화 || !String(f.key).startsWith('top_deal'))
+    .map((f) => (f.눈에띄는변화 ? f : { scope: f.scope, key: f.key, 지표: f.지표, 눈에띄는변화: false }));
 }
 
 function numbersIn(text) {
@@ -178,6 +180,10 @@ export async function buildSummaries({ db, key = process.env.OPENAI_API_KEY, mod
           used = model;
         } else {
           log(`insights: ${scope} AI 요약 검증 실패 (숫자 ${v.bad.join(',')}${v.banned ? ', 전망 표현' : ''}) → 규칙 문장 사용`);
+          await db.rpc('ingest_log_issue', {
+            p_stage: 'quality', p_code: 'summary_rejected',
+            p_detail: { scope, bad_numbers: v.bad, banned: v.banned, text: text.slice(0, 1500) },
+          }).catch(() => {});
         }
       } catch (e) {
         log(`insights: ${scope} AI 호출 실패 → 규칙 문장 사용: ${e.message}`);
