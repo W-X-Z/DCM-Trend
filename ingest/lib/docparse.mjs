@@ -11,6 +11,9 @@
 // - 수요예측: "[회 차 : 제22-1회] (단위: 건, 억원) ... 건수 |8 |18 |... |36 |수량 |900 |... |6,500 |경쟁률 |1.80 : 1 |... |13.00 : 1"
 // - IPO 밴드: "희망공모가액 |17,000원 ~ 18,500원", 수요예측 경쟁률 행: "경쟁률 |394.85 |99.20 |... |983.98"
 // - 메자닌 풋: 표 "1차 |2028-08-27 |2028-09-26 |2028-10-26 |..." 또는 "발행일로부터 24개월이 되는 날"
+// - 기준금리 확정 후 두 번째 [발행조건확정] (이랜드월드 108회·롯데케미칼 64회): "[회차: 108] 이자율: 6.306% 발행수익률: 6.306%"
+//   가산금리 문장은 "1년 만기 무보증 회사채 개별민평", "AAA등급 은행채 3년 만기 등급민평" 처럼 사이에 낱말이 끼기도 한다
+// - 한 딜의 수요예측·가산금리와 확정 금리가 서로 다른 공시에 나뉘어 있으므로 합치는 일은 SQL(core.deal_doc_value)이 한다
 
 const ENT = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&nbsp;': ' ', '&#160;': ' ' };
 
@@ -43,8 +46,13 @@ export function parseBond(text) {
     out.push({ field, series: series ?? null, value: String(value) });
   };
 
-  // 1) 회차별 요약표 (첫 값·마지막 값)
-  const blocks = [...text.matchAll(/회차\s*:\s*\|\s*([0-9]+(?:-[0-9]+)?)\s*\|(.{0,1500}?)(?=회차\s*:\s*\||$)/g)];
+  // 1) 회차별 요약표 (첫 값·마지막 값). 표 사이 간격이 길어 다음 표까지가 아니라 최대 1,500자만 본다.
+  const heads = [...text.matchAll(/회차\s*:\s*\|\s*([0-9]+(?:-[0-9]+)?)\s*\|/g)];
+  const blocks = heads.map((h, i) => {
+    const start = h.index + h[0].length;
+    const end = Math.min(i + 1 < heads.length ? heads[i + 1].index : text.length, start + 1500);
+    return [null, h[1], text.slice(start, end)];
+  });
   const seen = new Map();
   for (const [, s, body] of blocks) {
     const series = normSeries(s);
@@ -60,6 +68,17 @@ export function parseBond(text) {
     if (coupon !== null) rec.coupon = coupon;
     if (yld !== null) rec.yield = yld;
     if (maturity) rec.maturity = maturity;
+    seen.set(series, rec);
+  }
+  // 기준금리 확정 후 정정 표: "[회차: 108] 이자율: 6.306% 발행수익률: 6.306%", "[회차 : 64]발행수익률(%): 4.497 연리이자율(%): 4.497"
+  for (const m of text.matchAll(/\[\s*회\s*차\s*:\s*([0-9]+(?:-[0-9]+)?)\s*\]([^[|]{0,160})/g)) {
+    const series = normSeries(m[1]);
+    const coupon = num(m[2].match(/(?:연리)?이자율\s*(?:\(\s*%\s*\))?\s*:\s*(\d+\.\d+)/)?.[1]);
+    const yld = num(m[2].match(/발행수익률\s*(?:\(\s*%\s*\))?\s*:\s*(\d+\.\d+)/)?.[1]);
+    if (coupon === null && yld === null) continue;
+    const rec = seen.get(series) ?? { first: null, last: null };
+    if (coupon !== null) rec.coupon = coupon;
+    if (yld !== null) rec.yield = yld;
     seen.set(series, rec);
   }
   for (const [series, r] of seen) {
@@ -99,7 +118,8 @@ export function parseBond(text) {
 
   // 4) 확정 가산금리 (만기 연수별, 범위가 아닌 한 값)
   const spreads = new Map();
-  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*년\s*만기\s*회사채\s*(?:개별|등급)\s*민평\s*수익률[^~|]{0,160}?에\s*([+-]?\d+(?:\.\d+)?)\s*%\s*p\.?\s*를\s*가산/g)) {
+  // "2년 만기 회사채 개별민평", "1년 만기 무보증 회사채 개별민평", "AAA등급 은행채 3년 만기 등급민평"
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*년\s*만기\s*(?:[가-힣]+\s*){0,2}?(?:개별|등급)\s*민평\s*수익률[^~|]{0,160}?에\s*([+-]?\d+(?:\.\d+)?)\s*%\s*p\.?\s*를\s*가산/g)) {
     spreads.set(m[1], Math.round(Number(m[2]) * 100));
   }
   for (const [years, bp] of spreads) push('final_spread_bp_by_tenor', years, bp);
@@ -110,14 +130,20 @@ export function parseBond(text) {
     return vals.length ? vals[vals.length - 1] : null;
   };
   const demandRe = /(?:\[\s*회\s*차\s*:\s*제?\s*([0-9]+(?:-[0-9]+)?)\s*회?\s*\])?[^[]{0,900}?\|\s*건수((?:\s*\|\s*[\d,\-]+)+)\s*\|\s*수량((?:\s*\|\s*[\d,\-]+)+)\s*\|\s*경쟁률((?:\s*\|\s*(?:[\d.,]+\s*:\s*1|-))+)/g;
-  const unitEok = /단위\s*:\s*건\s*,\s*억원/.test(text);
+  // 수량 단위는 표 바로 위 "(단위: 건, 억원)" 에서 읽는다. 표기가 없으면 억원으로 본다(원 단위면 1억 미만일 수 없다).
+  const unitOf = (win) => {
+    const u = [...win.matchAll(/단위\s*:\s*([^)|]{0,30})/g)].pop()?.[1] ?? '';
+    return /백만\s*원/.test(u) ? 1e6 : /억\s*원/.test(u) ? 1e8 : /(?:^|[\s,])원/.test(u) ? 1 : null;
+  };
   for (const m of text.matchAll(demandRe)) {
     const series = m[1] ? normSeries(m[1]) : null;
     const count = lastNum(m[2]);
     const qty = lastNum(m[3]);
     const ratio = lastNum(m[4].replace(/\s*:\s*1/g, ''));
+    let unit = unitOf(m[0].slice(0, m[0].indexOf('건수'))) ?? 1e8;
+    if (unit === 1 && qty !== null && qty < 1e8) unit = 1e8;
     push('demand_count', series, count);
-    push('demand_krw', series, qty !== null ? (unitEok ? qty * 1e8 : qty) : null);
+    push('demand_krw', series, qty !== null ? qty * unit : null);
     push('competition_ratio', series, ratio);
   }
   return out;
@@ -132,16 +158,29 @@ export function parseIpo(text) {
     push('band_low', num(band[1]));
     push('band_high', num(band[2]));
   }
-  const finals = [...text.matchAll(/확정\s*공모\s*가(?:액|격)?[^0-9|]{0,24}\|?\s*(?:금\s*)?([\d,]{3,})\s*원/g)].map((m) => num(m[1])).filter(Boolean);
-  if (finals.length) push('offer_price_final', finals[finals.length - 1]);
+  // 확정공모가: ① 표 칸 "1주당 확정공모가액 |18,500원" ② 문장 "공모가액을 10,000원으로 확정" ③ 공모개요 표(정정 후)의 모집가액.
+  // "확정공모가액이 23,445원 이상으로 결정되는 경우", "확정공모가액 기준 취득가격(18,034원)" 같은 조건 문장은 쓰지 않는다.
+  const last = (re) => [...text.matchAll(re)].map((m) => num(m[1])).filter(Boolean).pop() ?? null;
+  const overview = [...text.matchAll(/기명식\s*보통주\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)/g)]
+    .map((m) => [num(m[1]), num(m[3]), num(m[4])])
+    .filter(([q, p, t]) => q && p && t && Math.abs(q * p - t) <= t * 0.001)
+    .map(([, p]) => p);
+  let final =
+    last(/확정\s*공모\s*가(?:액|격)\s*\|\s*(?:금\s*)?([\d,]{3,})\s*원/g) ??
+    last(/공모\s*가(?:액|격)?(?:은|는|을|를|이|가)?\s*(?:1주당\s*)?(?:금\s*)?([\d,]{3,})\s*원\s*(?:으로|로)\s*(?:최종\s*)?(?:확정|결정)/g) ??
+    overview.pop() ??
+    null;
+  const lo = band ? num(band[1]) : null;
+  const hi = band ? num(band[2]) : null;
+  if (final && lo && hi && (final < lo * 0.5 || final > hi * 1.5)) final = null;
+  if (final) push('offer_price_final', final);
   // 수요예측 결과 표의 경쟁률 행: 숫자가 3개 이상 이어진 행 중 마지막 값(합계)
   const rows = [...text.matchAll(/경쟁률((?:\s*\|\s*[\d,]+(?:\.\d+)?\s*(?::\s*1)?){3,})/g)];
   if (rows.length) {
     const vals = [...rows[rows.length - 1][1].matchAll(/([\d,]+(?:\.\d+)?)/g)].map((x) => num(x[1]));
     push('demand_ratio', vals[vals.length - 1]);
   }
-  const lock = text.match(/의무\s*보유\s*확약[^|]{0,40}\|?[^|]{0,20}?(\d+(?:\.\d+)?)\s*%/);
-  if (lock) push('lockup_pct', num(lock[1]));
+  // 의무보유 확약 비율은 확약기간별 참여내역 표를 합산해야 해서 아직 읽지 않는다(문장 정규식은 0% 오탐이 많았다).
   return out;
 }
 

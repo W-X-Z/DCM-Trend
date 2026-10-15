@@ -125,6 +125,35 @@ await check('원문: 증액 판단 (22-2 500억 → 1,000억)',
   `select string_agg(deal_key || ':' || is_increased, ',' order by deal_key) from mart.v_deals where product_type = 'bond'`,
   'bond:00500254:22-1:false,bond:00500254:22-2:true');
 
+// 한 딜의 값이 여러 공시에 나뉜 경우: 필드마다 가장 최근 공시 값, 최초 신고금액은 가장 이른 공시 값
+const regNo = (await db.query(
+  `select rcept_no from core.deal_filings where deal_key = 'bond:00500254:22-1' and role = 'registration' order by rcept_no limit 1`)).rows[0]?.rcept_no;
+await db.exec('set role service_role');
+await db.query(`select public.ingest_put_doc_fields(null, $1, 'bond', $2::jsonb)`, [regNo, JSON.stringify([
+  { field: 'coupon_pct', series: '22-1', value: '3.1' },          // 확정 공시에는 없는 값 → 채택
+  { field: 'competition_ratio', series: '22-1', value: '99' },    // 확정 공시(13배)가 더 최근 → 버림
+  { field: 'amount_initial', series: '22-1', value: '45000000000' },
+])]);
+await db.query(`select public.ingest_refresh()`);
+await db.exec('reset role');
+await check('여러 공시 병합: 금리는 이전 공시, 경쟁률은 최근 공시, 최초 금액은 가장 이른 공시',
+  `select coupon_pct || '|' || competition_ratio || '|' || is_increased from mart.v_deals where deal_key = 'bond:00500254:22-1'`,
+  '3.1|13|true');
+
+// 같은 공시를 고친 파서로 다시 읽으면, 이번에 나오지 않은 필드(이전 run 값)는 쓰지 않는다
+await db.exec('set role service_role');
+const run2 = (await db.query(`select public.ingest_start_run('test-reparse') as id`)).rows[0].id;
+await db.query(`select public.ingest_put_doc_fields($1, '20261015000311', 'bond', $2::jsonb)`, [run2, JSON.stringify([
+  { field: 'final_spread_bp_by_tenor', series: '2', value: '-12' },
+])]);
+await db.exec('reset role');
+await check('다시 읽은 공시: 새 값만 사용',
+  `select coalesce(core.doc_value('20261015000311', 'rating_raw'), '-') || '|' || core.doc_value('20261015000311', 'final_spread_bp_by_tenor', '2')`,
+  '-|-12');
+await check('파서 버전을 올린 규칙의 공시는 다시 대기열로',
+  `select count(*)::int from public.ingest_pending_documents(1000) p where p.purpose in ('bond', 'ipo')`,
+  (await db.query(`select count(*)::int as n from raw.filings f join ref.document_fetch_rules r on r.is_active and r.purpose in ('bond', 'ipo') and f.report_nm ~ r.report_pattern and (r.lookback_days is null or f.rcept_dt >= current_date - r.lookback_days)`)).rows[0].n);
+
 let failed = 0;
 for (const r of results) {
   if (!r.ok) failed++;

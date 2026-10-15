@@ -62,14 +62,33 @@ export function toReadable(f) {
   };
 }
 
+// 최근 3개월 상위 딜 → 요약 입력용 사실. 한 건이 합계의 30% 이상이면 눈에 띄는 사실로 본다.
+export const TOP_DEAL_NOTABLE_PCT = 30;
+export function topDealFacts(rows) {
+  return rows.map((r) => ({
+    scope: r.scope,
+    key: `top_deal_${r.rank}`,
+    지표: `${SCOPE_LABEL[r.scope] ?? r.scope} 최근 3개월 ${r.rank === 1 ? '최대' : `${r.rank}번째`} 딜`,
+    기간: r.period,
+    값: `${r.corp_name}${r.sub_type ? ` ${r.sub_type}` : ''} ${won(r.amount_krw)} (합계의 ${Number(r.share_pct).toFixed(1)}%)`,
+    비교기준: null,
+    비교값: null,
+    변화: null,
+    눈에띄는변화: Number(r.share_pct) >= TOP_DEAL_NOTABLE_PCT,
+    점수: Number(r.share_pct) / TOP_DEAL_NOTABLE_PCT,
+  }));
+}
+
 // 규칙 문장 (AI 없이도 항상 만들 수 있는 요약)
 export function ruleSummary(facts) {
   const usable = facts.filter((f) => f.값 && f.변화).sort((a, b) => b.점수 - a.점수);
-  if (!usable.length) return '- 비교할 수 있는 기간의 데이터가 아직 부족하다.';
+  const top = facts.find((f) => f.key === 'top_deal_1' && f.눈에띄는변화);
+  const topLine = top ? [`- ${top.지표}: ${top.값}`] : [];
+  if (!usable.length) return topLine.length ? topLine.join('\n') : '- 비교할 수 있는 기간의 데이터가 아직 부족하다.';
   const notable = usable.filter((f) => f.눈에띄는변화).slice(0, 4);
   const line = (f) => `- ${f.지표}: ${f.기간} ${f.값}, ${f.비교기준} ${f.비교값} 대비 ${f.변화}`;
-  if (!notable.length) return ['- 기준 이상으로 바뀐 지표는 없다.', ...usable.slice(0, 2).map(line)].join('\n');
-  return notable.map(line).join('\n');
+  if (!notable.length) return ['- 기준 이상으로 바뀐 지표는 없다.', ...usable.slice(0, 2).map(line), ...topLine].join('\n');
+  return [...notable.map(line), ...topLine].join('\n');
 }
 
 const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을 정리해 주는 애널리스트다.
@@ -79,6 +98,8 @@ const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을
 - 3~5개의 불릿("- "로 시작), 각 불릿은 한 문장. 변화가 큰 것부터.
 - 각 불릿에 비교 기준(예: 전년 동기, 직전 12개월, 1개월 전)을 밝힌다.
 - 눈에띄는변화가 false 인 항목은 "큰 변화 없음"으로 묶어 한 줄 이내로만 언급한다.
+- key 가 top_deal 로 시작하는 항목은 최근 3개월 상위 딜이다. 금액 변화가 한두 건에 좌우됐으면 그 딜 이름과 비중을 밝힌다.
+  금액이 크게 늘거나 줄었다는 문장은 '최대 1건 제외' 지표가 있으면 함께 적는다.
 - 존댓말 없이 간결한 보고서 문체("~했다", "~이다")로 쓴다.`;
 
 function numbersIn(text) {
@@ -117,8 +138,15 @@ async function openai({ key, model, scope, facts }) {
 export async function buildSummaries({ db, key = process.env.OPENAI_API_KEY, model = process.env.OPENAI_MODEL || 'gpt-5-mini', log = console.log }) {
   const raw = await db.rpc('ingest_insight_facts');
   const readable = raw.map(toReadable);
-  const byScope = Object.fromEntries(SCOPES.map((s) => [s, readable.filter((f) => f.scope === s)]));
-  byScope.home = readable.filter((f) => f.눈에띄는변화 && f.scope !== 'rates').sort((a, b) => b.점수 - a.점수).slice(0, 8);
+  const top = topDealFacts(await db.rpc('ingest_insight_top_deals', { p_per_scope: 2 }).catch((e) => {
+    log(`insights: 상위 딜 조회 실패 → 생략: ${e.message}`);
+    return [];
+  }));
+  const byScope = Object.fromEntries(SCOPES.map((s) => [s, [...readable, ...top].filter((f) => f.scope === s)]));
+  byScope.home = [
+    ...readable.filter((f) => f.눈에띄는변화 && f.scope !== 'rates').sort((a, b) => b.점수 - a.점수).slice(0, 8),
+    ...top.filter((f) => f.key === 'top_deal_1' && Number(f.점수) >= 50 / TOP_DEAL_NOTABLE_PCT),
+  ];
   const hashes = await db.rpc('ingest_summary_hashes');
   const asof = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
   const out = {};
