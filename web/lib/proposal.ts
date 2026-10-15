@@ -68,8 +68,10 @@ const spreadRange = (i: BondIssue) =>
 const amountPair = (i: { initial_amount_krw: number | null; amount_krw: number | null }) =>
   i.initial_amount_krw && i.amount_krw && i.initial_amount_krw !== i.amount_krw ? `${won(i.initial_amount_krw)} → ${won(i.amount_krw)}` : won(i.amount_krw);
 // 직전 회차 문장: 증액·감액이면 최초 신고 금액을 함께 쓴다
+// '1년' → '1년 단일 만기', '1년+2년' → '1년+2년 구조'
+const structOf = (combo: string | null | undefined) => (!combo ? '' : combo.includes('+') ? `${combo} 구조` : `${combo} 단일 만기`);
 const lastIssueLine = (i: BondIssue) => {
-  const head = `직전 회차는 ${date(i.pricing_dt ?? i.deal_dt)} 수요예측을 거쳐 ${i.tenor_combo ? `${i.tenor_combo} 구조로 ` : ''}`;
+  const head = `직전 회차는 ${date(i.pricing_dt ?? i.deal_dt)} 수요예측을 거쳐 ${i.tenor_combo ? `${structOf(i.tenor_combo)}로 ` : ''}`;
   const a = won(i.amount_krw);
   const init = i.initial_amount_krw ? Number(i.initial_amount_krw) : null;
   const fin = i.amount_krw ? Number(i.amount_krw) : null;
@@ -156,13 +158,15 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
     key: 'refi', title: '만기 구조와 차환 수요', status: 'filled',
     lines: [
       mats.length
-        ? `향후 2년 내 공모 회사채 ${mats.length}건, ${won(sum(mats, (m) => m.amount_krw))}의 만기가 도래하며, ${in1y.length ? `이 중 1년 내 도래분은 ${won(sum(in1y, (m) => m.amount_krw))}입니다` : '1년 내 도래분은 없습니다'}.`
+        ? in1y.length === mats.length
+          ? `향후 1년 내 공모 회사채 ${mats.length}건, ${won(sum(mats, (m) => m.amount_krw))}의 만기가 도래합니다.`
+          : `향후 2년 내 공모 회사채 ${mats.length}건, ${won(sum(mats, (m) => m.amount_krw))}의 만기가 도래하며, ${in1y.length ? `이 중 1년 내 도래분은 ${won(sum(in1y, (m) => m.amount_krw))}입니다` : '1년 내 도래분은 없습니다'}.`
         : '향후 2년 내 만기가 도래하는 공모 회사채는 없습니다.',
       ...(sd?.total_1y_krw != null
         ? [(() => {
           const parts = [['회사채', sd.bond_1y_krw], ['CP', sd.cp_1y_krw], ['단기사채', sd.stb_krw]]
             .filter(([, v]) => v != null && Number(v) > 0).map(([k, v]) => `${k} ${won(Number(v))}`);
-          return `${date(sd.stlm_dt)} 정기보고서 기준 1년 내 만기가 도래하는 차입금은 ${won(sd.total_1y_krw)}${parts.length ? `(${parts.join(', ')})` : ''}입니다.`;
+          return `${date(sd.stlm_dt)} 정기보고서 기준 1년 내 만기가 도래하는 차입금은 ${parts.length === 1 ? parts[0] : `${won(sd.total_1y_krw)}${parts.length ? `(${parts.join(', ')})` : ''}`}입니다.`;
         })()]
         : []),
     ],
@@ -291,7 +295,7 @@ async function bondSections(c: CompanyOverview): Promise<Section[]> {
     key: 'structure', title: '발행 구조안', status: 'partial',
     lines: [
       ...(combos[0] ? [`최근 6개월간 ${group}급에서 가장 많이 쓰인 만기 구조는 ${combos[0].combo}(${pct0(combos[0].share)})입니다.`] : []),
-      ...(last?.tenor_combo ? [`직전 회차는 ${last.tenor_combo} 구조로 발행했습니다.`] : []),
+      ...(last?.tenor_combo ? [`직전 회차는 ${structOf(last.tenor_combo)}로 발행했습니다.`] : []),
       '발행 금액, 만기 구성, 금리밴드는 발행사의 자금 계획을 반영해 결정합니다. 아래 표를 판단 근거로 활용하시기 바랍니다.',
     ],
     table: combos.length
