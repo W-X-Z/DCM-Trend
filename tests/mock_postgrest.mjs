@@ -79,7 +79,13 @@ for (let back = 24; back >= 0; back--) {
     const pay = day(between(2, maxDay));
     sql.push(`insert into core.deals (deal_key, product_type, sub_type, corp_code, series, is_public, status, announce_dt, pricing_dt, payment_dt, amount_krw, initial_amount_krw, latest_rcept_no)
       values (${q(key)}, 'bond', ${q(cat)}, ${q(c.code)}, ${q(`${between(10, 120)}-${between(1, 2)}`)}, true, 'completed', ${q(pay)}::date - 14, ${q(pay)}::date - 7, ${q(pay)}, ${amt}, ${inc ? amt * 0.6 : amt}, null);`);
-    sql.push(`insert into core.bond_terms (deal_key, tenor_months, maturity_dt) values (${q(key)}, ${tenor}, (${q(pay)}::date + make_interval(months => ${tenor}))::date);`);
+    const rating = pick(['AA+', 'AA0', 'AA0', 'AA-', 'A+', 'A0', 'A-', 'BBB+', 'BBB0']);
+    const fixedBand = rating.startsWith('BBB');
+    const ratio = Math.round((rnd() < 0.08 ? rnd() * 0.9 : 1 + rnd() * 9) * 100) / 100;
+    sql.push(`insert into core.bond_terms (deal_key, tenor_months, maturity_dt, rating_raw, rating, band_type, band_low, band_high, competition_ratio, final_spread_bp, coupon_pct, demand_krw)
+      values (${q(key)}, ${tenor}, (${q(pay)}::date + make_interval(months => ${tenor}))::date, ${q(rating)}, ${q(rating)},
+              ${q(fixedBand ? '고정금리' : '개별민평')}, ${fixedBand ? 5.5 : -30}, ${fixedBand ? 6.8 : 30}, ${ratio},
+              ${fixedBand ? 'null' : between(-25, 20)}, ${fixedBand ? (between(560, 680) / 100) : 'null'}, ${Math.round(amt * ratio)});`);
     const lead = pick(firms);
     sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(lead)}, ${q(lead)}, '대표주관', '총액인수', ${amt * 0.6}, ${Math.round(amt * 0.6 * between(10, 32) / 1e4)});`);
     const co = pick(firms.filter((f) => f !== lead));
@@ -131,6 +137,17 @@ for (let back = 24; back >= 0; back--) {
       const lead = pick(firms);
       sql.push(`insert into core.deal_underwriters (deal_key, firm_raw, firm_std, role, method, amount_krw, fee_krw) values (${q(key)}, ${q(lead)}, ${q(lead)}, '대표주관', ${q(uw)}, ${amt}, ${Math.round(amt * between(150, 350) / 1e4)});`);
     }
+  }
+}
+// 가상 정기보고서 잔액 (회사채 공모·사모·합계, 기업어음, 단기사채)
+for (const c of corps) {
+  const pub = between(0, 30) * 1e10, prv = between(0, 10) * 1e10, cp = between(0, 20) * 1e10;
+  const row = (scope, total, y1) => ({ remndr_exprtn1: '미상환잔액', remndr_exprtn2: scope, sm: String(total), yy1_below: String(y1), stlm_dt: '2026-06-30', rcept_no: `SYN${c.code}` });
+  const items = [row('공모', pub, pub * 0.3), row('사모', prv, prv * 0.5), row('합계', pub + prv, pub * 0.3 + prv * 0.5)];
+  for (const it of items) sql.push(`insert into raw.api_items (endpoint, corp_code, rcept_no, period_key, item, item_hash) values ('cprndNrdmpBlce', ${q(c.code)}, ${q(it.rcept_no)}, '2026-11012', ${q(JSON.stringify(it))}::jsonb, md5(${q(JSON.stringify(it))}));`);
+  if (cp > 0) {
+    const it = { remndr_exprtn1: '미상환잔액', remndr_exprtn2: '합계', de10_below: String(cp * 0.2), de30_excess_de90_below: String(cp * 0.3), de90_excess_de180_below: String(cp * 0.5), sm: String(cp), stlm_dt: '2026-06-30', rcept_no: `SYN${c.code}` };
+    sql.push(`insert into raw.api_items (endpoint, corp_code, rcept_no, period_key, item, item_hash) values ('entrprsBilScritsNrdmpBlce', ${q(c.code)}, ${q(it.rcept_no)}, '2026-11012', ${q(JSON.stringify(it))}::jsonb, md5(${q(JSON.stringify(it))}));`);
   }
 }
 await db.exec(sql.join('\n'));

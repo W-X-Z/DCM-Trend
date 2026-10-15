@@ -127,7 +127,13 @@ export default async function CompanyPage({ params }: { params: { corp: string }
               <h2 id="upcoming-h">다가오는 만기·풋옵션</h2>
               <p>공모 회사채 트랜치 만기, 메자닌 만기·조기상환청구 시작일. 앞으로 5년</p>
             </div>
-            <UpcomingTable rows={upcoming} />
+            <UpcomingTable rows={upcoming.slice(0, 12)} />
+            {upcoming.length > 12 && (
+              <details className="disc-more">
+                <summary>{upcoming.length - 12}건 더 보기</summary>
+                <UpcomingTable rows={upcoming.slice(12)} />
+              </details>
+            )}
           </section>
         )}
 

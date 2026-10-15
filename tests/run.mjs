@@ -164,6 +164,18 @@ await check('anon: mart 뷰 조회 가능', `select count(*)::int from mart.v_de
 await check('anon: mart 함수 실행 가능',
   `select count(*)::int from mart.similar_deals('bond:FX_ELAND:108')`, 14, one);
 await check('anon: 지표 정의 조회 가능', `select count(*)::int from mart.v_metric_catalog`, 18, one);
+{
+  // 모든 mart 뷰를 anon 으로 읽을 수 있어야 한다 (뷰 안에서 부르는 함수가 ref·core 를 읽으면 권한 오류)
+  await db.exec('reset role');
+  const views = (await db.query(`select table_name from information_schema.views where table_schema = 'mart' order by 1`)).rows.map((r) => r.table_name);
+  await db.exec('set role anon');
+  const failedViews = [];
+  for (const v of views) {
+    try { await db.query(`select * from mart.${v} limit 1`); } catch (e) { failedViews.push(`${v}: ${e.message}`); }
+  }
+  try { await db.query(`select * from mart.insight_facts() limit 1`); } catch (e) { failedViews.push(`insight_facts: ${e.message}`); }
+  results.push({ name: `anon: mart 뷰 ${views.length}개 모두 조회 가능`, ok: failedViews.length === 0, actual: failedViews, expected: [] });
+}
 await check('anon: core 직접 조회 불가', `select count(*) from core.deals`, 'permission denied',
   () => 'allowed');
 results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');

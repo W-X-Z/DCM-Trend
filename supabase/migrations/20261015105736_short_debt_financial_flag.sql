@@ -52,6 +52,7 @@ select
   nullif(n.cp_3m, 0)            as cp_3m_krw,
   nullif(n.stb, 0)              as stb_krw,
   nullif(coalesce(n.bond_1y, 0) + coalesce(n.cp_1y, 0) + coalesce(n.stb, 0), 0) as total_1y_krw,
-  (core.map_value('bond_category_corp', c.corp_name) is not null)                as is_financial
+  exists (select 1 from ref.value_maps v
+          where v.domain = 'bond_category_corp' and c.corp_name ~ v.pattern)      as is_financial
 from n
 join core.companies c on c.corp_code = n.corp_code;
