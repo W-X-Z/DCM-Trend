@@ -369,13 +369,15 @@ export async function rates(env, { from = '2019-01-01', key = process.env.ECOS_A
 
 // 9. 인사이트 요약 (DB 사실 → AI 요약 또는 규칙 문장) -------------------------
 import { buildIssues } from './issues.mjs';
+import { buildFeed } from './feed.mjs';
 
 // 인사이트: 지표 변화는 화면이 SQL(mart.insight_facts)로 직접 그리고,
 // AI 는 '눈여겨볼 회사'(특이 이슈·고객 접점)만 고른다. 예전 범위별 요약(buildSummaries)은 쓰지 않는다.
 export async function insights(env) {
   return withRun(env, 'insights', {}, async (ctx) => {
     const out = await buildIssues({ db: env.db });
-    ctx.written = out.items;
+    const feed = await buildFeed({ db: env.db });
+    ctx.written = out.items + feed.items;
   });
 }
 
