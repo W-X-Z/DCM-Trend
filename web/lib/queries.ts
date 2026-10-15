@@ -1,6 +1,6 @@
 import { select, selectAll, rpc, inList } from './db';
 import type {
-  BondTrendRow, Comp, CompanyHit, CompanyOverview, DataStatus, Deal, DisclosureRule, EquityTrendRow,
+  BondIssue, BondTrendRow, Comp, FeedItem, CompanyHit, CompanyOverview, DataStatus, Deal, DisclosureRule, EquityTrendRow,
   FeeRow, InsightFact, InsightIssue, IpoTrendRow, LeagueRow, Maturity, MaturityMonth, Metric, MezzTrendRow,
   NotableDeal, PolicyEvent, ProductType, RateLatest, RatePoint, ShortDebt, SpreadPoint,
 } from './types';
@@ -126,6 +126,19 @@ export async function getInsightFacts(): Promise<InsightFact[]> {
 
 export async function getInsightIssues(): Promise<InsightIssue[]> {
   return select<InsightIssue>('v_insight_issues', { order: 'rank.asc' });
+}
+
+export async function getFeed(): Promise<FeedItem[]> {
+  return select<FeedItem>('v_feed', { order: 'rank.asc' });
+}
+
+// 회사채 발행(트랜치 묶음). since 는 납입일 기준
+export async function getBondIssues(since: string, subTypes?: string[] | null): Promise<BondIssue[]> {
+  return selectAll<BondIssue>('v_bond_issues', {
+    deal_dt: `gte.${since}`,
+    sub_type: subTypes?.length ? inList(subTypes) : undefined,
+    order: 'deal_dt.desc,amount_krw.desc.nullslast',
+  });
 }
 
 // 금리 ---------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { Footer } from '@/components/Chrome';
+import { Footer, Header } from '@/components/Chrome';
 
 export const metadata: Metadata = {
   title: { default: '발행시장 트렌드', template: '%s | 발행시장 트렌드' },
@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <a href="#main" className="skip">본문으로 건너뛰기</a>
+        <Header />
         {children}
         <Footer />
       </body>

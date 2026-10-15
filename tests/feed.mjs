@@ -42,7 +42,7 @@ const checks = [
   ['AI 선택: 버린 이유', picked.rejected.map((r) => r.why.split(' ')[0]), ['numbers', 'unknown', 'banned']],
   ['AI 카드에 원래 공시·종류 연결', [picked.items[0].rcept_no, picked.items[0].kind_label, picked.items[0].by], ['20261015000311', '회사채', 'test-model']],
   ['규칙 카드: 4종 모두 검증 통과', cands.slice(0, 4).every((c) => validateCard(ruleCard(c), c).ok), true],
-  ['규칙 카드: 공시 본문', ruleCard(cands[2]).body, '2026.10.15 유형자산양수결정 공시를 냈다. 금액은 1,904억원, 상대는 Valmet 등이다.'],
+  ['규칙 카드: 공시 본문', ruleCard(cands[2]).body, '10월 15일 유형자산양수결정 공시를 냈다. 금액은 1,904억원, 상대는 Valmet 등이다.'],
   ['위기 공시는 경고색', balanceCards([], cands).find((i) => i.kind === 'd_dissolve')?.tone, 'alert'],
   ['균형: 같은 종류 3건까지·공시 3건 이상 (후보 한도 8건)', [balanced.filter((i) => i.kind === 'bond').length, balanced.filter((i) => i.tag === '공시').length >= 3, balanced.length], [3, true, 8]],
   ['균형: AI 가 고른 순서 유지', balanced.slice(0, 3).map((i) => i.corp_name), ['GS', '회사채0', '회사채1']],

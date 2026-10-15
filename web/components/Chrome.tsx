@@ -1,17 +1,20 @@
 import Link from 'next/link';
 import { getDataStatus } from '@/lib/queries';
 import { kstDateTime } from '@/lib/format';
+import { CompanySearch } from './CompanySearch';
+import { NavTabs } from './NavTabs';
 
+// 검색 화면 본문에서 쓰는 큰 검색창 (머리글 검색은 CompanySearch)
 export function SearchForm({ defaultValue = '', size = 'small' }: { defaultValue?: string; size?: 'small' | 'large' }) {
   return (
     <form action="/search" method="get" role="search" className={`search search-${size}`}>
-      <label htmlFor={`q-${size}`} className="sr-only">발행사 이름</label>
+      <label htmlFor={`q-${size}`} className="sr-only">회사 이름</label>
       <input
         id={`q-${size}`}
         name="q"
         type="search"
         defaultValue={defaultValue}
-        placeholder="발행사 이름 (예: 이랜드월드)"
+        placeholder="회사 이름 (예: 이랜드월드)"
         autoComplete="off"
         required
         minLength={1}
@@ -21,32 +24,16 @@ export function SearchForm({ defaultValue = '', size = 'small' }: { defaultValue
   );
 }
 
-// 머리글: 화면 이동만 둔다. 상품(회사채·메자닌·유상증자·IPO) 선택은 동향 화면 안의 탭으로.
-const NAV = [
-  { key: 'trends', href: '/trends/bond', label: '발행 동향' },
-  { key: 'maturities', href: '/maturities', label: '만기도래' },
-  { key: 'rates', href: '/rates', label: '금리' },
-] as const;
-
-export function Header({ active, showSearch = true }: { active?: string; showSearch?: boolean }) {
-  const current = active && ['bond', 'mezz', 'equity', 'ipo'].includes(active) ? 'trends' : active;
+// 머리글: 1줄 = 서비스 이름 + 회사 검색, 2줄 = 화면 탭
+export function Header() {
   return (
-    <header className="site-header">
-      <div className="wrap header-row">
+    <header className="gh">
+      <div className="wrap gh-top">
         <Link href="/" className="wordmark">발행시장 트렌드</Link>
-        <nav aria-label="주요 화면" className="nav">
-          {NAV.map((x) => (
-            <Link
-              key={x.key}
-              href={x.href}
-              className={`nav-link${current === x.key ? ' is-active' : ''}`}
-              aria-current={current === x.key ? 'page' : undefined}
-            >
-              {x.label}
-            </Link>
-          ))}
-        </nav>
-        {showSearch && <SearchForm />}
+        <CompanySearch />
+      </div>
+      <div className="wrap">
+        <NavTabs />
       </div>
     </header>
   );

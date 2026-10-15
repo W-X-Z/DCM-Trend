@@ -85,6 +85,11 @@ export function ro(word) {
   return jong === 0 || jong === 8 ? '로' : '으로';
 }
 const has = (c, f) => (c._raw.flags ?? []).includes(f);
+// '2026.10.13' → '10월 13일'
+export const kd = (s) => {
+  const m = String(s ?? '').match(/(\d{4})[.-](\d{2})[.-](\d{2})/);
+  return m ? `${Number(m[2])}월 ${Number(m[3])}일` : String(s ?? '');
+};
 const amountOf = (f) => f['양수금액'] ?? f['양도금액'] ?? f['양수가액'] ?? f['양도가액'] ?? f['정지 영업 매출'] ?? f['부도금액'] ?? null;
 const partyOf = (f) => f['대상 회사'] ?? f['합병 상대회사'] ?? f['거래상대방'] ?? f['분할설립회사'] ?? null;
 
@@ -116,21 +121,21 @@ export function ruleCard(c) {
       : has(c, 'i_wide_spread') ? '가산금리 높은 회사채 발행'
       : `${f['만기 구성'] ?? ''} 회사채 ${f['확정 발행액'] ?? ''}`.trim();
     const body = [
-      `${f['수요예측일'] ?? c.날짜} 수요예측을 거쳐 ${f['만기 구성'] ?? ''} 구조로 ${f['확정 발행액'] ?? ''}을 확정했다.`.replace(/\s+/g, ' ').replace('만기 미상 구조로 ', ''),
+      `${kd(f['수요예측일'] ?? c.날짜)} 수요예측을 거쳐 ${f['만기 구성'] ?? ''} 구조로 ${f['확정 발행액'] ?? ''}을 확정했다.`.replace(/\s+/g, ' ').replace('만기 미상 구조로 ', ''),
       f['전체 수요예측 경쟁률'] ? `전체 경쟁률은 ${f['전체 수요예측 경쟁률']}였다.` : null,
     ].filter(Boolean).join(' ');
     return { headline, body, point: '트랜치 구성과 증액 배경 확인' };
   }
   if (k === 'mezz') {
     const body = [
-      `${f['결정일'] ?? c.날짜} ${f['공모 여부'] ?? ''} ${f['종류'] ?? '메자닌'} ${f['발행액'] ?? ''} 발행을 결정했다.`.replace(/\s+/g, ' '),
+      `${kd(f['결정일'] ?? c.날짜)} ${f['공모 여부'] ?? ''} ${f['종류'] ?? '메자닌'} ${f['발행액'] ?? ''} 발행을 결정했다.`.replace(/\s+/g, ' '),
       f['표면이자율'] && f['만기이자율'] ? `표면이자율 ${f['표면이자율']}, 만기이자율 ${f['만기이자율']}이다.` : null,
     ].filter(Boolean).join(' ');
     return { headline: `${f['종류'] ?? '메자닌'} ${f['발행액'] ?? ''} 발행 결정`.trim(), body, point: '조달 목적과 후속 자금 수요 확인' };
   }
   if (k === 'equity') {
     const body = [
-      `${f['결정일'] ?? c.날짜} ${f['방식'] ?? ''} 유상증자로 ${f['조달액'] ?? ''}을 조달하기로 했다.`.replace(/\s+/g, ' '),
+      `${kd(f['결정일'] ?? c.날짜)} ${f['방식'] ?? ''} 유상증자로 ${f['조달액'] ?? ''}을 조달하기로 했다.`.replace(/\s+/g, ' '),
       f['신주 비율'] ? `신주 비율은 ${f['신주 비율']}다.` : null,
     ].filter(Boolean).join(' ');
     return { headline: `${f['방식'] ?? ''} 유상증자 ${f['조달액'] ?? ''}`.trim(), body, point: '자금 사용처와 추가 조달 필요 여부 확인' };
@@ -145,7 +150,7 @@ export function ruleCard(c) {
   const amt = amountOf(f);
   const party = partyOf(f);
   const body = [
-    `${f['공시일'] ?? c.날짜} ${f['공시'] ?? c.특징} 공시를 냈다.`,
+    `${kd(f['공시일'] ?? c.날짜)} ${f['공시'] ?? c.특징} 공시를 냈다.`,
     amt ? `금액은 ${amt}${party ? `, 상대는 ${party}` : ''}이다.` : party ? `상대는 ${party}이다.` : null,
   ].filter(Boolean).join(' ');
   return { headline: c.특징, body, point: DISC_POINT[k] ?? '자금 수요로 이어지는지 확인' };

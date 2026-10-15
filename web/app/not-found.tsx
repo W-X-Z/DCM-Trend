@@ -1,10 +1,8 @@
 import Link from 'next/link';
-import { Header } from '@/components/Chrome';
 
 export default function NotFound() {
   return (
     <>
-      <Header />
       <main id="main" className="wrap">
         <div className="page-head">
           <h1 className="page-title">찾는 화면이 없습니다</h1>

@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { Header } from '@/components/Chrome';
 import { BarChart } from '@/components/BarChart';
 import { ChangeTiles } from '@/components/Insights';
 import { PageHead, SectionHead } from '@/components/Ui';
@@ -173,7 +172,6 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
 
   return (
     <>
-      <Header active="maturities" />
       <main id="main" className="wrap">
         <PageHead
           title="만기도래 발행사"
