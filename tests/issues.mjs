@@ -1,7 +1,7 @@
 // 눈여겨볼 회사: 후보 형식, AI 항목 검증(후보 밖 회사·숫자 차단), 규칙 선택
 // 후보는 2026-10-15 실데이터(public.ingest_signal_candidates) 일부
 // 실행: npm run test:issues
-import { readableCandidates, validateItem, pickFromModel, ruleSelect, formatFact } from '../ingest/lib/issues.mjs';
+import { readableCandidates, validateItem, pickFromModel, ruleSelect, formatFact, balance } from '../ingest/lib/issues.mjs';
 
 const raw = [
   { kind: 'touchpoint', facts: { 등급: 'AA0', '만기 금액': 1300000000000, '만기 회차 수': 2, 'NH 대표주관 이력': true, '가장 빠른 만기일': '2027-02-14' }, label: '3~6개월 뒤 공모채 만기, 차환 신고서 아직 없음', context: { 시장: '유가증권', '공모채 발행 이력(건)': 15, '최근 회사채 등급': 'AA0', 'NH 대표주관 이력': true }, event_dt: '2027-02-14', priority: 10, rcept_no: null, corp_code: '01515323', corp_name: 'LG에너지솔루션', signal_key: 'refi_due' },
@@ -24,6 +24,13 @@ const model = {
   ],
 };
 const picked = pickFromModel(model, cands);
+// AI 가 같은 신호(만기)만 셋 고른 경우 → 신호별 2곳까지, 이슈 후보(금양)는 최소 1곳 들어가고 6곳까지 규칙으로 채움
+const sameSignal = pickFromModel({ items: [
+  { id: 'c1', title: '공모채 만기 도래', why: '2027.02.14부터 공모채 1.3조원 만기가 돌아온다.', angle: '차환 시기 확인' },
+  { id: 'c2', title: '공모채 만기 도래', why: '2027.01.22부터 공모채 6,900억원 만기가 돌아온다.', angle: '차환 시기 확인' },
+  { id: 'c3', title: '단기 차입 의존', why: '1년 내 만기 차입이 1,690억원이다.', angle: '첫 공모채 점검' },
+] }, cands).items;
+const balanced = balance(sameSignal, cands);
 const rule = ruleSelect(cands, 4);
 
 const checks = [
@@ -38,6 +45,8 @@ const checks = [
   ['AI 항목에 원래 신호·공시 연결', [picked.items[0].signal_key, picked.items[0].event_dt], ['refi_due', '2027-02-14']],
   ['규칙 선택: 신호를 돌아가며, 같은 회사 한 번', rule.map((i) => i.signal_key), ['refi_due', 'cp_reliant', 'invest', 'put_due']],
   ['규칙 문장', rule[0].why, '2027.02.14부터 공모 회사채 1.3조원 만기가 돌아오고, 차환 신고서는 아직 없다.'],
+  ['균형: 신호별 2곳까지·이슈 포함·6곳', [balanced.length, balanced.filter((i) => i.signal_key === 'refi_due').length, balanced.some((i) => i.kind === 'issue')], [6, 2, true]],
+  ['균형: AI 가 고른 순서 유지', balanced.slice(0, 3).map((i) => i.corp_name), ['LG에너지솔루션', '현대제철', 'SK디앤디']],
   ['규칙 문장도 검증 통과', rule.every((it, i) => validateItem(it, cands.find((c) => c._raw.corp_code === it.corp_code)).ok), true],
 ];
 

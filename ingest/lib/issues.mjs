@@ -5,9 +5,12 @@
 
 import { createHash } from 'node:crypto';
 
-const PROMPT_VERSION = 1;
+const PROMPT_VERSION = 2;
 const MIN_ITEMS = 4;
 const TARGET_ITEMS = 6;
+const MAX_ITEMS = 9;
+const PER_SIGNAL = 2;   // 같은 신호에서 최대
+const MIN_ISSUES = 2;   // 후보에 이슈가 있으면 최소
 
 const KRW_KEYS = new Set(['만기 금액', '풋 대상 금액', '금액', '1년 내 만기 차입 합계', '사모 회사채 1년 내', 'CP 1년 내', '전단채']);
 
@@ -121,17 +124,20 @@ export function ruleSelect(cands, n = TARGET_ITEMS, exclude = new Set()) {
 }
 
 const SYSTEM = `너는 증권사 IB 커버리지 본부의 RM(기업 영업 담당)을 돕는 리서처다.
-입력은 공시·발행·만기·차입 잔액 데이터에서 규칙으로 뽑은 후보 회사 목록이다. RM이 이번 주에 먼저 연락하거나 챙겨 볼 회사를 ${TARGET_ITEMS}곳 골라라 (특별히 중요한 후보가 많으면 9곳까지).
+입력은 공시·발행·만기·차입 잔액 데이터에서 규칙으로 뽑은 후보 회사 목록이다. RM이 이번 주에 먼저 연락하거나 챙겨 볼 회사를 ${TARGET_ITEMS}곳 골라라.
+목적은 RM이 이미 아는 정례 일정이 아니라 놓치기 쉬운 특이 이슈와 새로운 고객 접점을 찾는 것이다.
 고르는 기준:
-- 접점: 자금 조달 수요로 이어질 수 있는 사건 (공모채 만기·메자닌 풋 도래, 투자·인수 결정, 공모채 없이 단기 차입 의존, 신종자본 발행, 첫 발행)
+- 접점: 자금 조달 수요로 이어질 수 있는 사건 (투자·인수 결정, 공모채 없이 단기 차입 의존, 신종자본 발행, 첫 발행, 메자닌 풋 도래, 공모채 만기 도래)
 - 이슈: 시장에서 이례적인 사건 (수요예측 미달, 공모가 밴드 하단 미만, 대규모 희석, 합병·분할, 회생·영업정지)
-- 접점을 이슈보다 많이 고른다. 규모가 크거나 공모채 발행 이력·등급이 있는 회사를 우선한다. 같은 회사는 한 번만.
+- 같은 '신호'에서는 ${PER_SIGNAL}곳까지만. 후보에 이슈가 있으면 이슈를 ${MIN_ISSUES}곳 이상 넣는다.
+- 규모만 큰 정례 만기보다 새로 생긴 사건(최근 공시)과 이례적인 사건을 앞에 둔다. 공모채 발행 이력이나 등급이 있는 회사를 우선한다. 같은 회사는 한 번만.
 - 금융회사, 공기업, 스팩, 리츠는 고르지 않는다.
 각 항목:
 - id: 후보 id
-- title: 무슨 일인지 25자 이내 (회사명 빼고)
-- why: 한 문장. 그 후보의 사실·맥락에 있는 내용만. 숫자는 주어진 문자열 그대로
-- angle: 한 문장. RM이 대화에서 확인할 점이나 꺼낼 수 있는 상품 (예: 차환 시기 확인, 첫 공모채 가능성 점검). 단정하지 말고 확인·점검 식으로
+- title: 무슨 일인지 20자 안팎 (회사명 빼고)
+- why: 자연스러운 한 문장. 그 후보의 사실 2~3개만 골라 쓴다. "등급 AA0, 만기 금액 …"처럼 항목을 쉼표로 나열하지 않는다. 숫자는 주어진 문자열 그대로.
+  좋은 예: "2027.02.14부터 공모채 1.3조원 만기가 돌아오는데 아직 차환 신고서를 내지 않았다."
+- angle: RM이 대화에서 확인할 점이나 꺼낼 상품을 30자 안팎의 짧은 구로. 단정하지 말고 확인·점검 식으로. 좋은 예: "차환 시기와 공모·사모 선택 확인"
 금지: 예측·전망 문장, 투자 권유, 후보에 없는 숫자, 존댓말.
 JSON 으로만 답한다: {"items":[{"id":"c3","title":"...","why":"...","angle":"..."}]}`;
 
@@ -174,6 +180,39 @@ export function pickFromModel(out, cands) {
   return { items, rejected };
 }
 
+// AI 결과를 고르게: 신호별 최대 PER_SIGNAL, 이슈 최소 MIN_ISSUES(후보가 있으면), 모자라면 규칙으로 채움
+export function balance(items, cands) {
+  const perSignal = new Map();
+  const kept = [];
+  for (const it of items) {
+    const n = perSignal.get(it.signal_key) ?? 0;
+    if (n >= PER_SIGNAL) continue;
+    perSignal.set(it.signal_key, n + 1);
+    kept.push(it);
+  }
+  let out = kept.slice(0, MAX_ITEMS);
+  const used = () => new Set(out.map((i) => i.corp_code));
+  const issueCands = cands.filter((c) => c._raw.kind === 'issue');
+  const issueCount = () => out.filter((i) => i.kind === 'issue').length;
+  if (issueCands.length && issueCount() < MIN_ISSUES) {
+    const add = ruleSelect(issueCands, MIN_ISSUES - issueCount(), used());
+    // 이슈를 넣을 자리가 없으면 맨 뒤 접점부터 뺀다
+    while (out.length + add.length > MAX_ITEMS) {
+      const idx = out.map((i) => i.kind).lastIndexOf('touchpoint');
+      if (idx < 0) break;
+      out.splice(idx, 1);
+    }
+    out = [...out, ...add];
+  }
+  if (out.length < TARGET_ITEMS) {
+    const counts = new Map();
+    for (const i of out) counts.set(i.signal_key, (counts.get(i.signal_key) ?? 0) + 1);
+    const rest = cands.filter((c) => (counts.get(c._raw.signal_key) ?? 0) < PER_SIGNAL);
+    out = [...out, ...ruleSelect(rest, TARGET_ITEMS - out.length, used())];
+  }
+  return out;
+}
+
 export async function buildIssues({ db, key = process.env.OPENAI_API_KEY, model = process.env.OPENAI_MODEL || 'gpt-5-mini', log = console.log }) {
   const raw = await db.rpc('ingest_signal_candidates', {});
   const cands = readableCandidates(raw ?? []);
@@ -206,11 +245,10 @@ export async function buildIssues({ db, key = process.env.OPENAI_API_KEY, model 
       log(`issues: AI 호출 실패 → 규칙으로 고름: ${e.message}`);
     }
   }
-  if (items.length < MIN_ITEMS) {
-    const fill = ruleSelect(cands, TARGET_ITEMS - items.length, new Set(items.map((i) => i.corp_code)));
-    items = [...items, ...fill];
-    if (used !== 'rule') used = `${used}+rule`;
-  }
+  const before = items.length;
+  items = balance(items, cands);
+  if (used !== 'rule' && items.length > before) used = `${used}+rule`;
+  if (items.length < MIN_ITEMS) log(`issues: ${items.length}곳만 고름`);
   await db.rpc('ingest_put_issue_set', { p_asof: asof, p_items: items, p_model: used, p_hash: hash });
   log(`issues: ${items.length}곳 (${used})`);
   return { items: items.length, model: used };
