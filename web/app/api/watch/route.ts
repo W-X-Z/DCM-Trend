@@ -4,7 +4,7 @@ import { daysAgo, factLine, kstToday } from '@/lib/filings';
 import { dealTitle } from '@/lib/labels';
 import { getKeyFilings } from '@/lib/queries';
 import { won } from '@/lib/format';
-import type { Deal, Maturity } from '@/lib/types';
+import type { BondIssue, Deal, Maturity } from '@/lib/types';
 
 // 관심 회사 모아보기: 브라우저에 저장한 회사 목록(최대 150곳)의 최근 30일 공시·발행과 앞으로 90일 만기·풋옵션.
 // 목록은 서버에 저장하지 않는다.
@@ -23,13 +23,14 @@ const addDays = (n: number) => {
 
 export async function GET(req: Request) {
   const raw = (new URL(req.url).searchParams.get('c') ?? '').split(',').map((s) => s.trim());
-  const corps = [...new Set(raw.filter((c) => /^\d{8}$/.test(c)))].slice(0, 150);
+  const corps = [...new Set(raw.filter((c) => /^[0-9A-Za-z_]{1,20}$/.test(c)))].slice(0, 150);
   if (!corps.length) return NextResponse.json({ events: [] });
   const since = daysAgo(30);
   try {
-    const [filings, deals, upcoming] = await Promise.all([
+    const [filings, deals, bonds, upcoming] = await Promise.all([
       getKeyFilings({ since, corps }),
-      select<Deal>('v_deals', { corp_code: inList(corps), deal_dt: `gte.${since}`, order: 'deal_dt.desc', limit: 300 }),
+      select<Deal>('v_deals', { corp_code: inList(corps), product_type: 'neq.bond', deal_dt: `gte.${since}`, order: 'deal_dt.desc', limit: 300 }),
+      select<BondIssue>('v_bond_issues', { corp_code: inList(corps), deal_dt: `gte.${since}`, order: 'deal_dt.desc', limit: 300 }),
       select<Maturity>('v_maturities', {
         corp_code: inList(corps), and: `(event_dt.gte.${kstToday()},event_dt.lte.${addDays(90)})`, order: 'event_dt.asc', limit: 300,
       }),
@@ -44,6 +45,17 @@ export async function GET(req: Request) {
         when: 'recent', dt: d.deal_dt!, corp_code: d.corp_code, corp_name: d.corp_name, kind: '발행', title: dealTitle(d),
         detail: [won(d.amount_krw), d.lead_managers ? `대표주관 ${d.lead_managers}` : null].filter(Boolean).join(', '),
         href: d.dart_url ?? `/company/${d.corp_code}`, tone: d.is_undersubscribed ? 'alert' : null,
+      })),
+      ...bonds.map((b): WatchEvent => ({
+        when: 'recent', dt: b.pricing_dt ?? b.deal_dt!, corp_code: b.corp_code, corp_name: b.corp_name, kind: '발행',
+        title: `${b.tenor_combo ? `${b.tenor_combo} ` : ''}${b.sub_type && b.sub_type !== '일반회사채' ? b.sub_type : '공모 회사채'}`,
+        detail: [
+          b.initial_amount_krw && b.initial_amount_krw !== b.amount_krw ? `${won(b.initial_amount_krw)} → ${won(b.amount_krw)}` : won(b.amount_krw),
+          b.competition_ratio != null ? `경쟁률 ${Number(b.competition_ratio).toFixed(2)}배` : null,
+          b.lead_managers ? `대표주관 ${b.lead_managers}` : null,
+        ].filter(Boolean).join(', '),
+        href: b.latest_rcept_no ? `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${b.latest_rcept_no}` : `/company/${b.corp_code}`,
+        tone: b.is_undersubscribed ? 'alert' : null,
       })),
       ...upcoming.map((m): WatchEvent => ({
         when: 'upcoming', dt: m.event_dt, corp_code: m.corp_code, corp_name: m.corp_name,

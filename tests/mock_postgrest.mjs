@@ -202,6 +202,34 @@ console.log(`mock: 가상 딜 ${n}건 적재`);
   await db.exec('reset role');
 }
 
+// 가상 거래소 공시 + 원문에서 읽은 값 (주요 공시 화면 확인용)
+{
+  const d = (back) => new Date(today.getTime() + 9 * 3600_000 - back * 86400_000).toISOString().slice(0, 10);
+  const ymdk = (s) => s.replaceAll('-', '');
+  const ev = [
+    { c: corps[2], back: 1, nm: '단기차입금증가결정', f: { '차입금액:krw': '25000000000', '자기자본 대비:pct': '20.86', '차입 목적:text': '운영자금 확보', '차입 형태:text': '금융기관 차입' } },
+    { c: corps[5], back: 1, nm: '신규시설투자등', f: { '투자금액:krw': '216779761800', '자기자본 대비:pct': '8.16', '투자 대상:text': '2차전지 소재 신규 공장', '투자 종료일:date': '2028-12-31' } },
+    { c: corps[9], back: 2, nm: '최대주주변경', f: { '변경 전 최대주주:text': '홍길동 외 4인', '변경 전 지분율:pct': '7.34', '변경 후 최대주주:text': '주식회사 한빛투자3호', '변경 후 지분율:pct': '41.2', '변경 사유:text': '제3자배정 유상증자' } },
+    { c: corps[12], back: 3, nm: '최대주주변경을수반하는주식양수도계약체결', f: { '양도인:text': '김철수 외 3인', '양수인:text': '누리인베스트먼트 주식회사', '양수금액:krw': '23071298595', '예정 지분율:pct': '21.07', '변경 예정일:date': '2026-11-27' } },
+    { c: corps[14], back: 4, nm: '타인에대한채무보증결정', f: { '채무자:text': '솔빛물류(주)', '채무자와의 관계:text': '계열회사', '채권자:text': '한빛저축은행', '채무보증금액:krw': '37450000000', '자기자본 대비:pct': '17.57' } },
+    { c: corps[18], back: 5, nm: '사채원리금미지급발생', f: { '미지급 금액:krw': '3000000000', '사채 종류:text': '제5회 무기명식 이권부 무보증 사모 전환사채' } },
+    { c: corps[20], back: 6, nm: '매출액또는손익구조30%(대규모법인은15%)이상변동', f: { '매출액 증감률:pct': '-2.3', '영업이익 증감률:pct': '343.4', '흑자·적자 전환:text': '당기순이익 흑자전환' } },
+    { c: corps[24], back: 8, nm: '기타시장안내              (상장적격성 실질심사 대상 결정)', f: {} },
+    { c: corps[26], back: 12, nm: '단기차입금증가결정', f: { '차입금액:krw': '120000000000', '자기자본 대비:pct': '6.1', '차입 목적:text': '회사채 상환 재원' } },
+    { c: corps[30], back: 20, nm: '신규시설투자등', f: { '투자금액:krw': '58000000000', '자기자본 대비:pct': '12.4', '투자 대상:text': '물류센터 신축' } },
+    { c: corps[3], back: 40, nm: '타인에대한담보제공결정', f: { '채무자:text': '동탄도시개발(주)', '담보제공금액:krw': '63000000000', '자기자본 대비:pct': '22.7', '담보 재산:text': '오송공장(토지, 건물)' } },
+  ];
+  const filings = ev.map((e, i) => ({ rm: '', flr_nm: e.c.name, corp_cls: 'K', rcept_dt: ymdk(d(e.back)), rcept_no: `${ymdk(d(e.back))}8${String(i).padStart(5, '0')}`, corp_code: e.c.code, corp_name: e.c.name, report_nm: e.nm, stock_code: '' }));
+  await db.exec('set role service_role');
+  const rid = (await db.query(`select public.ingest_start_run('mock-exch') as id`)).rows[0].id;
+  await db.query(`select public.ingest_put_filings($1, $2::jsonb)`, [rid, JSON.stringify(filings)]);
+  for (const [i, e] of ev.entries()) {
+    const items = Object.entries(e.f).map(([field, value]) => ({ field, series: null, value }));
+    if (items.length) await db.query(`select public.ingest_put_doc_fields($1, $2, 'disclosure', $3::jsonb)`, [rid, filings[i].rcept_no, JSON.stringify(items)]);
+  }
+  await db.exec('reset role');
+}
+
 // 눈여겨볼 회사·홈 피드 (수집기와 같은 코드, AI 키 없이 규칙으로 고름)
 {
   const { buildIssues } = await import('../ingest/lib/issues.mjs');

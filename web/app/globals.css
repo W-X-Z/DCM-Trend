@@ -2973,3 +2973,25 @@ tr.row-hl td {
   margin: 12px 0 0;
   text-align: right;
 }
+
+@media (max-width: 959px) {
+  .kf-kinds ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .kf-kinds li {
+    display: inline-flex;
+    gap: 6px;
+    padding: 2px 9px;
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--gc);
+    border-radius: 3px;
+    background: var(--surface);
+  }
+
+  .kf-kinds-bar {
+    display: none;
+  }
+}

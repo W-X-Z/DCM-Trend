@@ -98,7 +98,7 @@ export default async function FilingsPage({ searchParams }: { searchParams: Para
             <h2 id="kf-kinds-h" className="sub-h">종류별 건수</h2>
             <ul>
               {kinds.map((k) => (
-                <li key={k.label}>
+                <li key={k.label} className={`g-${FILING_GROUPS.find((x) => x.grp === k.grp)?.key ?? 'asset'}`}>
                   <span className="kf-kinds-label">{k.label}</span>
                   <span className={`kf-kinds-bar g-${FILING_GROUPS.find((x) => x.grp === k.grp)?.key ?? 'asset'}`} style={{ width: `${Math.max(4, (k.n / maxN) * 100)}%` }} aria-hidden />
                   <span className="kf-kinds-n tnum">{k.n}</span>

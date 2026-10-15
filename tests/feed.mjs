@@ -1,7 +1,7 @@
 // 홈 피드: 후보 형식, AI 카드 검증(후보 밖 회사·숫자 차단), 규칙 카드, 균형
 // 후보는 2026-10-15 실데이터(public.ingest_feed_candidates) 일부
 // 실행: npm run test:feed
-import { readableFeed, validateCard, pickCards, ruleCard, balanceCards, kindLabel } from '../ingest/lib/feed.mjs';
+import { readableFeed, validateCard, pickCards, ruleCard, balanceCards, kindLabel, ida } from '../ingest/lib/feed.mjs';
 
 const raw = [
   { tag: '발행', kind: 'bond', ref_key: '00500254:22:2026-10-21', corp_code: '00500254', corp_name: 'GS', event_dt: '2026-10-15', rcept_no: '20261015000311', flags: ['i_hot_demand'], label: '경쟁률 10배 이상', score: 1.5,
@@ -46,6 +46,13 @@ const checks = [
   ['위기 공시는 경고색', balanceCards([], cands).find((i) => i.kind === 'd_dissolve')?.tone, 'alert'],
   ['균형: 같은 종류 3건까지·공시 3건 이상 (후보 한도 8건)', [balanced.filter((i) => i.kind === 'bond').length, balanced.filter((i) => i.tag === '공시').length >= 3, balanced.length], [3, true, 8]],
   ['균형: AI 가 고른 순서 유지', balanced.slice(0, 3).map((i) => i.corp_name), ['GS', '회사채0', '회사채1']],
+  ['조사: 이다/다', [ida('250억원'), ida('운영자금 확보'), ida('20.86%')], ['이다', '다', '이다']],
+  ['규칙 카드: 단기차입금 (금액·자기자본 대비·목적)', ruleCard(readableFeed([{ tag: '공시', kind: 'd_stdebt', corp_code: 'X', corp_name: '에스엠국일', event_dt: '2026-10-14', flags: ['d_stdebt'], label: '단기차입금 증가',
+    facts: { 공시: '단기차입금증가결정', 공시일: '2026.10.14', 차입금액: '250억원', '자기자본 대비': '20.86%', '차입 목적': '운영자금 확보' } }])[0]).body,
+    '10월 14일 단기차입금증가결정 공시를 냈다. 금액은 250억원으로 자기자본의 20.86%이다. 목적은 운영자금 확보다.'],
+  ['규칙 카드: 최대주주 변경 (전·후 최대주주와 지분율)', ruleCard(readableFeed([{ tag: '공시', kind: 'd_control', corp_code: 'Y', corp_name: '제일엠앤에스', event_dt: '2026-10-14', flags: ['d_control'], label: '최대주주 변경',
+    facts: { 공시: '최대주주변경', 공시일: '2026.10.14', '변경 전 최대주주': '이영진 외 4인', '변경 후 최대주주': '주식회사 에프지투자3호', '변경 후 지분율': '79.91%', '변경 사유': '회생계획 인가 결정에 따른 제3자배정 유상증자' } }])[0]).body,
+    '10월 14일 최대주주가 이영진 외 4인에서 주식회사 에프지투자3호(지분율 79.91%)로 바뀌는 공시를 냈다. 사유는 회생계획 인가 결정에 따른 제3자배정 유상증자다.'],
 ];
 
 let failed = 0;

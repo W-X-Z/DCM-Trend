@@ -16,7 +16,7 @@ const MAX = 150;
 function read(): Item[] {
   try {
     const v = JSON.parse(window.localStorage.getItem(KEY) ?? '[]');
-    return Array.isArray(v) ? v.filter((x) => x && /^\d{8}$/.test(x.c)).slice(0, MAX) : [];
+    return Array.isArray(v) ? v.filter((x) => x && /^[0-9A-Za-z_]{1,20}$/.test(x.c)).slice(0, MAX) : [];
   } catch {
     return [];
   }
@@ -68,11 +68,27 @@ export function WatchButton({ corp, name }: { corp: string; name: string }) {
 
 const md = (d: string) => `${Number(d.slice(5, 7))}.${Number(d.slice(8, 10))}`;
 
+const SHOW = 8;
+
 function EventList({ rows, empty }: { rows: Ev[]; empty: string }) {
   if (!rows.length) return <p className="muted small">{empty}</p>;
   return (
+    <>
+      <Events rows={rows.slice(0, SHOW)} />
+      {rows.length > SHOW && (
+        <details className="disc-more">
+          <summary>{rows.length - SHOW}건 더 보기</summary>
+          <Events rows={rows.slice(SHOW, 60)} />
+        </details>
+      )}
+    </>
+  );
+}
+
+function Events({ rows }: { rows: Ev[] }) {
+  return (
     <ul className="watch-events">
-      {rows.slice(0, 30).map((e, i) => (
+      {rows.map((e, i) => (
         <li key={`${e.corp_code}-${e.dt}-${e.title}-${i}`} className={e.tone === 'alert' ? 'is-alert' : undefined}>
           <span className="tnum we-dt">{md(e.dt)}</span>
           <span className="we-kind">{e.kind}</span>

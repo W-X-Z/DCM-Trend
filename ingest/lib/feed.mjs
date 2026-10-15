@@ -87,6 +87,13 @@ export function ro(word) {
   const jong = code % 28;
   return jong === 0 || jong === 8 ? '로' : '으로';
 }
+// '…이다/…다': 받침이 있으면 '이다' (숫자·기호로 끝나면 '이다')
+export function ida(word) {
+  const ch = String(word ?? '').trim().slice(-1);
+  const code = ch.charCodeAt(0) - 0xac00;
+  if (code < 0 || code > 11171) return '이다';
+  return code % 28 === 0 ? '다' : '이다';
+}
 const has = (c, f) => (c._raw.flags ?? []).includes(f);
 // '2026.10.13' → '10월 13일'
 export const kd = (s) => {
@@ -167,13 +174,35 @@ export function ruleCard(c) {
     ].filter(Boolean).join(' ');
     return { headline: `IPO 공모가 ${f['확정공모가'] ?? ''} 확정`.trim(), body, point: '상장 후 추가 조달 계획 확인' };
   }
+  const when = kd(f['공시일'] ?? c.날짜);
+  const ratio = f['자기자본 대비'];
+  const point = DISC_POINT[k] ?? '자금 수요로 이어지는지 확인';
+  if (k === 'd_control' && (f['변경 후 최대주주'] || f['양수인'])) {
+    const to = f['변경 후 최대주주'] ?? f['양수인'];
+    const share = f['변경 후 지분율'] ?? f['예정 지분율'];
+    const body = [
+      `${when} 최대주주가 ${f['변경 전 최대주주'] ?? f['양도인'] ?? '기존 주주'}에서 ${to}${share ? `(지분율 ${share})` : ''}${ro(share ? ')' : to)} 바뀌는 공시를 냈다.`,
+      f['양수금액'] ? `양수 금액은 ${f['양수금액']}이다.` : f['변경 사유'] ? `사유는 ${f['변경 사유']}${ida(f['변경 사유'])}.` : null,
+    ].filter(Boolean).join(' ');
+    return { headline: c.특징, body, point };
+  }
+  if (k === 'd_plshock' && (f['영업이익 증감률'] || f['매출액 증감률'])) {
+    const body = [
+      `${when} 매출·손익 구조 변동 공시를 냈다.`,
+      [f['매출액 증감률'] ? `매출액 ${f['매출액 증감률']}` : null, f['영업이익 증감률'] ? `영업이익 ${f['영업이익 증감률']}` : null].filter(Boolean).join(', ') + ' 변동했다.',
+      f['흑자·적자 전환'] ? `${f['흑자·적자 전환']}${ida(f['흑자·적자 전환'])}.` : null,
+    ].filter(Boolean).join(' ');
+    return { headline: c.특징, body, point };
+  }
   const amt = amountOf(f);
   const party = partyOf(f);
+  const purpose = f['차입 목적'] ?? f['투자 대상'] ?? f['투자 목적'] ?? null;
   const body = [
-    `${kd(f['공시일'] ?? c.날짜)} ${f['공시'] ?? c.특징} 공시를 냈다.`,
-    amt ? `금액은 ${amt}${party ? `, 상대는 ${party}` : ''}이다.` : party ? `상대는 ${party}이다.` : null,
+    `${when} ${f['공시'] ?? c.특징} 공시를 냈다.`,
+    amt ? `금액은 ${amt}${ratio ? `${ro(amt)} 자기자본의 ${ratio}` : ''}${party ? `, 상대는 ${party}` : ''}${ida(party ?? (ratio ? '%' : amt))}.` : party ? `상대는 ${party}${ida(party)}.` : null,
+    purpose ? `${f['차입 목적'] ? '목적은' : '대상은'} ${purpose}${ida(purpose)}.` : null,
   ].filter(Boolean).join(' ');
-  return { headline: c.특징, body, point: DISC_POINT[k] ?? '자금 수요로 이어지는지 확인' };
+  return { headline: c.특징, body, point };
 }
 
 function toCard(cand, text, model) {

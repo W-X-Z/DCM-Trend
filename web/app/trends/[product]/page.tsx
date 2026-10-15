@@ -281,7 +281,16 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
 
       {(league.length > 0 || fees.length > 0) && (
         <section className="section" aria-labelledby="ib-h">
-          <SectionHead id="ib-h" title={`주관사 (최근 ${PERIOD_LABEL[period]})`} info="인수인 정보가 공시된 딜만 집계합니다." />
+          <SectionHead
+            id="ib-h"
+            title={`주관사 (최근 ${PERIOD_LABEL[period]})`}
+            info="인수인 정보가 공시된 딜만 집계합니다."
+            right={
+              <a className="small" href={`/api/track?product=${product}&m=${period}${product === 'bond' ? `&cat=${encodeURIComponent(cat)}` : ''}`} download>
+                NH 대표주관 딜 목록 내려받기 (CSV)
+              </a>
+            }
+          />
           <div className="breakdowns">
             {league.length > 0 && (
               <div>

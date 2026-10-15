@@ -245,6 +245,33 @@ results.push({ name: '금리 조사: 차단 출처·출처 없는 값은 받지 
 await db.exec(`insert into raw.rates (series_key, dt, value, source, source_url) values ('ktb10y', '2026-10-13', 4.2, 'research', 'https://www.xn--vj4b13a.com/x')`);
 await check('금리 화면: 차단 출처 값은 숨김', `select count(*) from mart.v_rates_daily where series_key = 'ktb10y' and dt = '2026-10-13'`, 0);
 
+// 주요 공시: 거래소 공시 + 원문 값, 상장 위험 정지 규칙, anon 조회
+await db.exec('set role service_role');
+{
+  const rid = (await db.query(`select public.ingest_start_run('t-exch') as id`)).rows[0].id;
+  const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10).replaceAll('-', '');
+  const mk = (no, nm) => ({ rm: '', flr_nm: '테스트', corp_cls: 'K', rcept_dt: today, rcept_no: no, corp_code: '00126380', corp_name: '테스트전자', report_nm: nm, stock_code: '' });
+  await db.query(`select public.ingest_put_filings($1, $2::jsonb)`, [rid, JSON.stringify([
+    mk(`${today}900001`, '단기차입금증가결정'),
+    mk(`${today}900002`, '주권매매거래정지              (상장폐지 사유발생)'),
+    mk(`${today}900003`, '주권매매거래정지              (주식의 병합, 분할 등 전자등록 변경, 말소)'),
+    mk(`${today}900004`, '기타시장안내              (상장적격성 실질심사 대상결정 기한 안내)'),
+  ])]);
+  await db.query(`select public.ingest_put_doc_fields($1, $2, 'disclosure', $3::jsonb)`, [rid, `${today}900001`, JSON.stringify([
+    { field: '차입금액:krw', series: null, value: '25000000000' }, { field: '자기자본 대비:pct', series: null, value: '20.86' },
+  ])]);
+}
+await db.exec('reset role');
+await check('주요 공시: 상장폐지 사유 정지만 (병합 정지·심사 기한 안내 제외)',
+  `select string_agg(label, ',' order by rcept_no) from mart.v_key_filings where corp_name = '테스트전자'`,
+  '단기차입금 증가,상장폐지 사유·실질심사');
+await check('주요 공시: 원문 값과 규모',
+  `select (facts ->> '차입금액') || '|' || (facts ->> '자기자본 대비') || '|' || size_krw || '|' || grp from mart.v_key_filings where label = '단기차입금 증가' and corp_name = '테스트전자'`,
+  '250억원|20.86%|25000000000|자금 수요');
+await db.exec('set role anon');
+await check('주요 공시: anon 으로 원문 값까지 조회', `select count(facts) from mart.v_key_filings where corp_name = '테스트전자'`, 2);
+await db.exec('reset role');
+
 let failed = 0;
 for (const r of results) {
   if (!r.ok) failed++;
