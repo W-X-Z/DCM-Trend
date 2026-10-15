@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Footer, Header } from '@/components/Chrome';
+import { Feedback } from '@/components/Feedback';
+import { Notice } from '@/components/Notice';
 
 export const metadata: Metadata = {
   title: { default: '발행시장 트렌드', template: '%s | 발행시장 트렌드' },
@@ -24,6 +26,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Header />
         {children}
         <Footer />
+        <Feedback />
+        <Notice />
       </body>
     </html>
   );

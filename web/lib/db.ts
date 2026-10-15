@@ -90,6 +90,28 @@ export async function rpc<T>(fn: string, args: Record<string, unknown>): Promise
   return res.json();
 }
 
+// 쓰기 함수(피드백 보내기 등): 캐시하지 않는다. 실패하면 PostgREST 오류 메시지를 그대로 넘긴다.
+export async function rpcWrite<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+  assertEnv();
+  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json', 'Content-Profile': 'mart', 'Accept-Profile': 'mart' }),
+    body: JSON.stringify(args),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text.slice(0, 200);
+    try {
+      message = (JSON.parse(text) as { message?: string }).message ?? message;
+    } catch {
+      /* JSON 이 아닌 응답 */
+    }
+    throw new DbError(message);
+  }
+  return res.json();
+}
+
 // PostgREST in 필터. 값의 큰따옴표·괄호는 제거한다.
 export const inList = (values: string[]) =>
   `in.(${values.map((v) => `"${v.replace(/["()]/g, '')}"`).join(',')})`;

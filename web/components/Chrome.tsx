@@ -3,6 +3,7 @@ import { getDataStatus } from '@/lib/queries';
 import { kstDateTime } from '@/lib/format';
 import { CompanySearch } from './CompanySearch';
 import { NavTabs } from './NavTabs';
+import { NoticeLink } from './Notice';
 
 // 검색 화면 본문에서 쓰는 큰 검색창 (머리글 검색은 CompanySearch)
 export function SearchForm({ defaultValue = '', size = 'small' }: { defaultValue?: string; size?: 'small' | 'large' }) {
@@ -47,6 +48,9 @@ export async function Footer() {
         <p>
           출처 DART 공시(OpenDART). 제안서에 옮기기 전에 공시 원문을 확인하세요.
           {s?.last_refresh_at ? ` 마지막 갱신 ${kstDateTime(s.last_refresh_at)}` : ''}
+        </p>
+        <p>
+          현업 의견을 받기 위한 테스트용 프로토타입입니다. 내부 자료는 입력하지 마세요. <NoticeLink />
         </p>
       </div>
     </footer>

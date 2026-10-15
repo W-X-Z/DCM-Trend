@@ -180,7 +180,21 @@ await check('anon: core 직접 조회 불가', `select count(*) from core.deals`
   () => 'allowed');
 results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');
 if (results[results.length - 1].ok) failed--;
+
+// 8. 피드백: anon 은 보내기만, 읽기는 불가 --------------------------------
+await check('피드백: anon 이 보낼 수 있음',
+  `select mart.submit_feedback('improve', '  만기 화면에 풋 금액도 보여 주세요  ', '인더스트리1부', '/maturities', 'c1', '1280x800') > 0`, true, one);
+await check('피드백: 잘못된 유형은 거절', `select mart.submit_feedback('spam', '내용입니다')`, 'ERROR: invalid kind');
+await check('피드백: 같은 브라우저 1분 3건 제한',
+  `select mart.submit_feedback('etc', 'a2', null, null, 'c1'), mart.submit_feedback('etc', 'a3', null, null, 'c1'), mart.submit_feedback('etc', 'a4', null, null, 'c1')`,
+  'ERROR: too many');
+await check('피드백: anon 은 저장된 피드백을 읽지 못함', `select count(*) from ops.feedback`, 'permission denied', () => 'allowed');
+results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');
+if (results[results.length - 1].ok) failed--;
 await db.exec('reset role');
+await check('피드백: 앞뒤 공백 정리·한국 시간 보기',
+  `select kind_label || '|' || body || '|' || author || '|' || page from ops.v_feedback where client_id = 'c1' and kind_label = '개선 의견'`,
+  '개선 의견|만기 화면에 풋 금액도 보여 주세요|인더스트리1부|/maturities', one);
 
 // 결과 출력 -------------------------------------------------------------
 for (const r of results) {

@@ -5,6 +5,8 @@ OpenDART·ECOS 공개 데이터로 **① 시장·공시 모니터링**, **② �
 
 운영 주소: https://ib-deal-agent.vercel.app
 
+현업 피드백(화면 오른쪽 아래 '의견 보내기')은 Supabase 대시보드 Table Editor > 스키마 `ops` > `v_feedback` 에서 본다.
+
 ## 구조
 
 ```
