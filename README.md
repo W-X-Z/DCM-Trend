@@ -8,8 +8,8 @@ OpenDART 공개 데이터로 **① 회사별 조달 이력·유사 딜**과 **�
 ```
 supabase/migrations/   DB 스키마와 SQL 로직 (raw → core → mart, ref 규칙)
 tests/                 실제 공시 픽스처로 SQL 로직 검증 (PGlite, Supabase 불필요)
-ingest/                OpenDART 수집기 (GitHub Actions)        ← W1
-web/                   Next.js 화면 (Vercel)                    ← W2
+ingest/                OpenDART 수집기 (GitHub Actions, 매일 07:10 KST)
+web/                   Next.js 화면 (Vercel, 서울 리전) — web/README.md
 docs/                  아키텍처, 로직 변경 가이드, 결정 사항
 ```
 
@@ -23,15 +23,20 @@ docs/                  아키텍처, 로직 변경 가이드, 결정 사항
 
 ```bash
 npm install
-npm test
+npm test                 # SQL 로직: 108 신고서 'BBB0 최근 1년 발행사례 14건' 재현 등 41개 항목
+npm run test:ingest      # 수집기 종단: 모의 OpenDART → 수집 RPC → raw → 변환
+npm run test:transforms  # 실제 OpenDART 응답 샘플 → 딜 변환 결과
 ```
 
-이랜드월드 제108회 증권신고서의 'BBB0 최근 1년 발행사례 14건' 표를 유사 딜 로직이 그대로 재현하는지 등 33개 항목을 검증한다.
+## DB
 
-## 배포 (환경 준비 후)
+- Supabase 프로젝트 `dcm-trend` (서울 리전, Postgres 17).
+- `20261015081900_deal_transforms` 는 SQL 편집기에서 직접 적용해 원격 이력에 없다. CLI 를 쓰기 전에 `supabase migration repair --status applied 20261015081900` 을 한 번 실행한다.
+- 로컬 `supabase/migrations` 파일명의 버전은 원격 이력과 같다. 새 마이그레이션은 이 뒤에 추가한다.
 
 ```bash
-supabase link --project-ref <ref>
-supabase db push            # 마이그레이션 적용
-# Supabase 대시보드: API > Exposed schemas 에 mart 추가
+supabase link --project-ref byajhicukluhlbzafclh
+supabase db push            # 새 마이그레이션 적용
 ```
+
+- 대시보드 설정: API > Exposed schemas 에 `mart` 추가 (화면이 mart 를 읽기 위해 필요)
