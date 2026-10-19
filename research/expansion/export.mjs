@@ -2,22 +2,24 @@
 //
 //   node research/expansion/export.mjs --from-web https://ib-deal-agent.vercel.app   (키 없이, 웹의 공개 JSON)
 //   SUPABASE_URL=... SUPABASE_KEY=<anon 키> node research/expansion/export.mjs         (DB 에서 바로)
+//   node research/expansion/export.mjs --from-json data.json                           (/api/expansion/data 와 같은 형식 파일)
 //   공통: [--out research/expansion/data]
 //
 // 읽는 곳: 웹 /api/expansion/data, 또는 Supabase mart.v_expansion_companies / v_expansion_events / v_company_overview
 // 쓰는 곳: companies.csv, events.csv (엑셀용 UTF-8 BOM), summary.md, meta.json
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const args = process.argv.slice(2);
 const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const outDir = opt('--out') ?? 'research/expansion/data';
 const fromWeb = (opt('--from-web') ?? process.env.EXPANSION_WEB_URL ?? '').replace(/\/$/, '');
+const fromJson = opt('--from-json');
 const base = (process.env.SUPABASE_URL ?? '').replace(/\/$/, '');
 const key = process.env.SUPABASE_KEY ?? process.env.SUPABASE_ANON_KEY ?? '';
-if (!fromWeb && (!base || !key)) {
-  console.error('--from-web <웹 주소> 또는 SUPABASE_URL·SUPABASE_KEY(anon 키)가 필요합니다');
+if (!fromWeb && !fromJson && (!base || !key)) {
+  console.error('--from-web <웹 주소>, --from-json <파일>, 또는 SUPABASE_URL·SUPABASE_KEY(anon 키)가 필요합니다');
   process.exit(1);
 }
 const headers = { apikey: key, 'Accept-Profile': 'mart' };
@@ -62,8 +64,9 @@ const clip = (s, n) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s ?? '')
 let companies;
 let events;
 const stock = new Map();
-if (fromWeb) {
-  const body = await fromWebJson();
+if (fromWeb || fromJson) {
+  const body = fromJson ? JSON.parse(readFileSync(fromJson, 'utf8')) : await fromWebJson();
+  if (!Array.isArray(body.companies) || !Array.isArray(body.events)) throw new Error('companies·events 배열이 없습니다');
   companies = body.companies;
   events = body.events;
   for (const [k, v] of Object.entries(body.stocks ?? {})) stock.set(k, v ?? '');
