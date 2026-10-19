@@ -217,6 +217,8 @@ console.log(`mock: 가상 딜 ${n}건 적재`);
     { c: corps[24], back: 8, nm: '기타시장안내              (상장적격성 실질심사 대상 결정)', f: {} },
     { c: corps[26], back: 12, nm: '단기차입금증가결정', f: { '차입금액:krw': '120000000000', '자기자본 대비:pct': '6.1', '차입 목적:text': '회사채 상환 재원' } },
     { c: corps[30], back: 20, nm: '신규시설투자등', f: { '투자금액:krw': '58000000000', '자기자본 대비:pct': '12.4', '투자 대상:text': '물류센터 신축' } },
+    { c: corps[6], back: 30, nm: '[기재정정]신규시설투자등', f: { '투자금액:krw': '92000000000', '자기자본 대비:pct': '45.2', '투자 대상:text': '아산 2공장 증설', '투자 목적:text': '생산능력 확대', '투자 종료일:date': '2027-06-30' } },
+    { c: corps[10], back: 15, nm: '신규시설투자등', f: { '투자금액:krw': '15000000000', '자기자본 대비:pct': '9.1', '투자 대상:text': '판교 신사옥', '투자 목적:text': '본사 사옥 신축' } },
     { c: corps[3], back: 40, nm: '타인에대한담보제공결정', f: { '채무자:text': '동탄도시개발(주)', '담보제공금액:krw': '63000000000', '자기자본 대비:pct': '22.7', '담보 재산:text': '오송공장(토지, 건물)' } },
   ];
   const filings = ev.map((e, i) => ({ rm: '', flr_nm: e.c.name, corp_cls: 'K', rcept_dt: ymdk(d(e.back)), rcept_no: `${ymdk(d(e.back))}8${String(i).padStart(5, '0')}`, corp_code: e.c.code, corp_name: e.c.name, report_nm: e.nm, stock_code: '' }));

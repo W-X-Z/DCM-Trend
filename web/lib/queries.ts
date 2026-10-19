@@ -3,7 +3,7 @@ import { TREND_DEAL_COLS, type TrendDeal } from './period';
 import type {
   BondIssue, BondTrendRow, Comp, FeedItem, CompanyHit, CompanyOverview, DataStatus, Deal, DisclosureRule, EquityTrendRow,
   FeeRow, InsightFact, InsightIssue, IpoTrendRow, LeagueRow, Maturity, MaturityMonth, Metric, MezzTrendRow,
-  KeyFiling, NotableDeal, PolicyEvent, ProductType, RateLatest, RatePoint, ShortDebt, SpreadPoint,
+  ExpansionCompany, ExpansionEvent, KeyFiling, NotableDeal, PolicyEvent, ProductType, RateLatest, RatePoint, ShortDebt, SpreadPoint,
 } from './types';
 
 export async function getDataStatus(): Promise<DataStatus | null> {
@@ -195,4 +195,13 @@ export async function getBondIssuesBy(opts: { corp?: string; ratingGroup?: strin
     order: 'deal_dt.desc,amount_krw.desc.nullslast',
     limit: opts.limit ?? 200,
   });
+}
+
+// 사업 확장 기업 (최근 1년): 회사별 묶음과 공시별 근거
+export async function getExpansionCompanies(): Promise<ExpansionCompany[]> {
+  return selectAll<ExpansionCompany>('v_expansion_companies', { order: 'amount_krw.desc.nullslast,last_dt.desc' });
+}
+
+export async function getExpansionEvents(): Promise<ExpansionEvent[]> {
+  return selectAll<ExpansionEvent>('v_expansion_events', { order: 'decided_dt.desc,amount_krw.desc.nullslast' });
 }

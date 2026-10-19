@@ -233,3 +233,23 @@ export type KeyFiling = {
   market: string | null; latest_bond_rating: string | null; bond_deal_count: number | null; mezz_deal_count: number | null;
   outstanding_bond_krw: number | null; dart_url: string;
 };
+
+// 사업 확장 기업 (mart.v_expansion_events / v_expansion_companies)
+export type ExpansionCat = '생산·설비 증설' | '부지·사업장 확보' | '인수·신사업' | '연구·업무시설';
+export type ExpansionEvent = {
+  rcept_no: string; corp_code: string; corp_name: string; market: string | null;
+  decided_dt: string; rcept_dt: string; src: 'capex' | 'asset' | 'stake' | 'biz'; src_label: string; cat: ExpansionCat;
+  amount_krw: number | null; ratio_pct: number | null; ratio_basis: string;
+  target: string | null; purpose: string | null; detail: string | null; stake_after_pct: number | null;
+  funding_note: string | null; via_sub: boolean; dart_url: string; is_amendment: boolean; end_dt: string | null;
+};
+export type ExpansionFunding = { type: string; amount_krw: number | null; dt: string; nh_lead: boolean | null };
+export type ExpansionCompany = {
+  corp_code: string; corp_name: string; market: string | null; latest_bond_rating: string | null;
+  cats: ExpansionCat[]; event_count: number; amount_krw: number | null; max_ratio_pct: number | null;
+  first_dt: string; last_dt: string; top_src: string; top_amount_krw: number | null; top_ratio_pct: number | null;
+  top_ratio_basis: string | null; top_what: string | null; top_target: string | null;
+  funding: ExpansionFunding[]; no_funding_after: boolean; nh_lead_ever: boolean;
+  outstanding_bond_krw: number | null; outstanding_bond_1y_krw: number | null; max_ratio_basis: string | null;
+  has_new_decision: boolean; last_end_dt: string | null;
+};

@@ -1,1 +1,1 @@
-{"command":"sequence","maxCalls":"15000","steps":[{"command":"filings","from":"2026-10-10","to":"2026-10-20"},{"command":"filings","from":"2025-10-01","to":"2026-08-02","types":"I"},{"command":"details"},{"command":"refresh"},{"command":"documents","maxDocs":"1500"},{"command":"rates"},{"command":"refresh"},{"command":"insights"}]}
+{"command":"sequence","maxCalls":"1200","steps":[{"command":"documents","maxDocs":"700"},{"command":"refresh"},{"command":"insights"}]}
