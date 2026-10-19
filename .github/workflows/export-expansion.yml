@@ -1,5 +1,6 @@
 # 사업 확장 기업 스냅샷(개인 투자 아이디어 분석용): research/expansion/data 를 갱신해 커밋한다.
 # 매주 월요일 08:20(KST), 수동 실행 가능.
+# 데이터는 웹의 공개 JSON(/api/expansion/data)에서 받는다. GitHub 쪽에 DB 키가 필요 없다.
 name: export-expansion
 on:
   schedule:
@@ -19,10 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: node research/expansion/export.mjs
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - run: node research/expansion/export.mjs --from-web https://ib-deal-agent.vercel.app
       - name: 바뀐 내용이 있으면 커밋
         run: |
           git config user.name "github-actions[bot]"
