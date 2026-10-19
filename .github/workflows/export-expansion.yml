@@ -1,0 +1,33 @@
+# 사업 확장 기업 스냅샷(개인 투자 아이디어 분석용): research/expansion/data 를 갱신해 커밋한다.
+# 매주 월요일 08:20(KST), 수동 실행 가능.
+name: export-expansion
+on:
+  schedule:
+    - cron: '20 23 * * 0'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: export-expansion
+  cancel-in-progress: false
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node research/expansion/export.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: 바뀐 내용이 있으면 커밋
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add research/expansion/data
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -m "data: 사업 확장 기업 스냅샷 $(TZ=Asia/Seoul date +%F)"
+          git push

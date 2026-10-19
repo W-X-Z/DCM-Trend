@@ -158,6 +158,54 @@ if (results[results.length - 1].ok) failed--;
 await db.exec('reset role');
 await db.exec(`delete from raw.detail_fetches; delete from raw.api_items; delete from raw.filings; delete from ops.ingest_runs;`);
 
+// 6-2. 사업 확장 기업: 목적 글로 분류, 정정은 최신본, 지주사 중복·금융사 제외 ------------
+await db.exec(`
+  insert into core.companies (corp_code, corp_name, market, induty_code) values
+    ('XP_CAP', '확장공업', '코스닥', '29'), ('XP_RENT', '임대산업', '코스닥', '29'), ('XP_HQ', '사옥전자', '유가증권', '26'),
+    ('XP_MNA', '인수테크', '코스닥', '58'), ('XP_MIN', '소수지분', '코스닥', '58'), ('XP_SUB', '정리홀딩스', '코스닥', '70'),
+    ('XP_PAR', '지주회사', '유가증권', '70'), ('XP_FIN', '테스트캐피탈', '기타', '64'), ('XP_OLD', '정정만공업', '코스닥', '29')
+  on conflict (corp_code) do nothing;
+  insert into raw.filings (rcept_no, corp_code, corp_name, report_nm, rcept_dt, payload) values
+    ('XP0000000001', 'XP_CAP', '확장공업', '신규시설투자등', current_date - 40, '{}'),
+    ('XP0000000002', 'XP_CAP', '확장공업', '[기재정정]신규시설투자등', current_date - 10, '{}'),
+    ('XP0000000003', 'XP_RENT', '임대산업', '주요사항보고서(유형자산양수결정)', current_date - 20, '{}'),
+    ('XP0000000004', 'XP_HQ', '사옥전자', '주요사항보고서(유형자산양수결정)', current_date - 20, '{}'),
+    ('XP0000000005', 'XP_MNA', '인수테크', '주요사항보고서(타법인주식및출자증권양수결정)', current_date - 30, '{}'),
+    ('XP0000000006', 'XP_MIN', '소수지분', '주요사항보고서(타법인주식및출자증권양수결정)', current_date - 30, '{}'),
+    ('XP0000000007', 'XP_SUB', '정리홀딩스', '주요사항보고서(타법인주식및출자증권양수결정)', current_date - 30, '{}'),
+    ('XP0000000008', 'XP_PAR', '지주회사', '신규시설투자등(자회사의 주요경영사항)', current_date - 10, '{}'),
+    ('XP0000000009', 'XP_FIN', '테스트캐피탈', '신규시설투자등', current_date - 10, '{}'),
+    ('XP0000000010', 'XP_CAP', '확장공업', '신규시설투자등', current_date - 500, '{}'),
+    ('XP0000000011', 'XP_OLD', '정정만공업', '[기재정정]신규시설투자등', current_date - 50, '{}');
+  insert into raw.doc_fields (rcept_no, purpose, field, value) values
+    ('XP0000000001', 'disclosure', '투자 대상:text', '청주 2공장 생산시설'), ('XP0000000001', 'disclosure', '투자금액:krw', '50000000000'),
+    ('XP0000000001', 'disclosure', '자기자본 대비:pct', '25.5'), ('XP0000000001', 'disclosure', '투자 목적:text', '생산능력 확대'),
+    ('XP0000000002', 'disclosure', '투자 대상:text', '청주 2공장 생산시설'), ('XP0000000002', 'disclosure', '투자금액:krw', '60000000000'),
+    ('XP0000000002', 'disclosure', '자기자본 대비:pct', '30.6'), ('XP0000000002', 'disclosure', '투자 목적:text', '생산능력 확대'),
+    ('XP0000000008', 'disclosure', '투자 대상:text', '자회사 신공장'), ('XP0000000008', 'disclosure', '투자금액:krw', '60000000000'),
+    ('XP0000000009', 'disclosure', '투자 대상:text', '전산센터'), ('XP0000000009', 'disclosure', '투자금액:krw', '9000000000'),
+    ('XP0000000010', 'disclosure', '투자 대상:text', '옛 공장'), ('XP0000000010', 'disclosure', '투자금액:krw', '1000000000'),
+    ('XP0000000011', 'disclosure', '투자 대상:text', '2023년 결정 공장'), ('XP0000000011', 'disclosure', '투자금액:krw', '7000000000');
+  insert into raw.api_items (endpoint, corp_code, rcept_no, item, item_hash) values
+    ('tgastInhDecsn', 'XP_RENT', 'XP0000000003', '{"ast_sen":"토지 및 건물","ast_nm":"강남 빌딩","inh_pp":"부동산 임대를 통한 수익 창출","inhdtl_inhprc":"30,000,000,000","inhdtl_tast_vs":"12.5"}', 'h3'),
+    ('tgastInhDecsn', 'XP_HQ', 'XP0000000004', '{"ast_sen":"토지 및 건물","ast_nm":"판교 빌딩","inh_pp":"본사 사옥 확보","inhdtl_inhprc":"20,000,000,000","inhdtl_tast_vs":"8.1","dl_pym":"1. 지급형태: 현금\\n2. 자금조달 방법 : 자기자금 및 차입"}', 'h4'),
+    ('otcprStkInvscrInhDecsn', 'XP_MNA', 'XP0000000005', '{"iscmp_cmpnm":"대상(주)","iscmp_rl_cmpn":"-","atinh_eqrt":"100","inh_pp":"사업다각화 및 신성장동력 확보","inhdtl_inhprc":"15,000,000,000","inhdtl_ecpt_vs":"40.2"}', 'h5'),
+    ('otcprStkInvscrInhDecsn', 'XP_MIN', 'XP0000000006', '{"iscmp_cmpnm":"협력사(주)","iscmp_rl_cmpn":"-","atinh_eqrt":"4.8","inh_pp":"사업 시너지","inhdtl_inhprc":"5,000,000,000"}', 'h6'),
+    ('otcprStkInvscrInhDecsn', 'XP_SUB', 'XP0000000007', '{"iscmp_cmpnm":"자회사(주)","iscmp_rl_cmpn":"자회사","atinh_eqrt":"95","inh_pp":"종속회사에 대한 지배력 강화","inhdtl_inhprc":"5,000,000,000"}', 'h7');
+`);
+await check('사업 확장: 목적 글로 분류',
+  `select string_agg(corp_code || ':' || cat, ',' order by corp_code) from core.v_expansion_events where corp_code like 'XP\\_%'`,
+  'XP_CAP:생산·설비 증설,XP_FIN:생산·설비 증설,XP_HQ:연구·업무시설,XP_MIN:소수 지분 투자,XP_MNA:인수·신사업,XP_OLD:생산·설비 증설,XP_PAR:생산·설비 증설,XP_RENT:임대·투자,XP_SUB:계열 지분 정리', one);
+await check('사업 확장: 정정은 최신 금액, 결정일은 최초 공시, 1년 지난 결정 제외, 정정본만 있으면 진행 중 표시',
+  `select string_agg(corp_code || '|' || amount_krw::bigint || '|' || (current_date - decided_dt) || '|' || is_amendment, ',' order by corp_code) from core.v_expansion_events where corp_code in ('XP_CAP', 'XP_OLD')`,
+  'XP_CAP|60000000000|40|false,XP_OLD|7000000000|50|true', one);
+await check('사업 확장: 화면 목록은 확장만, 지주사 중복·금융사 제외, 자금 조달 문구',
+  `select string_agg(corp_code || coalesce(':' || funding_note, ''), ',' order by corp_code) from mart.v_expansion_events where corp_code like 'XP\\_%'`,
+  'XP_CAP,XP_HQ:자기자금 및 차입,XP_MNA,XP_OLD', one);
+await check('사업 확장: 회사별 묶음과 결정 후 조달 없음',
+  `select string_agg(corp_code || ':' || event_count || ':' || no_funding_after || ':' || has_new_decision, ',' order by corp_code) from mart.v_expansion_companies where corp_code like 'XP\\_%'`,
+  'XP_CAP:1:true:true,XP_HQ:1:true:true,XP_MNA:1:true:true,XP_OLD:1:true:false', one);
+
 // 7. 권한 (화면 = anon 은 mart 만) --------------------------------------
 await db.exec('set role anon');
 await check('anon: mart 뷰 조회 가능', `select count(*)::int from mart.v_deals`, 17, one);

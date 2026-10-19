@@ -8,6 +8,7 @@ const TABS = [
   { href: '/trends/bond', label: '발행 동향', match: (p: string) => p.startsWith('/trends') },
   { href: '/filings', label: '주요 공시', match: (p: string) => p.startsWith('/filings') },
   { href: '/maturities', label: '만기도래', match: (p: string) => p.startsWith('/maturities') },
+  { href: '/expansion', label: '사업 확장', match: (p: string) => p.startsWith('/expansion') },
   { href: '/proposal', label: '제안서 초안', match: (p: string) => p.startsWith('/proposal') },
   { href: '/rates', label: '금리', match: (p: string) => p.startsWith('/rates') },
   { href: '/ai', label: 'AI 질문', match: (p: string) => p.startsWith('/ai') },

@@ -99,7 +99,9 @@ async function run(command, opts) {
     case 'daily': {
       await probe(env);
       const s = await stats('before');
-      if (s.corp_codes < 1000 || new Date().getUTCDay() === 1) await corpCodes(env);   // 매주 월요일 갱신
+      // 회사 코드: 비어 있으면 반드시 받고, 매주 월요일 갱신은 실패해도(다운로드 시간 초과 등) 수집을 계속한다
+      if (s.corp_codes < 1000) await corpCodes(env);
+      else if (new Date().getUTCDay() === 1) await corpCodes(env).catch((e) => console.error(`corp-codes(주간 갱신 건너뜀): ${e.message}`));
       await filings(env, { from: addDays(today, -7), to: today });
       await details(env);
       await refresh(env);
