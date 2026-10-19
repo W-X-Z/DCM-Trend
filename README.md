@@ -14,7 +14,7 @@ OpenDART·ECOS 공개 데이터로 **① 시장·공시 모니터링**, **② �
 ```
 supabase/migrations/   DB 스키마와 SQL 로직 (raw → core → mart, ref 규칙)
 tests/                 실제 공시 픽스처로 SQL 로직 검증 (PGlite, Supabase 불필요)
-ingest/                OpenDART 수집기 (GitHub Actions, 매일 07:10 KST)
+ingest/                OpenDART 수집기 (GitHub Actions, 매일 07:10 KST, 실패·누락 시 10:10 재시도)
 web/                   Next.js 화면 (Vercel, 서울 리전) — web/README.md
 docs/                  아키텍처, 로직 변경 가이드, 결정 사항
 ```

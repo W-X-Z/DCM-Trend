@@ -1,9 +1,15 @@
 # 매일 07:10(KST) 최근 7일 공시 증분 수집 → 상세 → 변환
+# 10:10(KST)에 한 번 더 예약해 둔다: 앞 실행이 실패했거나 GitHub 예약이 밀려 안 돌았을 때만 수집하고,
+# 오늘(KST) 이미 성공한 실행이 있으면 바로 끝낸다. 수동 실행은 항상 수집한다.
 name: ingest-daily
 on:
   schedule:
     - cron: '10 22 * * *'
+    - cron: '10 1 * * *'
   workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
 concurrency:
   group: ingest
   cancel-in-progress: false
@@ -12,13 +18,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
+      - name: 오늘 이미 성공했으면 건너뜀 (예약 실행만)
+        id: gate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today=$(TZ=Asia/Seoul date +%F)
+          n=$(gh run list -R "$GITHUB_REPOSITORY" -w ingest-daily.yml -s success -L 20 --json createdAt \
+                --jq "[.[] | select(((.createdAt | fromdateiso8601) + 32400 | strftime(\"%Y-%m-%d\")) == \"$today\")] | length")
+          echo "오늘($today) 성공한 수집: ${n:-0}회"
+          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.skip != 'true'
         with:
           node-version: 20
           cache: npm
       - run: npm ci --omit=dev
+        if: steps.gate.outputs.skip != 'true'
       - run: node ingest/run.mjs daily
+        if: steps.gate.outputs.skip != 'true'
         env:
           OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
