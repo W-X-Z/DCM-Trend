@@ -7,6 +7,8 @@ OpenDART·ECOS 공개 데이터로 **① 시장·공시 모니터링**, **② �
 
 현업 피드백(화면 오른쪽 아래 '의견 보내기')은 Supabase 대시보드 Table Editor > 스키마 `ops` > `v_feedback` 에서 본다.
 
+개인 투자 아이디어 분석용 '사업 확장 기업' 목록은 [research/expansion](research/expansion/README.md)에 따로 둔다(매주 자동 갱신).
+
 ## 구조
 
 ```
