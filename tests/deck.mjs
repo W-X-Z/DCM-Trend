@@ -61,6 +61,7 @@ const check = (name, cond, detail = '') => {
   check('검증: 하우스 없는 전망은 금리 장표에서도 거부', !m.lineOk('기준금리는 인상될 것', allowed, true).ok);
   check('검증: NH 제안 판단은 허용', m.lineOk('장기물 중심 구성이 적합하다고 판단', allowed, false).ok);
   check('검증: 출처 없는 시장 방향 예측은 거부', !m.lineOk('국고채 금리가 하락할 것으로 예상되어 발행 여건 개선', allowed, false).ok);
+  check('검증: 출처 없는 수요 예측은 거부', !m.lineOk('경쟁률 1.43:1 수준의 수요가 몰릴 것으로 예상', allowed, false).ok);
   check('검증: 하우스를 밝힌 시장 전망은 허용(금리 장표)', m.lineOk('NH투자증권 리서치는 국고채 금리 하락 가능성을 제시', allowed, true).ok);
   const rule = { lead: 'r', peers: ['r1'], compare: ['r'], schedule: ['r'], structure: ['r'], structureRows: [{ label: '1년', desc: 'r' }], strengths: [{ title: 'a', text: 'b' }, { title: 'c', text: 'd' }, { title: 'e', text: 'f' }], rates: ['r'], corp: ['r'], views: ['r'], sizing: ['r'], pipeline: ['r'], bok: ['r'], fomc: ['r'], usviews: ['r'], forecast: ['r'], league: ['r'], maturity: ['r'], sales: ['r'], termNotes: { rating: '', tenor: '', amount: '', band: '', coupon: '', demand: '', pay: '', uw: '', fee: '' } };
   const r = m.mergeValidated({ ...rule, peers: ['경쟁률 9.99:1'], lead: '430억원 제안' }, rule, allowed);
