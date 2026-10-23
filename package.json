@@ -10,10 +10,12 @@
     "test:insights": "node tests/insights.mjs",
     "test:docparse": "node tests/docparse.mjs",
     "test:issues": "node tests/issues.mjs",
-    "test:feed": "node tests/feed.mjs"
+    "test:feed": "node tests/feed.mjs",
+    "test:deck": "node tests/deck.mjs"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.2.17"
+    "@electric-sql/pglite": "0.2.17",
+    "esbuild": "0.23.1"
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.0",

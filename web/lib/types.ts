@@ -215,6 +215,8 @@ export type BondTranche = {
   amount_krw: number | null; initial_amount_krw: number | null; demand_krw: number | null; competition_ratio: number | null;
   final_spread_bp: number | null; coupon_pct: number | null; band_low: number | null; band_high: number | null;
   is_increased: boolean | null; is_undersubscribed: boolean | null; lead_managers: string | null; nh_lead: boolean | null;
+  demand_in_band_krw?: number | null; demand_count?: number | null; yield_pct?: number | null; band_type?: string | null;
+  fee_bp?: number | null; maturity_dt?: string | null;
 };
 
 export type BondIssue = {
@@ -224,6 +226,8 @@ export type BondIssue = {
   competition_ratio: number | null; is_increased: boolean | null; increase_pct: number | null; is_undersubscribed: boolean | null;
   tenor_combo: string; tenor_min: number | null; tenor_max: number | null; spread_min_bp: number | null; spread_max_bp: number | null;
   tranches: BondTranche[]; lead_managers: string | null; nh_lead: boolean | null; nh_involved: boolean | null; latest_rcept_no: string | null;
+  demand_dt?: string | null; demand_in_band_krw?: number | null; band_type?: string | null; band_low?: number | null; band_high?: number | null;
+  fee_bp?: number | null; demand_count?: number | null; maturity_min_dt?: string | null;
 };
 
 // 주요 공시 (mart.v_key_filings) — facts 는 '라벨 → 표시 문자열'
