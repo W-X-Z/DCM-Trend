@@ -55,7 +55,8 @@ await check('회사채 딜 키·금액·만기',
   ['bond:00500254:22-1|500.0|24|2026-10-21|일반회사채', 'bond:00500254:22-2|1000.0|36|2026-10-21|일반회사채']);
 await check('회사채 공시 연결: 최초 신고일·발행조건확정일·최신 공시',
   `select announce_dt::text || '|' || pricing_dt::text || '|' || status || '|' || latest_rcept_no from mart.v_deals where deal_key = 'bond:00500254:22-1'`,
-  '2026-10-08|2026-10-15|priced|20261015000311');
+  // 납입일(2026-10-21)이 지나면 상태가 priced → completed 로 바뀐다 (DB current_date 기준)
+  `2026-10-08|2026-10-15|${new Date().toISOString().slice(0, 10) >= '2026-10-21' ? 'completed' : 'priced'}|20261015000311`);
 await check('회사채 인수단: 표준명·역할',
   `select firm_std || ':' || role from core.deal_underwriters where deal_key = 'bond:00500254:22-2' order by firm_std`,
   ['KB증권:대표주관', '대신증권:대표주관', '키움증권:인수', '하나증권:인수']);
