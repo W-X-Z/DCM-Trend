@@ -1,1 +1,1 @@
-{"command":"documents","rceptNos":"20260916000407,20260827000853,20260730000487,20260915000415,20260904000464","keepRaw":"1","maxCalls":"50"}
+{"command":"sequence","maxCalls":"5000","steps":[{"command":"documents","maxDocs":"4500"},{"command":"refresh"}]}
