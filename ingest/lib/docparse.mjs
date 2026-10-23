@@ -131,7 +131,8 @@ export function parseBond(text) {
     const vals = [...row.matchAll(/\|\s*([\d,]+(?:\.\d+)?)\s*(?::\s*1)?\s*(?=\||$)/g)].map((x) => num(x[1])).filter((v) => v !== null);
     return vals.length ? vals[vals.length - 1] : null;
   };
-  const demandRe = /(?:\[\s*회\s*차\s*:\s*제?\s*([0-9]+(?:-[0-9]+)?)\s*회?\s*\])?[^[]{0,900}?\|\s*건수((?:\s*\|\s*[\d,\-]+)+)\s*\|\s*수량((?:\s*\|\s*[\d,\-]+)+)\s*\|\s*경쟁률((?:\s*\|\s*(?:[\d.,]+\s*:\s*1|-))+)/g;
+  // 경쟁률은 '경쟁율'로 쓰기도 하고, 칸 값이 '0.97'(':1' 없이)인 서식도 있다(2026 이랜드월드 107회·에스엘엘중앙 22회)
+  const demandRe = /(?:\[\s*회\s*차\s*:\s*제?\s*([0-9]+(?:-[0-9]+)?)\s*회?\s*\])?[^[]{0,900}?\|\s*건수((?:\s*\|\s*[\d,\-]+)+)\s*\|\s*수량((?:\s*\|\s*[\d,\-]+)+)\s*\|\s*경쟁[률율]((?:\s*\|\s*(?:[\d.,]+(?:\s*:\s*1)?|-))+)/g;
   // 수량 단위는 표 바로 위 "(단위: 건, 억원)" 에서 읽는다. 표기가 없으면 억원으로 본다(원 단위면 1억 미만일 수 없다).
   const unitOf = (win) => {
     const u = [...win.matchAll(/단위\s*:\s*([^)|]{0,30})/g)].pop()?.[1] ?? '';
@@ -148,6 +149,48 @@ export function parseBond(text) {
     push('demand_krw', series, qty !== null ? qty * unit : null);
     push('competition_ratio', series, ratio);
   }
+
+  // 6) 유효수요(공모희망금리 밴드 안 참여 물량): '수요예측 신청가격 분포' 표에서 '포함' 행의 합계 수량을 더한다
+  //    행 = 금리(또는 bp) | 투자자 구분별 건수·수량 … | 합계 건수 | 합계 수량 | 비율 | 누적수량 | 누적비율 | 포함/미포함
+  for (const region of text.matchAll(/신청\s*가격\s*분포/g)) {
+    const from = region.index + region[0].length;
+    const stop = text.slice(from).search(/상세\s*분포|③|\(3\)|유효수요의\s*범위|신청\s*가격\s*분포/);
+    const area = text.slice(from, from + (stop > 0 ? Math.min(stop, 30000) : 30000));
+    const heads = [...area.matchAll(/\[\s*회\s*차\s*:\s*제?\s*([0-9]+(?:-[0-9]+)?)\s*회?\s*\]/g)];
+    heads.forEach((h, i) => {
+      const series = normSeries(h[1]);
+      const body = area.slice(h.index + h[0].length, i + 1 < heads.length ? heads[i + 1].index : area.length);
+      let unit = unitOf(body.slice(0, 120)) ?? 1e8;
+      let valid = 0;
+      let rows = 0;
+      for (const r of body.matchAll(/\|\s*[+\-]?\d+(?:\.\d+)?\s*%?\s*((?:\|\s*[\d,.\-%]+\s*){5,40})\|\s*(포함|미포함|불포함)/g)) {
+        const cells = r[1].split('|').map((c) => c.trim()).filter((c) => c !== '');
+        const qty = num(cells[cells.length - 4]);
+        rows++;
+        if (r[2] === '포함' && qty !== null) valid += qty;
+      }
+      if (rows && !out.some((f) => f.field === 'demand_valid_krw' && f.series === series)) {
+        if (unit === 1 && valid < 1e8) unit = 1e8;
+        push('demand_valid_krw', series, valid * unit);
+      }
+    });
+  }
+  // 표가 없을 때 문장: "공모희망금리 내 참여신청금액: 430억원", "총 참여신청금액: 510억원"
+  if (!out.some((f) => f.field === 'demand_valid_krw')) {
+    const v = text.match(/공모\s*희망\s*금리\s*내\s*참여\s*신청\s*금액\s*:\s*([\d,]+)\s*억\s*원/);
+    if (v) push('demand_valid_krw', null, num(v[1]) * 1e8);
+  }
+  for (const m of text.matchAll(/제\s*([0-9]+(?:-[0-9]+)?)\s*회[^-\[]{0,20}-\s*총\s*참여\s*신청\s*금액\s*:\s*([\d,]+)\s*억\s*원/g)) {
+    const series = normSeries(m[1]);
+    if (!out.some((f) => f.field === 'demand_krw' && f.series === series)) push('demand_krw', series, num(m[2]) * 1e8);
+  }
+
+  // 7) 수요예측일
+  //    최초 증권신고서: "수요예측기간은 2026년 01월 15일 09시부터 16시까지로 합니다", "(3) 수요예측 기간: 2026년 02월 05일 09시부터"
+  //    [발행조건확정]: "2026년 02월 12일 09시부터 16시 30분까지 실시하는 수요예측", "2026년 01월 29일 실시된 수요예측"
+  const dp = text.match(/수요예측\s*기간\s*(?:은|는|:)?\s*(\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일)/);
+  const dd = dp ?? text.match(/(\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일)\s*(?:\(\s*[월화수목금]\s*\)\s*)?(?:\d{1,2}\s*시[^수|]{0,30})?(?:에\s*)?실시(?:된|하는|한|될|되는|하였던|예정인)?\s*수요예측/);
+  if (dd) push('demand_dt', null, ymdKr(dd[1]));
   return out;
 }
 
