@@ -217,6 +217,7 @@ export type BondTranche = {
   is_increased: boolean | null; is_undersubscribed: boolean | null; lead_managers: string | null; nh_lead: boolean | null;
   demand_in_band_krw?: number | null; demand_count?: number | null; yield_pct?: number | null; band_type?: string | null;
   fee_bp?: number | null; maturity_dt?: string | null;
+  demand_by_type?: { t: string; n: number; q: number }[] | null;
 };
 
 export type BondIssue = {
@@ -228,6 +229,7 @@ export type BondIssue = {
   tranches: BondTranche[]; lead_managers: string | null; nh_lead: boolean | null; nh_involved: boolean | null; latest_rcept_no: string | null;
   demand_dt?: string | null; demand_in_band_krw?: number | null; band_type?: string | null; band_low?: number | null; band_high?: number | null;
   fee_bp?: number | null; demand_count?: number | null; maturity_min_dt?: string | null;
+  amount_max_krw?: number | null;
 };
 
 // 주요 공시 (mart.v_key_filings) — facts 는 '라벨 → 표시 문자열'

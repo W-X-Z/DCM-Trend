@@ -4207,6 +4207,40 @@ table.data th.col-cta {
   margin-top: 6px;
 }
 
+/* 발행조건 비고·내부 자료 */
+.dk-notes {
+  border: 0;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  gap: 4px;
+}
+
+.dk-note-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.dk-note-row input {
+  font: inherit;
+  font-size: var(--s-1);
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.dk-field textarea.dk-tsv {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+}
+
 /* 목차 */
 .dk-toc {
   list-style: none;

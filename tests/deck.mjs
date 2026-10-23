@@ -11,7 +11,8 @@ export * from './lib/deck/schedule';
 export * from './lib/deck/validate';
 export * from './lib/deck/rules';
 export * from './lib/deck/model';
-export { buildSlides, fileBase, staticSubs, available } from './lib/deck/layout';
+export { buildSlides, fileBase, staticSubs, available, parseTsv } from './lib/deck/layout';
+export { mixOf, valueAt, meetingVolatility, notchStats } from './lib/deck/analytics';
 export { planOf, defaultItems } from './lib/deck/catalog';
 export { assemble } from './lib/deck/assemble';
 export { PAGE } from './lib/deck/theme';
@@ -58,9 +59,26 @@ const check = (name, cond, detail = '') => {
   check('검증: 전망 표현 거부', !m.lineOk('수요가 충분할 것으로 예상됨', allowed, false).ok);
   check('검증: 하우스를 밝힌 전망은 금리 장표에서 허용', m.lineOk('NH투자증권 리서치는 기준금리 인상 지속을 전망', allowed, true).ok);
   check('검증: 하우스 없는 전망은 금리 장표에서도 거부', !m.lineOk('기준금리는 인상될 것', allowed, true).ok);
-  const rule = { lead: 'r', peers: ['r1'], compare: ['r'], schedule: ['r'], structure: ['r'], structureRows: [{ label: '1년', desc: 'r' }], strengths: [{ title: 'a', text: 'b' }, { title: 'c', text: 'd' }, { title: 'e', text: 'f' }], rates: ['r'], corp: ['r'], views: ['r'], sizing: ['r'], pipeline: ['r'], bok: ['r'], fomc: ['r'], usviews: ['r'], forecast: ['r'], league: ['r'], maturity: ['r'] };
+  check('검증: NH 제안 판단은 허용', m.lineOk('장기물 중심 구성이 적합하다고 판단', allowed, false).ok);
+  check('검증: 출처 없는 시장 방향 예측은 거부', !m.lineOk('국고채 금리가 하락할 것으로 예상되어 발행 여건 개선', allowed, false).ok);
+  check('검증: 하우스를 밝힌 시장 전망은 허용(금리 장표)', m.lineOk('NH투자증권 리서치는 국고채 금리 하락 가능성을 제시', allowed, true).ok);
+  const rule = { lead: 'r', peers: ['r1'], compare: ['r'], schedule: ['r'], structure: ['r'], structureRows: [{ label: '1년', desc: 'r' }], strengths: [{ title: 'a', text: 'b' }, { title: 'c', text: 'd' }, { title: 'e', text: 'f' }], rates: ['r'], corp: ['r'], views: ['r'], sizing: ['r'], pipeline: ['r'], bok: ['r'], fomc: ['r'], usviews: ['r'], forecast: ['r'], league: ['r'], maturity: ['r'], sales: ['r'], termNotes: { rating: '', tenor: '', amount: '', band: '', coupon: '', demand: '', pay: '', uw: '', fee: '' } };
   const r = m.mergeValidated({ ...rule, peers: ['경쟁률 9.99:1'], lead: '430억원 제안' }, rule, allowed);
   check('검증: 실패한 필드는 규칙 문안으로', r.text.peers[0] === 'r1' && r.text.lead === '430억원 제안' && r.dropped.length === 1, JSON.stringify(r.dropped));
+}
+
+// 2-1. 판단 근거 계산
+{
+  const tr = (byType) => ({ tenor: '3년', months: 36, byType });
+  const mx = m.mixOf([tr([{ t: 'fund', n: 2, q: 300e8 }, { t: 'broker', n: 1, q: 100e8 }]), tr([{ t: 'fund', n: 1, q: 100e8 }])]);
+  check('근거: 투자자 구분별 합계·비중', mx.total === 500e8 && mx.rows[0].t === 'fund' && Math.round(mx.rows[0].share) === 80, JSON.stringify(mx));
+  const pts = [['2026-10-01', 3.1], ['2026-10-02', 3.2], ['2026-10-06', 3.25]];
+  check('근거: 날짜 이전 가장 가까운 값(7일 이내)', m.valueAt(pts, '2026-10-05') === 3.2 && m.valueAt(pts, '2026-09-01') === null && m.valueAt(pts, '2026-10-20') === null);
+  const days = [];
+  for (let i = 0; i < 120; i++) days.push([new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10), 3 + (i % 2) * 0.02]);
+  const vol = m.meetingVolatility({ daily: [{ key: 'ktb3y', pts: days }] }, ['2026-02-01', '2026-03-01', '2026-04-01']);
+  check('근거: 금통위 전후 변동폭(일별 2bp 진동)', vol && vol.meetings === 3 && vol.byLag.every((x) => x.bp === 2), JSON.stringify(vol));
+  check('근거: 탭 구분 표 붙여넣기', JSON.stringify(m.parseTsv('a\tb\n1\t2\t3\n\n')) === JSON.stringify([['a', 'b', ''], ['1', '2', '3']]));
 }
 
 // 3. 목차: 켜고 끄면 번호가 다시 매겨진다
@@ -90,6 +108,9 @@ const check = (name, cond, detail = '') => {
   const ids = slides.map((s) => s.id);
   const want = ['cover', 'contents', 'folder-I', 'terms', 'sizing', 'schedule', 'pipeline', 'folder-II', 'rates', 'bok', 'fomc', 'views', 'usviews', 'forecast', 'peers-0', 'compare', 'corp', 'folder-III', 'nh_core-0', 'league', 'strength', 'maturity', 'events', 'back'];
   check('장표: 기본 목차 순서', want.every((w, i) => ids.indexOf(w) >= 0 && (i === 0 || ids.indexOf(w) > ids.indexOf(want[i - 1]))), ids.join(','));
+  check('장표: 발행조건 비고 근거', tx.termNotes && /수요예측 가능일/.test(tx.termNotes.demand) && tx.termNotes.tenor.length > 0, JSON.stringify(tx.termNotes));
+  const fx = m.buildSlides(d, { ...inp, internal: { ...inp.internal, creditFc: '구분\t2026\nAA-\t3.10', investors: '기관\t참여\nA\t100' }, items: { ...inp.items, sales: true } }, tx);
+  check('장표: 내부 자료 붙여넣기 → 회사채 전망 2쪽', fx.some((s) => s.id === 'forecast-2'));
   check('장표: 레이아웃(표지·목차·간지·본문·뒷표지)', slides[0].layout === 'cover' && slides[1].layout === 'contents' && slides[2].layout === 'folder' && slides[3].layout === 'body' && slides.at(-1).layout === 'back');
   check('장표: 표지 제목에 다음 회차', slides[0].prims.some((p) => p.k === 'text' && p.paras.some((x) => x.runs.some((r) => /제112회 공모사채 발행 검토 및 제안/.test(r.t)))));
   const core = slides.find((s) => s.id === 'nh_core-0');
