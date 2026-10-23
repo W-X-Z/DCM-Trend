@@ -26,10 +26,11 @@ export const C = {
   white: 'FFFFFF',
 } as const;
 
+// NH 템플릿과 같은 글꼴 이름(한글 표기). PowerPoint·LibreOffice 모두 나눔고딕의 한글 이름을 알아본다.
 export const FONT = {
-  face: 'NanumGothic',
-  faceBold: 'NanumGothic',
-  faceXB: 'NanumGothic ExtraBold',
+  face: '나눔고딕',
+  faceBold: '나눔고딕',
+  faceXB: '나눔고딕 ExtraBold',
 } as const;
 
 // 글자 폭 (em). NanumGothic hmtx 에서 읽음: 한글 0.94em, ASCII 는 표

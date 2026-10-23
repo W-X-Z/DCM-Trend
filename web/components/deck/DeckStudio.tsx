@@ -6,14 +6,15 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Info } from '@/components/Ui';
 import { bandRange, eok, mdw, ratioX, rate3, yy } from '@/lib/deck/fmt';
-import { buildSlides, fileBase } from '@/lib/deck/layout';
-import { defaultInput, factsFor, peerPool, ruleText, scheduleOf } from '@/lib/deck/rules';
-import { SLIDES, type DeckData, type DeckInput, type DeckText, type SlideId } from '@/lib/deck/types';
+import { BACK, FRONT, SECTIONS, defaultItems, type Item, type ItemId } from '@/lib/deck/catalog';
+import { available, buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
+import { defaultInput, factsFor, peerPool, ruleText, scheduleOf, totalEok } from '@/lib/deck/rules';
+import type { DeckData, DeckInput, DeckText } from '@/lib/deck/types';
 import { SlideView } from './SlideView';
 
 type Mode = 'rule' | 'ai' | 'edited';
-type Saved = { v: 1; input: DeckInput; text: DeckText | null; mode: Mode; factsKey: string | null; at: string };
-const KEY = (corp: string) => `deck:v1:${corp}`;
+type Saved = { v: 2; input: DeckInput; text: DeckText | null; mode: Mode; factsKey: string | null; at: string };
+const KEY = (corp: string) => `deck:v2:${corp}`;
 
 function load(corp: string): Saved | null {
   try {
@@ -42,14 +43,23 @@ function download(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-const TEXT_FIELDS: { key: keyof DeckText; slide: SlideId; label: string }[] = [
-  { key: 'peers', slide: 'peers', label: '같은 등급 수요예측 사례' },
-  { key: 'compare', slide: 'compare', label: '사례 비교' },
-  { key: 'schedule', slide: 'schedule', label: '발행 일정(안)' },
-  { key: 'structure', slide: 'structure', label: '트랜치·만기 구조' },
-  { key: 'rates', slide: 'rates', label: '기준금리·국고채' },
-  { key: 'corp', slide: 'corp', label: '회사채 금리' },
-  { key: 'views', slide: 'views', label: '증권사별 기준금리 전망' },
+// 장표별 요약 상자 문안 (목차에서 켠 장표만 보인다)
+const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
+  { key: 'structure', item: 'terms', label: '발행조건 제안(案)' },
+  { key: 'sizing', item: 'sizing', label: '적정 발행규모 및 트랜치 구성' },
+  { key: 'schedule', item: 'schedule', label: '발행 일정' },
+  { key: 'pipeline', item: 'pipeline', label: '수요예측 예정 내역' },
+  { key: 'rates', item: 'rates', label: '금리 동향' },
+  { key: 'bok', item: 'bok', label: '금통위' },
+  { key: 'fomc', item: 'fomc', label: 'FOMC' },
+  { key: 'views', item: 'views', label: '증권사별 국내 기준금리 전망' },
+  { key: 'usviews', item: 'usviews', label: '증권사별 미국 기준금리 전망' },
+  { key: 'forecast', item: 'forecast', label: '금리 전망(NH투자증권 리서치)' },
+  { key: 'peers', item: 'peers', label: '수요예측 결과' },
+  { key: 'compare', item: 'compare', label: '미매각 사례 분석' },
+  { key: 'corp', item: 'corp', label: '회사채 금리' },
+  { key: 'league', item: 'league', label: '연간 League Table' },
+  { key: 'maturity', item: 'maturity', label: '등급별 회사채 만기도래' },
 ];
 
 export function DeckStudio({ corp }: { corp: string }) {
@@ -79,7 +89,7 @@ export function DeckStudio({ corp }: { corp: string }) {
         const s = load(corp);
         const base = defaultInput(d);
         if (s) {
-          setInput({ ...base, ...s.input, slides: { ...base.slides, ...s.input.slides }, band: { ...base.band, ...s.input.band } });
+          setInput({ ...base, ...s.input, items: { ...base.items, ...s.input.items }, band: { ...base.band, ...s.input.band } });
           setText(s.text);
           setMode(s.mode);
           setFactsKey(s.factsKey);
@@ -108,7 +118,7 @@ export function DeckStudio({ corp }: { corp: string }) {
     if (!input) return;
     const t = setTimeout(() => {
       const at = new Date().toISOString();
-      save(corp, { v: 1, input, text: mode === 'rule' ? null : text, mode, factsKey, at });
+      save(corp, { v: 2, input, text: mode === 'rule' ? null : text, mode, factsKey, at });
       setSavedAt(at);
     }, 600);
     return () => clearTimeout(t);
@@ -143,7 +153,7 @@ export function DeckStudio({ corp }: { corp: string }) {
       const name = fileBase(input);
       if (kind === 'pptx') {
         const { toPptx } = await import('@/lib/deck/render-pptx');
-        download(await toPptx(slides, name), `${name}.pptx`);
+        download(await toPptx(slides, name, staticSubs(data!, input)), `${name}.pptx`);
       } else {
         const { toPdf } = await import('@/lib/deck/render-pdf');
         download(await toPdf(slides, name), `${name}.pdf`);
@@ -213,7 +223,8 @@ export function DeckStudio({ corp }: { corp: string }) {
         <form className="dk-form" onSubmit={(e) => e.preventDefault()} aria-label="제안 조건">
           <details open>
             <summary>기본 정보</summary>
-            <Field label="표지 회사명"><input value={input.issuer} onChange={(e) => set('issuer', e.target.value)} /></Field>
+            <Field label="회사명 표기"><input value={input.issuer} onChange={(e) => set('issuer', e.target.value)} /></Field>
+            <Field label="표지 제목"><input value={input.coverTitle} onChange={(e) => set('coverTitle', e.target.value)} /></Field>
             <div className="dk-row">
               <Field label="회차"><input value={input.series} onChange={(e) => set('series', e.target.value)} inputMode="numeric" /></Field>
               <Field label="제안 월"><input value={input.month} onChange={(e) => set('month', e.target.value)} placeholder="2026. 11" /></Field>
@@ -226,11 +237,7 @@ export function DeckStudio({ corp }: { corp: string }) {
 
           <details open>
             <summary>발행 조건</summary>
-            <Field label="만기" hint="'또는'으로 여러 안을 적으면 만기구조 비교 표에 행으로 나뉩니다."><input value={input.tenors} onChange={(e) => set('tenors', e.target.value)} placeholder="1년 또는 1.5년" /></Field>
-            <div className="dk-row">
-              <Field label="발행금액(억원)"><NumIn v={input.amountEok} on={(v) => set('amountEok', v)} /></Field>
-              <Field label="증액 시 최대(억원)"><NumIn v={input.maxEok} on={(v) => set('maxEok', v)} /></Field>
-            </div>
+            <Tranches input={input} set={set} />
             <Field label="이자지급">
               <select value={input.coupon} onChange={(e) => set('coupon', e.target.value)}>
                 {['3개월 이표채', '월단위 이표채', '6개월 이표채', '만기일시'].map((x) => <option key={x}>{x}</option>)}
@@ -317,19 +324,7 @@ export function DeckStudio({ corp }: { corp: string }) {
             </div>
           </details>
 
-          <details>
-            <summary>장표 구성 <span className="muted small">{SLIDES.filter((s) => input.slides[s.id]).length}/{SLIDES.length}</span></summary>
-            <ul className="dk-toggles">
-              {SLIDES.map((s) => (
-                <li key={s.id}>
-                  <label>
-                    <input type="checkbox" checked={input.slides[s.id]} onChange={(e) => set('slides', { ...input.slides, [s.id]: e.target.checked })} />
-                    {s.label}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </details>
+          <Toc data={data} input={input} set={set} />
 
           <details>
             <summary>
@@ -338,17 +333,17 @@ export function DeckStudio({ corp }: { corp: string }) {
             <Field label="주요 제안 첫 문장">
               <textarea rows={3} value={shownText.lead} onChange={(e) => editText('lead', e.target.value)} />
             </Field>
-            {TEXT_FIELDS.filter((f) => input.slides[f.slide]).map((f) => (
+            {TEXT_FIELDS.filter((f) => input.items[f.item]).map((f) => (
               <Field key={f.key} label={f.label}>
                 <textarea rows={Math.min(8, (shownText[f.key] as string[]).length + 1)} value={(shownText[f.key] as string[]).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
               </Field>
             ))}
-            {input.slides.structure && shownText.structureRows.map((r, i) => (
+            {input.items.sizing && shownText.structureRows.map((r, i) => (
               <Field key={`sr-${i}`} label={`만기 구조 설명: ${r.label}`}>
                 <textarea rows={2} value={r.desc} onChange={(e) => editText('structureRows', shownText.structureRows.map((x, j) => (j === i ? { ...x, desc: e.target.value } : x)))} />
               </Field>
             ))}
-            {input.slides.strength && shownText.strengths.map((s, i) => (
+            {input.items.strength && shownText.strengths.map((s, i) => (
               <div key={`st-${i}`} className="dk-row">
                 <Field label={`강점 ${i + 1} 제목`}><input value={s.title} onChange={(e) => editText('strengths', shownText.strengths.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field>
                 <Field label="내용"><input value={s.text} onChange={(e) => editText('strengths', shownText.strengths.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field>
@@ -384,6 +379,85 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       <span className="dk-label">{label}{hint && <Info>{hint}</Info>}</span>
       {children}
     </label>
+  );
+}
+
+type Setter = <K extends keyof DeckInput>(k: K, v: DeckInput[K]) => void;
+
+// 트랜치: 만기·최초 신고 금액. 만기 칸에 '1년 또는 1.5년'처럼 쓰면 대안으로 비교한다.
+function Tranches({ input, set }: { input: DeckInput; set: Setter }) {
+  const tr = input.tranches;
+  const put = (i: number, v: Partial<DeckInput['tranches'][number]>) => set('tranches', tr.map((t, j) => (j === i ? { ...t, ...v } : t)));
+  const total = totalEok(input);
+  return (
+    <div className="dk-tranches">
+      <div className="dk-tr dk-tr-h small" aria-hidden>
+        <span>만기</span><span>금액(억원)</span><span />
+      </div>
+      {tr.map((t, i) => (
+        <div className="dk-tr" key={i}>
+          <input aria-label={`트랜치 ${i + 1} 만기`} value={t.tenor} onChange={(e) => put(i, { tenor: e.target.value })} placeholder="3년" />
+          <input aria-label={`트랜치 ${i + 1} 금액(억원)`} type="number" inputMode="numeric" value={t.eok ?? ''} onChange={(e) => put(i, { eok: e.target.value === '' ? null : Number(e.target.value) })} />
+          <button type="button" className="linklike small" disabled={tr.length <= 1} onClick={() => set('tranches', tr.filter((_, j) => j !== i))} aria-label={`트랜치 ${i + 1} 빼기`}>빼기</button>
+        </div>
+      ))}
+      <div className="dk-tr-foot small">
+        <button type="button" className="linklike" onClick={() => set('tranches', [...tr, { tenor: '', eok: null }])} disabled={tr.length >= 5}>트랜치 추가</button>
+        <span className="muted">합계 {total ? `${total.toLocaleString('ko-KR')}억원` : '–'}</span>
+      </div>
+      <Field label="증액 시 최대(억원)"><NumIn v={input.maxEok} on={(v) => set('maxEok', v)} /></Field>
+    </div>
+  );
+}
+
+// 목차: 대한항공 공모사채 제안서 구성. 켜고 끄면 목차·간지·쪽 제목 번호가 다시 매겨진다.
+function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Setter }) {
+  const avail = available(data, input);
+  const on = input.items;
+  const count = [...FRONT, ...SECTIONS.flatMap((x) => x.groups.flatMap((g) => g.items)), BACK].filter((i) => on[i.id] && avail(i.id)).length;
+  const toggle = (id: ItemId, v: boolean) => set('items', { ...on, [id]: v });
+  const row = (i: Item, sub = false) => {
+    const ok = avail(i.id);
+    return (
+      <li key={i.id} className={sub ? 'dk-toc-sub' : undefined}>
+        <label className={ok ? undefined : 'muted'}>
+          <input type="checkbox" checked={!!on[i.id] && ok} disabled={!ok} onChange={(e) => toggle(i.id, e.target.checked)} />
+          <span>{i.title}</span>
+          {i.kind !== 'gen' && <span className="dk-tag">{i.kind === 'static' ? '템플릿' : '빈 표'}</span>}
+          {!ok && <span className="small">자료 없음</span>}
+        </label>
+        {i.note && ok && <span className="dk-toc-note small muted">{i.note}</span>}
+      </li>
+    );
+  };
+  const staticOn = (['ir', 'nh_org'] as ItemId[]).some((id) => on[id]);
+  return (
+    <details open>
+      <summary>목차 <span className="muted small">{count}개 항목</span></summary>
+      <ul className="dk-toc">{FRONT.map((i) => row(i))}</ul>
+      {SECTIONS.map((sec) => (
+        <fieldset key={sec.key} className="dk-toc-sec">
+          <legend>{sec.key === 'A' ? 'Appendix' : `${sec.key}. ${sec.label}`}</legend>
+          <ul className="dk-toc">
+            {sec.groups.map((g) => (g.items.length === 1 && g.items[0].title === g.title
+              ? row(g.items[0])
+              : (
+                <li key={g.title}>
+                  <span className="dk-toc-g">{g.title}</span>
+                  <ul className="dk-toc">{g.items.map((i) => row(i, true))}</ul>
+                </li>
+              )))}
+          </ul>
+        </fieldset>
+      ))}
+      <ul className="dk-toc">{row(BACK)}</ul>
+      {staticOn && (
+        <Field label="담당 커버리지 부서" hint="템플릿 장표(IR 전략·업무 분장)의 부서명 자리에 들어갑니다.">
+          <input value={input.coverDept} onChange={(e) => set('coverDept', e.target.value)} />
+        </Field>
+      )}
+      <p className="small"><button type="button" className="linklike" onClick={() => set('items', defaultItems())}>기본 목차로</button></p>
+    </details>
   );
 }
 

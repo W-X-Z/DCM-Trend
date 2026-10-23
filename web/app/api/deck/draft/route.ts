@@ -37,7 +37,7 @@ const arr = (min: number, max: number) => ({ type: 'array', items: { type: 'stri
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['lead', 'peers', 'compare', 'schedule', 'structure', 'structureRows', 'strengths', 'rates', 'corp', 'views'],
+  required: ['lead', 'peers', 'compare', 'schedule', 'structure', 'structureRows', 'strengths', 'rates', 'corp', 'views', 'sizing', 'pipeline', 'bok', 'fomc', 'usviews', 'forecast', 'league', 'maturity'],
   properties: {
     lead: { type: 'string', description: '주요 제안 장표 상단 한 문장(합니다체 허용)' },
     peers: { ...arr(2, 5), description: '같은 등급 수요예측 사례 장표 요약, 2~5줄' },
@@ -54,7 +54,15 @@ const SCHEMA = {
     },
     rates: { ...arr(2, 4), description: '기준금리·국고채 장표 요약, 2~4줄' },
     corp: { ...arr(2, 4), description: '회사채 금리 장표 요약, 2~4줄' },
-    views: { ...arr(1, 3), description: '증권사별 기준금리 전망 장표 요약, 1~3줄' },
+    views: { ...arr(1, 3), description: '증권사별 국내 기준금리 전망 장표 요약, 1~3줄' },
+    sizing: { ...arr(2, 4), description: '적정 발행규모·트랜치 구성 장표 요약(제안 금액·만기는 초안 그대로), 2~4줄' },
+    pipeline: { ...arr(1, 3), description: '회사채 수요예측 예정 내역 장표 요약, 1~3줄' },
+    bok: { ...arr(1, 2), description: '금통위 장표 상단 요약(결정·표결은 사실 그대로), 1~2줄' },
+    fomc: { ...arr(1, 2), description: 'FOMC 장표 상단 요약(결정·표결은 사실 그대로), 1~2줄' },
+    usviews: { ...arr(1, 3), description: '증권사별 미국 기준금리 전망 장표 요약, 1~3줄' },
+    forecast: { ...arr(2, 4), description: 'NH투자증권 리서치 금리 전망 장표 요약, 2~4줄' },
+    league: { ...arr(1, 3), description: '연간 대표주관·인수 League Table 장표 요약, 1~3줄' },
+    maturity: { ...arr(1, 3), description: '등급별 회사채 만기도래 장표 요약, 1~3줄' },
   },
 } as const;
 

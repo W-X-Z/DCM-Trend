@@ -8,20 +8,22 @@ type Page = ReturnType<import('pdf-lib').PDFDocument['addPage']>;
 type FK = { hasGlyphForCodePoint(cp: number): boolean };
 
 // 나눔고딕에 없는 글자 → 대체 표기
-const SUB: Record<string, string> = { '㈜': '(주)', '案': '안', '▪': '■', '∼': '~', '−': '-', '中': '중', '前': '전', '內': '내' };
+const SUB: Record<string, string> = {
+  '㈜': '(주)', '案': '안', '▪': '■', '∼': '~', '−': '-', '中': '중', '前': '전', '內': '내', '✓': '√',
+  'Ⅰ': 'I', 'Ⅱ': 'II', 'Ⅲ': 'III', 'Ⅳ': 'IV', '①': '(1)', '②': '(2)', '③': '(3)', '④': '(4)', '⑤': '(5)', '⑥': '(6)', '⑦': '(7)', '⑧': '(8)',
+};
 
 async function bytes(url: string) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`글꼴을 불러오지 못했습니다 (${url})`);
+  if (!r.ok) throw new Error(`파일을 불러오지 못했습니다 (${url})`);
   return new Uint8Array(await r.arrayBuffer());
 }
 
 export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
   const lib: PDFLib = await import('pdf-lib');
   const fontkit = (await import('@pdf-lib/fontkit')).default;
-  const [rB, bB, xB, logoC, logoW] = await Promise.all([
+  const [rB, bB, xB] = await Promise.all([
     bytes('/deck/NanumGothic-Regular.ttf'), bytes('/deck/NanumGothic-Bold.ttf'), bytes('/deck/NanumGothic-ExtraBold.ttf'),
-    bytes('/deck/nh-logo-color.png'), bytes('/deck/nh-logo-white.png'),
   ]);
   const doc = await lib.PDFDocument.create();
   doc.registerFontkit(fontkit);
@@ -33,7 +35,15 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
   // ExtraBold 는 pdf-lib 부분 내장 시 일부 글자가 빠져 통째로 내장한다(약 2MB)
   const fX = await doc.embedFont(xB, { subset: false });
   const glyphs = (fontkit as unknown as { create(b: Uint8Array): FK }).create(rB);
-  const imgs = { 'logo-color': await doc.embedPng(logoC), 'logo-white': await doc.embedPng(logoW) };
+  // 그림: 로고(png), 레이아웃 배경·고정 장표(jpg). 장표에 쓰인 것만 한 번씩 내장한다.
+  const imgUrl = (src: string) => (src === 'logo-color' ? '/deck/nh-logo-color.png' : src === 'logo-white' ? '/deck/nh-logo-white.png' : src);
+  const srcs = [...new Set(slides.flatMap((sl) => [...sl.chrome, ...sl.prims]).filter((p) => p.k === 'img').map((p) => (p as { src: string }).src))];
+  const imgs: Record<string, Awaited<ReturnType<typeof doc.embedPng>>> = {};
+  await Promise.all(srcs.map(async (src) => {
+    const url = imgUrl(src);
+    const b = await bytes(url);
+    imgs[src] = /\.png$/i.test(url) ? await doc.embedPng(b) : await doc.embedJpg(b);
+  }));
 
   const clean = (s: string) => {
     let o = '';
@@ -134,7 +144,7 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
     const sy = (v: number) => y0 + 6 + (1 - (v - c.min) / (c.max - c.min || 1)) * (bottom - 6);
     for (let v = c.min; v <= c.max + 1e-9; v += c.step) {
       page.drawLine({ start: { x: x0 + left, y: Y(sy(v)) }, end: { x: x0 + left + pw, y: Y(sy(v)) }, thickness: 0.5, color: col(C.grid) });
-      const lab = v.toFixed(c.step < 0.5 ? 2 : 1);
+      const lab = v.toFixed(c.step >= 1 ? 0 : c.step < 0.5 ? 2 : 1);
       page.drawText(lab, { x: x0 + left - 4 - fR.widthOfTextAtSize(lab, 7), y: Y(sy(v) + 3), size: 7, font: fR, color: col(C.sub) });
     }
     c.cats.forEach((k, i) => {
@@ -168,7 +178,7 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
         page.drawLine({ start: { x: p.x1, y: Y(p.y1) }, end: { x: p.x2, y: Y(p.y2) }, thickness: p.w, color: col(p.color) });
         return;
       case 'img':
-        page.drawImage(imgs[p.src], { x: p.x, y: Y(p.y + p.h), width: p.w, height: p.h });
+        if (imgs[p.src]) page.drawImage(imgs[p.src], { x: p.x, y: Y(p.y + p.h), width: p.w, height: p.h });
         return;
       case 'text':
         text(page, p);
@@ -185,7 +195,7 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
   for (const s of slides) {
     const page = doc.addPage([PAGE.w, PAGE.h]);
     page.drawRectangle({ x: 0, y: 0, width: PAGE.w, height: PAGE.h, color: col(s.bg ?? C.white) });
-    for (const p of s.prims) prim(page, p);
+    for (const p of [...s.chrome, ...s.prims]) prim(page, p);
   }
   const out = await doc.save();
   return new Blob([out], { type: 'application/pdf' });

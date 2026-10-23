@@ -1,6 +1,7 @@
 // PPTX 렌더러 (브라우저에서 실행). 표·차트는 PowerPoint에서 바로 고칠 수 있게 기본 표·차트로 만든다.
 import type PptxGenJS from 'pptxgenjs';
 import { BULLET_INDENT, type Cell, type Para, type Prim, type Slide, type Table, type TextBox } from './model';
+import { assemble, type AsmSlide, type Subs } from './assemble';
 import { C, FONT, LINE, PAGE } from './theme';
 
 const IN = (pt: number) => pt / 72;
@@ -64,7 +65,8 @@ function addTable(s: PSlide, t: Table) {
       .map((c) => ({
         text: runs(c.paras, c.size ?? t.size, c.color ?? t.color, !!c.bold, 1.18, FONT.face),
         options: {
-          fill: c.fill ? { color: c.fill } : undefined,
+          // 칸 바탕은 늘 명시한다(비워 두면 템플릿 기본 표 스타일 색이 깔린다)
+          fill: { color: c.fill ?? 'FFFFFF' },
           align: ALIGN[c.align ?? 'c'], valign: VALIGN[c.valign ?? 'm'],
           colspan: c.colspan, rowspan: c.rowspan,
           border: [line(true), line(!!t.gridV), line(true), line(!!t.gridV)],
@@ -92,6 +94,7 @@ function addPrim(pptx: Pptx, s: PSlide, p: Prim, logos: Record<string, string>) 
       s.addShape(pptx.ShapeType.line, { x: IN(Math.min(p.x1, p.x2)), y: IN(Math.min(p.y1, p.y2)), w: IN(Math.abs(p.x2 - p.x1)), h: IN(Math.abs(p.y2 - p.y1)), line: { color: p.color, width: p.w } });
       return;
     case 'img':
+      if (!logos[p.src]) return;
       s.addImage({ data: logos[p.src], x: IN(p.x), y: IN(p.y), w: IN(p.w), h: IN(p.h) });
       return;
     case 'text':
@@ -125,7 +128,7 @@ function addPrim(pptx: Pptx, s: PSlide, p: Prim, logos: Record<string, string>) 
         });
         s.addChart(pptx.ChartType.line, series, {
           ...box, chartColors: c.series.map((sr) => sr.color), lineSize: 2, lineDataSymbol: 'none',
-          valAxisMinVal: c.min, valAxisMaxVal: c.max, valAxisMajorUnit: c.step, valAxisLabelFormatCode: c.step < 0.5 ? '0.00' : '0.0',
+          valAxisMinVal: c.min, valAxisMaxVal: c.max, valAxisMajorUnit: c.step, valAxisLabelFormatCode: c.step >= 1 ? '0' : c.step < 0.5 ? '0.00' : '0.0',
           valAxisLabelFontSize: 7.5, catAxisLabelFontSize: 7.5, catAxisLabelFrequency: c.labelEvery,
           catAxisLabelFontFace: FONT.face, valAxisLabelFontFace: FONT.face,
           valGridLine: { color: C.grid, size: 0.5 }, showLegend: true, legendPos: 'b', legendFontSize: 8, legendFontFace: FONT.face,
@@ -135,7 +138,9 @@ function addPrim(pptx: Pptx, s: PSlide, p: Prim, logos: Record<string, string>) 
   }
 }
 
-export async function toPptx(slides: Slide[], fileName: string) {
+// NH 템플릿(public/deck/nh-template.pptx)의 슬라이드 마스터·레이아웃 위에 장표를 얹는다.
+// 데이터 장표는 pptxgenjs 로 내용만 그리고(머리띠·로고·쪽번호는 레이아웃), 고정 장표는 템플릿 원본 XML 을 쓴다.
+export async function toPptx(slides: Slide[], fileName: string, subs: Subs = []) {
   const { default: Pptx } = await import('pptxgenjs');
   const pptx = new Pptx();
   pptx.defineLayout({ name: 'NH', width: IN(PAGE.w), height: IN(PAGE.h) });
@@ -145,22 +150,34 @@ export async function toPptx(slides: Slide[], fileName: string) {
   pptx.title = fileName;
   pptx.theme = { headFontFace: FONT.face, bodyFontFace: FONT.face };
   const logos = { 'logo-color': await b64('/deck/nh-logo-color.png'), 'logo-white': await b64('/deck/nh-logo-white.png') };
+  const plan: AsmSlide[] = [];
+  let gen = 0;
   for (const sl of slides) {
+    if (sl.static) {
+      plan.push({ kind: 'static', file: sl.static.file, renumber: sl.static.renumber });
+      continue;
+    }
     const s = pptx.addSlide();
-    s.background = { color: sl.bg ?? C.white };
     for (const p of sl.prims) addPrim(pptx, s, p, logos);
+    gen += 1;
+    plan.push({ kind: 'gen', genIndex: gen, layout: sl.layout });
   }
-  const data = (await pptx.write({ outputType: 'blob' })) as Blob;
-  return fixParagraphProps(data);
+  const genBytes = gen ? await fixParagraphProps((await pptx.write({ outputType: 'uint8array' })) as Uint8Array) : null;
+  const template = new Uint8Array(await (await fetch('/deck/nh-template.pptx')).arrayBuffer());
+  const out = assemble(template, genBytes, plan, subs);
+  return new Blob([out as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
 }
 
 // pptxgenjs 는 여러 서식이 섞인 문단에서 <a:pPr> 를 글자 덩어리마다 넣는다. 문단당 하나만 남긴다.
-async function fixParagraphProps(blob: Blob): Promise<Blob> {
+// 배경(<p:bg>)은 지워 템플릿 레이아웃 배경을 쓴다.
+async function fixParagraphProps(bytes: Uint8Array): Promise<Uint8Array> {
   const { unzipSync, zipSync, strFromU8, strToU8 } = await import('fflate');
-  const files = unzipSync(new Uint8Array(await blob.arrayBuffer()));
+  const files = unzipSync(bytes);
   for (const name of Object.keys(files)) {
     if (!/^ppt\/slides\/slide\d+\.xml$/.test(name)) continue;
-    const xml = strFromU8(files[name]);
+    // pptxgenjs 는 표 틀과 도형에 같은 id 를 줄 때가 있어 장표 안 id 를 차례로 다시 매긴다(PowerPoint 복구 경고 방지)
+    let nextId = 1;
+    const xml = strFromU8(files[name]).replace(/<p:bg>[\s\S]*?<\/p:bg>/, '').replace(/<p:cNvPr id="\d+"/g, () => `<p:cNvPr id="${nextId++}"`);
     const fixed = xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (whole, inner: string) => {
       let seen = false;
       const body = inner.replace(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g, (m) => {
@@ -172,5 +189,5 @@ async function fixParagraphProps(blob: Blob): Promise<Blob> {
     });
     files[name] = strToU8(fixed);
   }
-  return new Blob([zipSync(files, { level: 6 })], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+  return zipSync(files, { level: 1 });
 }
