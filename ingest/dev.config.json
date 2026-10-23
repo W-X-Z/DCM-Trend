@@ -1,1 +1,1 @@
-{"command":"sequence","maxCalls":"1200","steps":[{"command":"documents","maxDocs":"700"},{"command":"refresh"},{"command":"insights"}]}
+{"command":"documents","rceptNos":"20260813001665,20260203000349,20260211000897,20260831001445,20260112000452","keepRaw":"true","maxDocs":"10"}
