@@ -14,7 +14,8 @@ export type TextBox = {
 };
 export type Rect = { k: 'rect'; x: number; y: number; w: number; h: number; fill?: string; stroke?: string; sw?: number; dash?: boolean };
 export type Line = { k: 'line'; x1: number; y1: number; x2: number; y2: number; color: string; w: number };
-export type Img = { k: 'img'; x: number; y: number; w: number; h: number; src: 'logo-color' | 'logo-white' };
+// src: 'logo-color' | 'logo-white' | 정적 장표 그림 경로('/deck/static/…')
+export type Img = { k: 'img'; x: number; y: number; w: number; h: number; src: string };
 
 export type Cell = {
   paras: Para[]; fill?: string; color?: string; bold?: boolean; size?: number; align?: Align; valign?: VAlign;
@@ -36,7 +37,13 @@ export type LineChart = {
 export type Chart = { k: 'chart'; x: number; y: number; w: number; h: number; chart: BarChart | LineChart };
 
 export type Prim = TextBox | Rect | Line | Img | Table | Chart;
-export type Slide = { id: string; title: string; bg?: string; prims: Prim[]; notes?: string };
+// layout: NH 템플릿 레이아웃. chrome 은 레이아웃이 그리는 부분(머리띠·로고·쪽번호 등)이라 PPTX 에서는 그리지 않고,
+// 미리보기·PDF 에서만 그린다. static 은 템플릿 고정 장표(PPTX 는 원본 XML, 미리보기·PDF 는 그림)
+export type SlideLayout = 'cover' | 'contents' | 'folder' | 'body' | 'back' | 'ceo';
+export type Slide = {
+  id: string; title: string; bg?: string; layout: SlideLayout; chrome: Prim[]; prims: Prim[];
+  static?: { file: string; renumber?: string | null };
+};
 
 // 강조 표기: **굵게+밑줄**, !!빨강!!, ^^굵게^^
 export function rich(s: string, base: Omit<Run, 't'> = {}): Run[] {

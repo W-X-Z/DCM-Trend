@@ -1,4 +1,5 @@
 // 제안서 데이터(서버 → 브라우저)와 입력값(브라우저에만 저장) 형식
+import type { ItemId } from './catalog';
 import type { Holiday, MarketEvent } from './schedule';
 
 export type PeerTranche = {
@@ -45,28 +46,28 @@ export type DeckData = {
   events: MarketEvent[];
   holidays: Holiday[];
   fee: { last_bp: number | null; group_median_bp: number | null };
+  // 상세형 장표용
+  pipeline: PipelineIssue[]; // 증권신고서 제출 후 발행 전(수요예측 예정·진행)
+  leagueYearly: { year: number; ytd: boolean; total_lead: number; total_uw: number; lead: YearRow[]; uw: YearRow[] }[];
+  maturityByGrade: { months: string[]; rows: { grade: string; values: number[]; total: number }[]; total: number[]; asof: string };
+  policy: { bok: Meeting | null; fomc: Meeting | null };
+  usViews: UsView[];
 };
 
-export type SlideId =
-  | 'cover' | 'sec1' | 'terms' | 'peers' | 'compare' | 'schedule' | 'structure' | 'strength'
-  | 'sec2' | 'rates' | 'corp' | 'views' | 'events' | 'back';
-
-export const SLIDES: { id: SlideId; label: string; group: 1 | 2 | 0 }[] = [
-  { id: 'cover', label: '표지', group: 0 },
-  { id: 'sec1', label: '간지: 발행 전략 검토 및 제안', group: 1 },
-  { id: 'terms', label: '주요 제안', group: 1 },
-  { id: 'peers', label: '발행시기 제안: 같은 등급 수요예측 사례', group: 1 },
-  { id: 'compare', label: '발행시기 제안: 사례 비교', group: 1 },
-  { id: 'schedule', label: '발행시기 제안: 발행 일정(안)', group: 1 },
-  { id: 'structure', label: '발행전략 제안: 트랜치·만기 구조', group: 1 },
-  { id: 'strength', label: 'NH투자증권의 강점', group: 1 },
-  { id: 'sec2', label: '간지: 회사채 시장 동향', group: 2 },
-  { id: 'rates', label: '금리 동향과 전망: 기준금리·국고채', group: 2 },
-  { id: 'corp', label: '금리 동향: 회사채', group: 2 },
-  { id: 'views', label: '시장 동향: 증권사별 기준금리 전망', group: 2 },
-  { id: 'events', label: 'Appendix: 주요 이벤트', group: 2 },
-  { id: 'back', label: '뒷표지', group: 0 },
-];
+export type YearRow = { rank: number; firm: string; krw: number; share: number; isNh: boolean };
+export type PipelineIssue = {
+  key: string; corp_name: string; sub_type: string | null; rating: string | null; demand_dt: string | null; pay_dt: string | null;
+  band_type: string | null; band_low: number | null; band_high: number | null; lead: string | null; nh_lead: boolean;
+  tranches: { tenor: string; months: number | null; initial_krw: number | null }[];
+};
+export type Meeting = {
+  kind: '금통위' | 'FOMC'; meeting_dt: string; title: string; decision: string; vote: string | null;
+  points: { label: string; text: string }[]; sources: { title: string; url: string; date: string | null }[];
+};
+export type UsView = {
+  house: string; analysts: string | null; published_dt: string; title: string; url: string;
+  next_move: string | null; terminal: number | null; end2026: number | null; end2027: number | null; summary: string;
+};
 
 export type BandInput = { type: 'later' | 'fixed' | 'spread'; low: number | null; high: number | null };
 
@@ -78,8 +79,8 @@ export type DeckInput = {
   security: string;
   rating: string;
   ratingNote: string;
-  tenors: string; // '1년 또는 1.5년'
-  amountEok: number | null;
+  coverTitle: string; // 표지 제목
+  tranches: { tenor: string; eok: number | null }[]; // '1년 또는 1.5년' 처럼 쓰면 대안 만기
   maxEok: number | null;
   coupon: string;
   band: BandInput;
@@ -93,8 +94,9 @@ export type DeckInput = {
   peerScope: 'group' | 'notch';
   peerKeys: string[]; // 수요예측 사례 표
   compareKeys: string[]; // 비교 장표 (최대 3)
-  slides: Record<SlideId, boolean>;
-  dept: string;
+  items: Record<ItemId, boolean>;
+  dept: string; // 뒷표지 부서명
+  coverDept: string; // 고정 장표의 담당(커버리지) 부서명
   contacts: string; // 뒷표지 연락처(직접 입력, 브라우저에만 저장)
 };
 
@@ -110,5 +112,13 @@ export type DeckText = {
   rates: string[];
   corp: string[];
   views: string[];
+  sizing: string[];
+  pipeline: string[];
+  bok: string[];
+  fomc: string[];
+  usviews: string[];
+  forecast: string[];
+  league: string[];
+  maturity: string[];
 };
 export type TextKey = keyof DeckText;

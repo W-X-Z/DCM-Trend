@@ -61,6 +61,14 @@ export function mergeValidated(ai: Partial<DeckText>, rule: DeckText, allowed: S
     rates: list('rates', true),
     corp: list('corp', true),
     views: list('views', true),
+    sizing: list('sizing'),
+    pipeline: list('pipeline'),
+    bok: list('bok', true),
+    fomc: list('fomc', true),
+    usviews: list('usviews', true),
+    forecast: list('forecast', true),
+    league: list('league'),
+    maturity: list('maturity'),
   };
   return { text, dropped };
 }

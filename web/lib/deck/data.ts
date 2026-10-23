@@ -65,7 +65,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
   const rating = c.latest_bond_rating ?? last?.rating ?? null;
   const group = (last?.rating_group && last.rating_group !== '등급 미확인' ? last.rating_group : null) ?? ratingGroupOf(rating);
 
-  const [peerRows, mats, latest, rateRows, fc, vw, ev, hol, tdeals] = await Promise.all([
+  const [peerRows, mats, latest, rateRows, fc, vw, ev, hol, tdeals, pipeRows, lyRows, gradeMats, pol] = await Promise.all([
     group
       ? select<BondIssue>('v_bond_issues', { rating_group: `eq.${group}`, deal_dt: `gte.${since12}`, order: 'deal_dt.desc', limit: 400 })
       : Promise.resolve([] as BondIssue[]),
@@ -75,12 +75,24 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
     select<{ house: string; published_dt: string; source_title: string; source_url: string; series_key: string; series_label: string; period: string; period_order: number; basis: string; is_actual: boolean; value_pct: number }>(
       'v_research_forecasts', { order: 'published_dt.desc,series_key.asc,period_order.asc', limit: 200 },
     ).catch(() => []),
-    select<{ house: string; analysts: string | null; published_dt: string; source_kind: string; source_title: string; source_url: string; stance: string | null; next_move: string | null; terminal_rate_pct: number | null; summary: string }>(
+    select<{ house: string; analysts: string | null; published_dt: string; source_kind: string; source_title: string; source_url: string; stance: string | null; next_move: string | null; terminal_rate_pct: number | null; summary: string; region?: string | null; end_2026_pct?: number | null; end_2027_pct?: number | null }>(
       'v_research_views', { limit: 40 },
     ).catch(() => []),
     select<MarketEvent>('v_market_events', { event_dt: `gte.${shiftMonths(today, -2)}`, order: 'event_dt.asc', limit: 200 }).catch(() => []),
     select<Holiday>('v_kr_holidays', { order: 'dt.asc', limit: 400 }).catch(() => []),
     selectAll<TrendDeal>('v_deals', { select: TREND_DEAL_COLS, product_type: 'eq.bond', deal_dt: `gte.${since12}`, sub_type: 'eq.일반회사채', order: 'deal_dt.asc' }).catch(() => [] as TrendDeal[]),
+    // 수요예측 예정·진행: 증권신고서는 냈고 납입 전인 발행
+    select<BondIssue>('v_bond_issues', { deal_dt: `gte.${today}`, order: 'demand_dt.asc.nullslast,deal_dt.asc', limit: 60 }).catch(() => [] as BondIssue[]),
+    select<{ year: number; firm: string; is_nh: boolean; lead_deals: number; lead_credit_krw: number | null; uw_amount_krw: number | null; lead_rank: number | null; uw_rank: number | null }>(
+      'v_league_table_yearly', { product_type: 'eq.bond', year: `gte.${Number(today.slice(0, 4)) - 5}`, order: 'year.desc,lead_rank.asc', limit: 600 },
+    ).catch(() => []),
+    selectAll<{ event_dt: string; amount_krw: number | null; rating_group: string | null; sub_type: string | null }>('v_maturities', {
+      select: 'event_dt,amount_krw,rating_group,sub_type', product_type: 'eq.bond', event_type: 'eq.만기',
+      and: `(event_dt.gte.${today.slice(0, 7)}-01,event_dt.lt.${shiftMonths(`${today.slice(0, 7)}-01`, 12)})`,
+    }).catch(() => []),
+    select<{ kind: '금통위' | 'FOMC'; meeting_dt: string; title: string; decision: string; vote: string | null; points: { label: string; text: string }[]; sources: { title: string; url: string; date: string | null }[] }>(
+      'v_policy_meetings', { order: 'meeting_dt.desc', limit: 10 },
+    ).catch(() => []),
   ]);
 
   const peers = peerRows.map(toPeer);
@@ -92,6 +104,37 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
   const keys = [...new Set(fcRows.map((r) => r.series_key))];
   const order = ['base_rate', 'ktb3y', 'ktb10y'];
   keys.sort((a, b) => (order.indexOf(a) + 99) % 99 - (order.indexOf(b) + 99) % 99);
+
+  // 연간 리그테이블: 상위 5 + NH
+  const years = [...new Set(lyRows.map((r) => r.year))].sort((a, b) => b - a).slice(0, 6).sort((a, b) => a - b);
+  const leagueYearly = years.map((y) => {
+    const rs = lyRows.filter((r) => r.year === y);
+    const totalLead = rs.reduce((t, r) => t + Number(r.lead_credit_krw ?? 0), 0);
+    const totalUw = rs.reduce((t, r) => t + Number(r.uw_amount_krw ?? 0), 0);
+    const pick = (rankKey: 'lead_rank' | 'uw_rank', amt: 'lead_credit_krw' | 'uw_amount_krw', total: number) => {
+      const sorted = rs.filter((r) => r[rankKey] != null).sort((a, b) => Number(a[rankKey]) - Number(b[rankKey]));
+      const top = sorted.slice(0, 5);
+      const nh = sorted.find((r) => r.is_nh);
+      if (nh && !top.includes(nh)) top.push(nh);
+      return top.map((r) => ({ rank: Number(r[rankKey]), firm: r.firm, krw: Number(r[amt] ?? 0), share: total ? (Number(r[amt] ?? 0) / total) * 100 : 0, isNh: r.is_nh }));
+    };
+    return { year: y, ytd: y === Number(today.slice(0, 4)), total_lead: totalLead, total_uw: totalUw, lead: pick('lead_rank', 'lead_credit_krw', totalLead), uw: pick('uw_rank', 'uw_amount_krw', totalUw) };
+  });
+
+  // 등급별 월별 만기도래 (일반 공모 회사채, 이번 달부터 12개월)
+  const m0 = `${today.slice(0, 7)}-01`;
+  const mlist = Array.from({ length: 12 }, (_, i) => shiftMonths(m0, i).slice(0, 7));
+  const gradeOf = (g: string | null) => (g === 'AAA' || g === 'AA' || g === 'A' ? g : g === 'BBB' || g === 'BB' || g === 'B' ? 'BBB 이하' : '등급 미확인');
+  const grades = ['AAA', 'AA', 'A', 'BBB 이하', '등급 미확인'];
+  const gm = gradeMats.filter((m) => (m.sub_type ?? '일반회사채') === '일반회사채');
+  const mrows = grades.map((g) => {
+    const values = mlist.map((mm) => gm.filter((m) => gradeOf(m.rating_group) === g && m.event_dt.slice(0, 7) === mm).reduce((t, m) => t + Number(m.amount_krw ?? 0), 0));
+    return { grade: g, values, total: values.reduce((a, b) => a + b, 0) };
+  }).filter((r) => r.total > 0 || r.grade !== '등급 미확인');
+  const maturityByGrade = { months: mlist, rows: mrows, total: mlist.map((_, i) => mrows.reduce((t, r) => t + r.values[i], 0)), asof: today };
+
+  const kr = vw.filter((v) => ((v as { region?: string | null }).region ?? 'KR') !== 'US');
+  const us = vw.filter((v) => (v as { region?: string | null }).region === 'US') as unknown as (typeof vw[number] & { end_2026_pct?: number | null; end_2027_pct?: number | null })[];
 
   const label: Record<string, string> = Object.fromEntries(latest.map((r) => [r.series_key, r.label_ko]));
   const bySeries = new Map<string, { dt: string; value: number }[]>();
@@ -125,12 +168,25 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
         }),
       }
       : null,
-    views: vw.map((v) => ({
+    views: kr.map((v) => ({
       house: v.house, analysts: v.analysts, published_dt: v.published_dt, kind: v.source_kind, title: v.source_title, url: v.source_url,
       stance: v.stance, next_move: v.next_move, terminal: n(v.terminal_rate_pct), summary: v.summary,
     })),
     events: ev,
     holidays: hol,
     fee: { last_bp: n(last?.fee_bp), group_median_bp: median(recent6.map((p) => n(p.fee_bp))) },
+    pipeline: pipeRows.filter((p) => p.corp_code !== corp).map((p) => ({
+      key: p.issue_key, corp_name: p.corp_name, sub_type: p.sub_type, rating: p.rating, demand_dt: p.demand_dt ?? null, pay_dt: p.deal_dt,
+      band_type: p.band_type ?? null, band_low: n(p.band_low), band_high: n(p.band_high), lead: p.lead_managers, nh_lead: !!p.nh_lead,
+      tranches: ((p.tranches ?? []) as BondTranche[]).slice().sort((a, b) => (a.tenor_months ?? 0) - (b.tenor_months ?? 0))
+        .map((t) => ({ tenor: t.tenor_label ?? t.tenor_bucket, months: n(t.tenor_months), initial_krw: n(t.initial_amount_krw ?? t.amount_krw) })),
+    })),
+    leagueYearly,
+    maturityByGrade,
+    policy: { bok: pol.find((m) => m.kind === '금통위') ?? null, fomc: pol.find((m) => m.kind === 'FOMC') ?? null },
+    usViews: us.map((v) => ({
+      house: v.house, analysts: v.analysts, published_dt: v.published_dt, title: v.source_title, url: v.source_url,
+      next_move: v.next_move, terminal: n(v.terminal_rate_pct), end2026: n(v.end_2026_pct), end2027: n(v.end_2027_pct), summary: v.summary,
+    })),
   };
 }

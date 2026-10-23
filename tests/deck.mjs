@@ -7,14 +7,17 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = `
-export * from './web/lib/deck/schedule';
-export * from './web/lib/deck/validate';
-export * from './web/lib/deck/rules';
-export * from './web/lib/deck/model';
-export { buildSlides, fileBase } from './web/lib/deck/layout';
-export { PAGE } from './web/lib/deck/theme';
+export * from './lib/deck/schedule';
+export * from './lib/deck/validate';
+export * from './lib/deck/rules';
+export * from './lib/deck/model';
+export { buildSlides, fileBase, staticSubs, available } from './lib/deck/layout';
+export { planOf, defaultItems } from './lib/deck/catalog';
+export { assemble } from './lib/deck/assemble';
+export { PAGE } from './lib/deck/theme';
+export { unzipSync, strFromU8 } from 'fflate';
 `;
-const out = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'error' });
+const out = await build({ stdin: { contents: entry, resolveDir: join(root, 'web'), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'error' });
 const m = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`);
 
 let pass = 0;
@@ -55,22 +58,48 @@ const check = (name, cond, detail = '') => {
   check('검증: 전망 표현 거부', !m.lineOk('수요가 충분할 것으로 예상됨', allowed, false).ok);
   check('검증: 하우스를 밝힌 전망은 금리 장표에서 허용', m.lineOk('NH투자증권 리서치는 기준금리 인상 지속을 전망', allowed, true).ok);
   check('검증: 하우스 없는 전망은 금리 장표에서도 거부', !m.lineOk('기준금리는 인상될 것', allowed, true).ok);
-  const rule = { lead: 'r', peers: ['r1'], compare: ['r'], schedule: ['r'], structure: ['r'], structureRows: [{ label: '1년', desc: 'r' }], strengths: [{ title: 'a', text: 'b' }, { title: 'c', text: 'd' }, { title: 'e', text: 'f' }], rates: ['r'], corp: ['r'], views: ['r'] };
+  const rule = { lead: 'r', peers: ['r1'], compare: ['r'], schedule: ['r'], structure: ['r'], structureRows: [{ label: '1년', desc: 'r' }], strengths: [{ title: 'a', text: 'b' }, { title: 'c', text: 'd' }, { title: 'e', text: 'f' }], rates: ['r'], corp: ['r'], views: ['r'], sizing: ['r'], pipeline: ['r'], bok: ['r'], fomc: ['r'], usviews: ['r'], forecast: ['r'], league: ['r'], maturity: ['r'] };
   const r = m.mergeValidated({ ...rule, peers: ['경쟁률 9.99:1'], lead: '430억원 제안' }, rule, allowed);
   check('검증: 실패한 필드는 규칙 문안으로', r.text.peers[0] === 'r1' && r.text.lead === '430억원 제안' && r.dropped.length === 1, JSON.stringify(r.dropped));
 }
 
-// 3. 장표: 실제 데이터 스냅샷(이랜드월드, 2026-10-23)으로 14장, 페이지 안, 숫자 출처
+// 3. 목차: 켜고 끄면 번호가 다시 매겨진다
+{
+  const on = m.defaultItems();
+  const p = m.planOf(on);
+  check('목차: 기본 구성 Ⅰ·Ⅱ·Ⅲ·Appendix', p.sections.map((x) => `${x.roman}${x.label}`).join('|') === 'Ⅰ주요 발행 조건 제안|Ⅱ주요 검토사항|ⅢNH투자증권 강점|Appendix', p.sections.map((x) => x.label).join('|'));
+  const rates = p.sections[1].groups[0].items;
+  check('목차: 금리 동향 및 전망 소제목 ①~⑥', rates.map((x) => x.sub).join(',') === '① 금리 동향,② 금통위,③ FOMC,④ 증권사별 국내 기준금리 전망,⑤ 증권사별 미국 기준금리 전망,⑥ 금리 전망(NH투자증권 리서치)', rates.map((x) => x.sub).join(','));
+  const p2 = m.planOf({ ...on, bok: false, sales: true, pipeline: false });
+  check('목차: 금통위를 끄면 FOMC 가 ②', p2.sections[1].groups[0].items[1].title === '1. 금리 동향 및 전망_② FOMC', p2.sections[1].groups[0].items[1].title);
+  check('목차: Sales 전략을 켜면 4번, 예정 내역을 끄면 빠짐', p2.sections[0].groups.map((g) => `${g.no}.${g.title}`).join('|') === '1.발행조건 제안(案)|2.적정 발행규모 및 트랜치 구성 검토|3.회사채 발행 일정 검토|4.Sales 전략');
+  const none = Object.fromEntries(Object.keys(on).map((k) => [k, false]));
+  const p3 = m.planOf({ ...none, rates: true, events: true });
+  check('목차: Ⅰ 이 비면 Ⅱ 가 Ⅰ 로', p3.sections[0].roman === 'Ⅰ' && p3.sections[0].label === '주요 검토사항' && p3.sections[1].groups[0].title === '주요 이벤트', JSON.stringify(p3.sections.map((x) => x.roman + x.label)));
+  check('목차: 하나만 남은 묶음은 소제목 없음', p3.sections[0].groups[0].items[0].title === '1. 금리 동향 및 전망_① 금리 동향', p3.sections[0].groups[0].items[0].title);
+  const p4 = m.planOf(on, (id) => id !== 'fomc');
+  check('목차: 자료 없는 장표는 빠짐', !p4.sections[1].groups[0].items.some((x) => x.id === 'fomc'));
+}
+
+// 4. 장표: 실제 데이터 스냅샷(이랜드월드, 2026-10-23), 페이지 안, 숫자 출처
 {
   const d = JSON.parse(readFileSync(join(root, 'tests/fixtures/deck_eland.json'), 'utf8'));
   const inp = m.defaultInput(d);
   const tx = m.ruleText(d, inp);
   const slides = m.buildSlides(d, inp, tx);
-  check('장표: 기본 14장', slides.length === 14, slides.map((s) => s.id).join(','));
-  check('장표: 표지 제목에 다음 회차', slides[0].prims.some((p) => p.k === 'text' && p.paras.some((x) => x.runs.some((r) => /제112회 공모회사채 대표주관 제안서/.test(r.t)))));
+  const ids = slides.map((s) => s.id);
+  const want = ['cover', 'contents', 'folder-I', 'terms', 'sizing', 'schedule', 'pipeline', 'folder-II', 'rates', 'bok', 'fomc', 'views', 'usviews', 'forecast', 'peers-0', 'compare', 'corp', 'folder-III', 'nh_core-0', 'league', 'strength', 'maturity', 'events', 'back'];
+  check('장표: 기본 목차 순서', want.every((w, i) => ids.indexOf(w) >= 0 && (i === 0 || ids.indexOf(w) > ids.indexOf(want[i - 1]))), ids.join(','));
+  check('장표: 레이아웃(표지·목차·간지·본문·뒷표지)', slides[0].layout === 'cover' && slides[1].layout === 'contents' && slides[2].layout === 'folder' && slides[3].layout === 'body' && slides.at(-1).layout === 'back');
+  check('장표: 표지 제목에 다음 회차', slides[0].prims.some((p) => p.k === 'text' && p.paras.some((x) => x.runs.some((r) => /제112회 공모사채 발행 검토 및 제안/.test(r.t)))));
+  const core = slides.find((s) => s.id === 'nh_core-0');
+  check('장표: 템플릿 고정 장표는 원본 XML·번호 바꿈', core.static?.file === 'ppt/slides/slide27.xml' && core.static.renumber === '1.', JSON.stringify(core.static));
+  const terms = slides.find((s) => s.id === 'terms');
+  check('장표: 쪽 제목 번호', terms.prims.some((p) => p.k === 'text' && p.paras[0].runs.map((r) => r.t).join('') === '1. 발행조건 제안(案)'));
+  check('장표: 쪽번호는 장표 순서', terms.chrome.some((p) => p.k === 'text' && p.paras[0].runs[0].t === String(ids.indexOf('terms') + 1)));
   let out = [];
   for (const s of slides) {
-    for (const p of s.prims) {
+    for (const p of [...s.chrome, ...s.prims]) {
       const box = p.k === 'line' ? { x: Math.min(p.x1, p.x2), y: Math.min(p.y1, p.y2), w: Math.abs(p.x2 - p.x1), h: Math.abs(p.y2 - p.y1) }
         : p.k === 'table' ? (() => { const c = m.cellBoxes(p); return { x: p.x, y: p.y, w: c.w, h: c.h }; })() : p;
       if (box.x < -0.5 || box.y < -0.5 || box.x + box.w > m.PAGE.w + 0.5 || box.y + box.h > m.PAGE.h + 0.5) out.push(`${s.id}:${p.k}`);
@@ -86,7 +115,7 @@ const check = (name, cond, detail = '') => {
   }
   check('장표: 요약 상자 글이 넘치지 않음', !over.length, over.join(' '));
   // 같은 등급 사례 표의 금리는 데이터 값
-  const peerSlide = slides.find((s) => s.id === 'peers');
+  const peerSlide = slides.find((s) => s.id === 'peers-0');
   const tbl = peerSlide.prims.find((p) => p.k === 'table');
   const yields = new Set(d.peers.flatMap((p) => p.tranches.map((t) => t.yield_pct)).filter((v) => v != null).map((v) => `${Number(v).toFixed(3)}%`));
   const shown = tbl.rows.slice(2).flatMap((r) => r.filter(Boolean).map((c) => c.paras.map((x) => x.runs.map((y) => y.t).join('')).join(''))).filter((t) => /^\d+\.\d{3}%$/.test(t));
@@ -98,9 +127,31 @@ const check = (name, cond, detail = '') => {
   // 규칙 문안 숫자도 사실 묶음 안에 있다
   const facts = m.factsFor(d, inp);
   const allowed = m.allowedNumbers(facts, d);
-  const lines = [tx.lead, ...tx.peers, ...tx.compare, ...tx.schedule, ...tx.structure, ...tx.rates, ...tx.corp, ...tx.views];
+  const lines = [tx.lead, ...tx.peers, ...tx.compare, ...tx.schedule, ...tx.structure, ...tx.rates, ...tx.corp, ...tx.views,
+    ...tx.sizing, ...tx.pipeline, ...tx.bok, ...tx.fomc, ...tx.usviews, ...tx.forecast, ...tx.league, ...tx.maturity];
   const bad = lines.filter((l) => !m.lineOk(l, allowed, true).ok);
   check('문안: 규칙 문안이 자체 검증을 통과', !bad.length, bad.join(' | '));
+  // 모든 장표를 켜도 페이지 안
+  const all = Object.fromEntries(Object.keys(inp.items).map((k) => [k, true]));
+  const full = m.buildSlides(d, { ...inp, items: all, tranches: [{ tenor: '2년', eok: 500 }, { tenor: '3년', eok: 1000 }] }, tx);
+  check('장표: 전체 목차 33장 내외(고정 장표 포함)', full.length >= 30 && full.filter((s) => s.static).length === 9, `${full.length} / static ${full.filter((s) => s.static).length}`);
+
+  // 5. PPTX 조립: NH 템플릿 + 고정 장표, 번호·회사명 바꿈
+  const tpl = new Uint8Array(readFileSync(join(root, 'web/public/deck/nh-template.pptx')));
+  const subs = m.staticSubs(d, inp);
+  const bytes = m.assemble(tpl, null, [{ kind: 'static', file: 'ppt/slides/slide31.xml', renumber: '7.' }, { kind: 'static', file: 'ppt/slides/slide21.xml', renumber: '3.' }], subs);
+  const z = m.unzipSync(bytes);
+  const pres = m.strFromU8(z['ppt/presentation.xml']);
+  const s1 = m.strFromU8(z['ppt/slides/slide1.xml']);
+  const s2 = m.strFromU8(z['ppt/slides/slide2.xml']);
+  check('조립: 장표 2장, 원본 장표 정리', (pres.match(/<p:sldId /g) ?? []).length === 2 && !z['ppt/slides/slide31.xml'] && Object.keys(z).filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k)).length === 2);
+  check('조립: 제목 번호 바꿈', /<a:t>7\. ?/.test(s1) && !/<a:t>6\. /.test(s1));
+  check('조립: 자리 표시를 회사·부서명으로', !/\{\{/.test(s1 + s2) && s2.includes('이랜드월드') && s1.includes('IB사업'), '');
+  const tz = m.unzipSync(tpl);
+  check('템플릿: 고객사 이름 없음', !Object.keys(tz).some((k) => /\.xml$/.test(k) && /대한항공/.test(m.strFromU8(tz[k]))));
+  check('조립: 레이아웃·마스터 유지', /slideLayout3\.xml/.test(m.strFromU8(z['ppt/slides/_rels/slide1.xml.rels'])) && !!z['ppt/slideMasters/slideMaster1.xml']);
+  const ct = m.strFromU8(z['[Content_Types].xml']);
+  check('조립: 콘텐츠 형식 등록', ct.includes('/ppt/slides/slide1.xml') && ct.includes('/ppt/slides/slide2.xml') && !ct.includes('/ppt/slides/slide31.xml'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

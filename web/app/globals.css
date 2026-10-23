@@ -4170,6 +4170,97 @@ table.data th.col-cta {
   font-weight: 600;
 }
 
+/* 트랜치 입력 */
+.dk-tranches {
+  margin-top: 8px;
+}
+
+.dk-tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.dk-tr-h {
+  color: var(--ink-2);
+  margin-top: 0;
+}
+
+.dk-tr input {
+  font: inherit;
+  font-size: var(--s-1);
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.dk-tr-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+}
+
+/* 목차 */
+.dk-toc {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+  display: grid;
+  gap: 2px;
+  font-size: var(--s-1);
+}
+
+.dk-toc label {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.dk-toc .dk-toc-sub {
+  padding-left: 18px;
+}
+
+.dk-toc-g {
+  display: block;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+.dk-toc-note {
+  display: block;
+  padding-left: 22px;
+}
+
+.dk-toc-sec {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  padding: 6px 0 0;
+  margin: 8px 0 0;
+}
+
+.dk-toc-sec legend {
+  font-size: var(--s-1);
+  font-weight: 700;
+  padding: 0 6px 0 0;
+}
+
+.dk-tag {
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
 .dk-toggles {
   list-style: none;
   padding: 0;

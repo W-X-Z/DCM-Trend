@@ -128,7 +128,7 @@ function LineEl({ c, x, y, w, h }: { c: LineChart; x: number; y: number; w: numb
       {ticks.map((t) => (
         <g key={t}>
           <line x1={left} x2={left + pw} y1={sy(t)} y2={sy(t)} stroke={hex(C.grid)} strokeWidth={0.5} />
-          <text x={left - 4} y={sy(t) + 3} textAnchor="end" fontSize={7} fill={hex(C.sub)}>{t.toFixed(c.step < 0.5 ? 2 : 1)}</text>
+          <text x={left - 4} y={sy(t) + 3} textAnchor="end" fontSize={7} fill={hex(C.sub)}>{t.toFixed(c.step >= 1 ? 0 : c.step < 0.5 ? 2 : 1)}</text>
         </g>
       ))}
       {c.cats.map((k, i) => (i % c.labelEvery === 0 ? <text key={i} x={sx(i)} y={bottom + 11} textAnchor="middle" fontSize={7} fill={hex(C.sub)}>{k}</text> : null))}
@@ -180,7 +180,7 @@ function PrimEl({ p }: { p: Prim }) {
     }
     case 'img':
       // eslint-disable-next-line @next/next/no-img-element
-      return <img alt="" src={p.src === 'logo-white' ? '/deck/nh-logo-white.png' : '/deck/nh-logo-color.png'} style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h }} />;
+      return <img alt="" src={p.src === 'logo-white' ? '/deck/nh-logo-white.png' : p.src === 'logo-color' ? '/deck/nh-logo-color.png' : p.src} style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h }} />;
     case 'text':
       return <TextEl t={p} />;
     case 'table':
@@ -200,6 +200,7 @@ export function SlideView({ slide, width }: { slide: Slide; width: number }) {
           background: hex(slide.bg ?? C.white), fontFamily: FONT, color: hex(C.ink), overflow: 'hidden',
         }}
       >
+        {slide.chrome.map((p, i) => <PrimEl key={`c${i}`} p={p} />)}
         {slide.prims.map((p, i) => <PrimEl key={i} p={p} />)}
       </div>
     </div>
