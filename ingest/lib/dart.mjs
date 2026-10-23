@@ -47,14 +47,14 @@ export class Dart {
     return url;
   }
 
-  async #request(path, params, parse) {
+  async #request(path, params, parse, timeoutMs = 60_000) {
     if (this.calls >= this.maxCalls) throw new BudgetError(`호출 상한 ${this.maxCalls}회 도달`);
     let lastErr;
     for (let attempt = 1; attempt <= 4; attempt++) {
       await this.#throttle();
       this.calls++;
       try {
-        const res = await fetch(this.#url(path, params), { signal: AbortSignal.timeout(60_000) });
+        const res = await fetch(this.#url(path, params), { signal: AbortSignal.timeout(timeoutMs) });
         if (res.status >= 500 || res.status === 429) throw new Error(`HTTP ${res.status}`);
         if (!res.ok) throw new DartStopError(`HTTP ${res.status} (${path})`);
         return await parse(res);
@@ -85,7 +85,17 @@ export class Dart {
 
   // 바이너리(zip) API. 오류 응답(JSON·XML)이면 상태 코드에 따라
   // 한도·키 문제는 DartStopError, 그 밖(파일 없음 등)은 DocError 를 던진다.
+  // 네 번 모두 응답이 없으면(큰 원문 등) 그 문서만 실패로 남기고 다음 문서로 넘어간다(다음 실행에서 다시 시도).
   async binary(path, params) {
+    try {
+      return await this.#binary(path, params);
+    } catch (e) {
+      if (e instanceof DartStopError || e instanceof DocError || e instanceof BudgetError) throw e;
+      throw new DocError('timeout', e.message);
+    }
+  }
+
+  async #binary(path, params) {
     return this.#request(path, params, async (res) => {
       const buf = new Uint8Array(await res.arrayBuffer());
       const isZip = buf[0] === 0x50 && buf[1] === 0x4b;
@@ -97,6 +107,6 @@ export class Dart {
         throw new DocError(code, `${path} 오류 응답 (${code}): ${head.slice(0, 160)}`);
       }
       return buf;
-    });
+    }, 120_000);
   }
 }
