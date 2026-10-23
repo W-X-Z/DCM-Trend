@@ -52,7 +52,7 @@ function addText(s: PSlide, t: TextBox) {
   s.addText(runs(t.paras, t.size, t.color, !!(t.bold || t.xb), t.line ?? LINE, font) as never, {
     x: IN(t.x), y: IN(t.y), w: IN(t.w), h: IN(t.h),
     align: ALIGN[t.align ?? 'l'], valign: VALIGN[t.valign ?? 't'],
-    margin: t.pad ?? 4, fit: 'none', wrap: true, fontFace: font, fontSize: t.size, color: t.color,
+    margin: Array(4).fill(t.pad ?? 4), fit: 'none', wrap: true, fontFace: font, fontSize: t.size, color: t.color,
   });
 }
 

@@ -321,7 +321,7 @@ function schedule(d: DeckData, inp: DeckInput, tx: DeckText, page: number, no: n
     { runs: [{ t: `• ${t}` }], gap: i ? 7 : 0 },
     { runs: [{ t: `- ${s}`, color: C.sub }] },
   ]);
-  const nh = 500 - tTop;
+  const nh = Math.min(500 - tTop, Math.max(rowH.reduce((a, b) => a + b, 0), 240));
   prims.push({ k: 'rect', x: nx, y: tTop, w: nw, h: nh, fill: 'FAFAFA', stroke: '9E9E9E', sw: 0.5, dash: true });
   prims.push({ k: 'text', x: nx, y: tTop, w: nw, h: nh, paras: nps, size: 7.5, color: C.ink, valign: 'm', pad: 7, line: 1.3 });
   prims.push(...footnote(['주) 영업일은 주말·관공서 공휴일·채권시장 휴장일(12/31) 제외. 금통위·FOMC 일정은 한국은행·미 연준 발표 기준.']));
