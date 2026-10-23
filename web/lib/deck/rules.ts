@@ -1,0 +1,303 @@
+// 기본 입력값과 규칙 문안. AI 문안이 없거나 검증에 실패하면 이 문안을 쓴다.
+// 문체: 제안서 개조식(~진행, ~제안, ~수준). 숫자는 데이터 값 그대로, 계산값은 차이·비율만.
+import { bandText, bpS, eok, eokW, mdw, ratioX, rate2, rate3, shortFirm, tenorYears, yy, yymmdd } from './fmt';
+import { BizCal, buildSchedule, korDate, type Schedule } from './schedule';
+import { SLIDES, type DeckData, type DeckInput, type DeckText, type PeerIssue, type SlideId } from './types';
+
+const median = (xs: (number | null | undefined)[]) => {
+  const v = xs.filter((x): x is number => x != null && !Number.isNaN(Number(x))).map(Number).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+const nextSeries = (s: string | null) => {
+  const m = String(s ?? '').match(/^(\d+)/);
+  return m ? String(Number(m[1]) + 1) : '';
+};
+const pd = (p: PeerIssue) => p.demand_dt ?? p.pricing_dt ?? p.deal_dt ?? '';
+// 전체 경쟁률이 1배 미만이면 미매각, 일부 트랜치만 미달이면 '일부 트랜치 미달'
+export const fullUnder = (p: PeerIssue) => p.ratio != null ? p.ratio < 1 : !!p.under;
+export function verdictOf(p: PeerIssue, cell: boolean) {
+  if (fullUnder(p)) return '!!수요예측 미달!!';
+  if (p.under) return '!!일부 트랜치 미달!!';
+  if (p.ratio == null) return cell ? '결과 미확인' : '수요예측 결과 미확인';
+  if (p.increased) return cell ? '^^증액 발행^^' : '모집액 이상 수요로 **증액 발행**';
+  return cell ? '^^모집액 이상 수요 확보^^' : '모집액 이상 수요 확보';
+}
+
+export function calOf(d: DeckData) {
+  return new BizCal(d.holidays);
+}
+
+export function scheduleOf(d: DeckData, inp: DeckInput): Schedule | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(inp.pay)) return null;
+  return buildSchedule(calOf(d), inp.pay, { band: inp.band.type, demand: inp.demand, events: d.events });
+}
+
+export function peerPool(d: DeckData, scope: 'group' | 'notch') {
+  const r = d.company.rating;
+  return d.peers
+    .filter((p) => (p.sub_type ?? '일반회사채') === '일반회사채')
+    .filter((p) => scope === 'group' || !r || p.rating === r)
+    .sort((a, b) => pd(b).localeCompare(pd(a)));
+}
+
+// 최근 발행금리 표: 3개월, 4건 미만이면 6개월 (납입일 기준)
+export function recentWindow(d: DeckData, inp: DeckInput) {
+  const pool = peerPool(d, inp.peerScope).sort((a, b) => (b.deal_dt ?? '').localeCompare(a.deal_dt ?? ''));
+  for (const months of [3, 6]) {
+    const list = pool.filter((p) => (p.deal_dt ?? '') >= addMonths(d.asof, -months));
+    if (list.length >= 4 || months === 6) return { months, list };
+  }
+  return { months: 6, list: [] as PeerIssue[] };
+}
+
+export function defaultInput(d: DeckData): DeckInput {
+  const last = d.own[0];
+  const cal = calOf(d);
+  const pay = cal.add(d.asof, 25);
+  const pool = peerPool(d, 'group');
+  const peerKeys = pool.slice(0, 6).map((p) => p.key);
+  const under = pool.find(fullUnder) ?? pool.find((p) => p.under);
+  const best = [...pool].filter((p) => p.ratio != null).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
+  const ownRecent = pool.find((p) => p.corp_code === d.company.corp_code);
+  const compareKeys = [...new Set([ownRecent?.key, best?.key, under?.key].filter(Boolean) as string[])].slice(0, 3);
+  const m = d.asof;
+  const slides = Object.fromEntries(SLIDES.map((s) => [s.id, true])) as Record<SlideId, boolean>;
+  if (!d.views.length) slides.views = false;
+  return {
+    corp_code: d.company.corp_code,
+    issuer: `㈜${d.company.corp_name}`,
+    series: nextSeries(d.company.last_series),
+    month: `${m.slice(0, 4)}. ${m.slice(5, 7)}`,
+    security: '무기명식 무보증 공모 회사채',
+    rating: d.company.rating ?? '',
+    ratingNote: last?.deal_dt && d.company.rating ? `${yy(last.deal_dt)} 발행 회차 기준 ${d.company.rating}` : '',
+    tenors: last?.tenor_combo ? last.tenor_combo.replace(/\+/g, ' + ') : '',
+    amountEok: last?.initial_krw ? Math.round(last.initial_krw / 1e8) : null,
+    maxEok: last?.initial_krw ? Math.round((last.initial_krw / 1e8) * 2) : null,
+    coupon: '3개월 이표채',
+    band: { type: 'later', low: null, high: null },
+    bandNote: '발행 시점 시장 상황에 따라 유연하게 결정',
+    pay,
+    demand: null,
+    uw: '발행금액 전액',
+    feeUw: d.fee.last_bp ?? d.fee.group_median_bp ?? null,
+    feeLead: null,
+    feeNote: d.fee.last_bp != null ? '이전 발행 회차 인수수수료 준용' : '',
+    peerScope: 'group',
+    peerKeys,
+    compareKeys,
+    slides,
+    dept: 'IB사업부',
+    contacts: '',
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// 규칙 문안
+export function ruleText(d: DeckData, inp: DeckInput): DeckText {
+  const name = d.company.corp_name;
+  const grp = inp.peerScope === 'notch' && d.company.rating ? d.company.rating : `${d.company.rating_group ?? ''}`;
+  const sch = scheduleOf(d, inp);
+  const pool = peerPool(d, inp.peerScope);
+  const sel = pool.filter((p) => inp.peerKeys.includes(p.key));
+  const withRatio = pool.filter((p) => p.ratio != null);
+  const under = pool.filter(fullUnder);
+  const part = pool.filter((p) => p.under && !fullUnder(p));
+  const inc = pool.filter((p) => p.initial_krw != null);
+  const own = d.own[0];
+
+  const lead = sch
+    ? `NH투자증권은 **${sch.pay.slice(0, 4)}년 ${Number(sch.pay.slice(5, 7))}월 ${Number(sch.pay.slice(8, 10)) <= 10 ? '초' : Number(sch.pay.slice(8, 10)) <= 20 ? '중순' : '말'}**을 회사채 적정 발행 시기로 판단하며, **${name}의 회사채 발행 및 당사 총액인수**를 하기와 같이 제안 드립니다.`
+    : `NH투자증권은 **${name}의 회사채 발행 및 당사 총액인수**를 하기와 같이 제안 드립니다.`;
+
+  const peers: string[] = [];
+  if (pool.length) {
+    peers.push(`최근 1년 ${grp}등급 일반 공모 회사채 수요예측 ${pool.length}건 진행${sel.length ? `(아래 표는 최근 ${sel.length}건)` : ''}`);
+    if (withRatio.length) peers.push(`경쟁률 확인 ${withRatio.length}건 기준 중간값 **${ratioX(median(withRatio.map((p) => p.ratio)))}**, 최고 ${ratioX(Math.max(...withRatio.map((p) => p.ratio ?? 0)))}`);
+    if (under.length) {
+      const u = under[0];
+      peers.push(`${under.length}건은 모집액에 못 미치는 수요로 **미매각 발생**(최근: ${u.corp_name} ${mdw(pd(u))}, 경쟁률 !!${ratioX(u.ratio)}!!)`);
+    }
+    if (part.length) {
+      const u = part[0];
+      const t = u.tranches.find((x) => x.under);
+      peers.push(`${part.length}건은 전체 경쟁률은 1배 이상이나 일부 트랜치 미달(최근: ${u.corp_name} ${mdw(pd(u))}${t ? ` ${t.tenor} !!${ratioX(t.ratio)}!!` : ''})`);
+    }
+    if (!under.length && !part.length && withRatio.length) peers.push('경쟁률이 확인된 수요예측은 모두 모집액 이상 수요 확보');
+    if (inc.length) peers.push(`최초 신고 금액 대비 증액 발행 ${inc.filter((p) => p.increased).length}건(${inc.length}건 중)`);
+  } else {
+    peers.push(`최근 1년 ${grp}등급 일반 공모 회사채 수요예측 사례 없음`);
+  }
+  if (own) peers.push(`${name} 직전 회차(제${own.series ?? ''}회)는 ${own.demand_dt ? `${mdw(own.demand_dt)} 수요예측, ` : ''}${own.tenor_combo} ${eokW(own.amount_krw)} 발행${own.ratio != null ? `(경쟁률 ${ratioX(own.ratio)})` : ''}`);
+
+  const cmp = inp.compareKeys.map((k) => d.peers.find((p) => p.key === k)).filter(Boolean) as PeerIssue[];
+  const compare = cmp.map((p) => {
+    const verdict = verdictOf(p, false);
+    const y = p.tranches.map((t) => rate3(t.yield_pct)).join('/');
+    return `${p.corp_name}: ${p.demand_dt ? `${mdw(p.demand_dt)} ` : ''}${p.tenor_combo}, 발행금리 ${y}, 경쟁률 ${ratioX(p.ratio)} → ${verdict}`;
+  });
+  if (cmp.length >= 2) {
+    const rs = cmp.filter((p) => p.ratio != null);
+    if (rs.length >= 2) {
+      const hi = rs.reduce((a, b) => ((a.ratio ?? 0) >= (b.ratio ?? 0) ? a : b));
+      const lo = rs.reduce((a, b) => ((a.ratio ?? 0) <= (b.ratio ?? 0) ? a : b));
+      if (hi.key !== lo.key) compare.push(`같은 등급에서도 수요예측 시점·금리 수준에 따라 경쟁률 차이(${ratioX(lo.ratio)} ~ ${ratioX(hi.ratio)}) 발생 → **경쟁 발행이 적은 시점 선점 필요**`);
+    }
+  }
+
+  const schedule: string[] = [];
+  if (sch) {
+    schedule.push(`발행 일정 案: **${yy(sch.pay).slice(0, 3)}년 ${korDate(sch.pay)} 발행, ${korDate(sch.demandOptions[0])} ~ ${Number(sch.demandOptions[2].slice(8, 10))}일 中 택1 수요예측 진행**`);
+    schedule.push(`수요예측 가능일은 ${mdw(sch.demandOptions[0])} ~ ${mdw(sch.demandOptions[2])}이며, 가장 무난한 일정은 ${korDate(sch.demandOptions[1])}(증권신고서 제출 및 추가청약 가능성을 고려해 전후 하루 여유 확보)`);
+    schedule.push(inp.band.type === 'fixed'
+      ? '고정금리 밴드로 발행할 경우, 금리가 수요예측일에 확정되어 증권신고서 정정은 1회만 진행'
+      : '개별민평 밴드로 발행할 경우, 수요예측 결과(조건확정)와 발행 전일 금리확정 두 차례 증권신고서 정정 진행');
+    for (const w of sch.warnings) schedule.push(w);
+    schedule.push('시장 및 회사 상황에 따라 발행일은 유동적으로 조정 가능');
+  }
+
+  // 만기 구조
+  const tenors = inp.tenors.split(/\s*(?:또는|,|\/)\s*/).map((s) => s.trim()).filter(Boolean);
+  const structureRows = tenors.map((t) => {
+    const c = d.combos.find((x) => x.combo.replace(/\s/g, '') === t.replace(/\s/g, ''));
+    const parts: string[] = [];
+    if (c) parts.push(`최근 6개월 ${d.company.rating_group ?? ''}등급 ${c.issues}건 발행(비중 ${Math.round(c.share ?? 0)}%)${c.medComp != null ? `, 경쟁률 중간값 ${ratioX(c.medComp)}` : ''}`);
+    else parts.push(`최근 6개월 ${d.company.rating_group ?? ''}등급 발행 사례 없음`);
+    const m = t.match(/^(\d+(?:\.\d+)?)년$/);
+    if (m && sch) {
+      const due = new Date(`${sch.pay}T00:00:00Z`);
+      due.setUTCMonth(due.getUTCMonth() + Math.round(Number(m[1]) * 12));
+      const dueS = due.toISOString().slice(0, 10);
+      const near = d.maturities.filter((x) => Math.abs(new Date(x.dt).getTime() - due.getTime()) <= 45 * 86_400_000);
+      parts.push(near.length
+        ? `${yy(dueS)} 만기 도래 → 기존 회사채 ${near.map((x) => `${yy(x.dt)} ${eokW(x.amount_krw)}`).join(', ')}와 만기 집중`
+        : `${yy(dueS)} 만기 도래 → 기존 회사채 만기와 겹치지 않음`);
+    }
+    return { label: t, desc: parts.join('\n') };
+  });
+  const structure: string[] = [];
+  const bandDesc = inp.band.type === 'later' ? '추후 결정(발행 시점 시장 상황 반영)' : inp.band.type === 'fixed' ? `고정금리 ${inp.band.low ?? '–'}%~${inp.band.high ?? '–'}%` : `개별민평 ${inp.band.low ?? '–'}~+${inp.band.high ?? '–'}bp`;
+  structure.push(`금리 밴드 ${bandDesc}, 이자지급 ${inp.coupon}`);
+  if (d.combos[0]) structure.push(`최근 6개월 ${d.company.rating_group ?? ''}등급 공모 회사채는 **${d.combos[0].combo}** 구조가 가장 많음(${d.combos[0].issues}건, 비중 ${Math.round(d.combos[0].share ?? 0)}%)`);
+  if (d.maturities.length) {
+    const in1y = d.maturities.filter((m) => m.dt <= addYears(d.asof, 1));
+    structure.push(`${name} 공모 회사채 만기 도래: 향후 3년 ${d.maturities.length}건 ${eokW(d.maturities.reduce((s, m) => s + (m.amount_krw ?? 0), 0))}${in1y.length ? `(1년 내 ${eokW(in1y.reduce((s, m) => s + (m.amount_krw ?? 0), 0))})` : ''}`);
+  }
+  structure.push('만기 집중을 피하고 투자자 선호 만기를 반영해 트랜치 구성, 수요예측 결과에 따라 트랜치별 금액 조정');
+
+  // 강점
+  const lg = d.league;
+  const nhG = lg.rows.findIndex((r) => r.isNh);
+  const nhA = d.leagueAll.rows.findIndex((r) => r.isNh);
+  const nhOwn = d.own.filter((p) => p.nh_lead);
+  const strengths: DeckText['strengths'] = [];
+  if (nhG >= 0) strengths.push({ title: `${d.company.rating_group ?? ''}등급 발행 실적`, text: `최근 1년 ${lg.scope} 대표주관 실적 **${nhG + 1}위**(${eokW(lg.rows[nhG].credit)}, ${lg.rows[nhG].deals}건)` });
+  if (nhA >= 0) strengths.push({ title: '공모 회사채 대표주관', text: `최근 1년 ${d.leagueAll.scope} 대표주관 실적 ${nhA + 1}위, 점유율 ${((d.leagueAll.rows[nhA].credit / (d.leagueAll.total || 1)) * 100).toFixed(1)}%` });
+  strengths.push(nhOwn.length
+    ? { title: `${name}에 대한 이해`, text: `${name} 공모 회사채 ${d.own.length}회 중 **${nhOwn.length}회 대표주관**(최근 제${nhOwn[0].series ?? ''}회, ${yy(nhOwn[0].deal_dt)})` }
+    : { title: '최적 컨설팅 역량', text: `${d.company.rating_group ?? ''}등급 발행사의 수요예측 사례를 바탕으로 발행 시기·구조·금리 밴드 제안` });
+
+  // 금리
+  const r = (k: string) => d.rates.find((x) => x.key === k);
+  const rates: string[] = [];
+  const base = r('base_rate');
+  const k3 = r('ktb3y');
+  const k10 = r('ktb10y');
+  if (base) rates.push(`한국은행 기준금리 **${rate2(base.value)}**(${yymmdd(base.dt)} 기준)`);
+  if (k3) rates.push(`국고채 3년 ${rate3(k3.value)}, 1개월 전 대비 ${bpS(k3.chg1m)}${k10 ? ` / 국고채 10년 ${rate3(k10.value)}, ${bpS(k10.chg1m)}` : ''}`);
+  const nhView = d.views.find((v) => /NH/.test(v.house));
+  if (nhView) rates.push(`NH투자증권 리서치(${yymmdd(nhView.published_dt)}): ${nhView.summary}`);
+  if (d.forecast) {
+    const b = d.forecast.rows.find((x) => x.key === 'base_rate');
+    const fy = b?.cells.find((c) => /^\d{4}$/.test(c.period) && !c.actual);
+    if (b && fy) rates.push(`${d.forecast.house} 리서치 전망표(${yymmdd(d.forecast.published_dt)} 발표): 기준금리 ${fy.period}년 말 ${rate2(fy.value)}`);
+  }
+
+  const corp: string[] = [];
+  const aa = r('corp3y_aa');
+  const bbb = r('corp3y_bbb');
+  if (aa && k3) corp.push(`회사채 3년 AA- ${rate3(aa.value)}, 국고채 3년 대비 스프레드 **${Math.round((aa.value - k3.value) * 100)}bp**(${yymmdd(aa.dt)})`);
+  if (aa && k3 && aa.chg1m != null && k3.chg1m != null) corp.push(`1개월 변화: 회사채 AA- ${bpS(aa.chg1m)}, 국고채 3년 ${bpS(k3.chg1m)}`);
+  if (bbb && daysBetween(bbb.dt, d.asof) <= 40) corp.push(`회사채 3년 BBB- ${rate3(bbb.value)}(${yymmdd(bbb.dt)})`);
+  const win = recentWindow(d, inp);
+  const ys = win.list.flatMap((p) => p.tranches.map((t) => t.yield_pct)).filter((v): v is number => v != null);
+  if (ys.length) {
+    const lo = Math.min(...ys);
+    const hi = Math.max(...ys);
+    corp.push(`최근 ${win.months}개월 ${grp}등급 공모 회사채 발행금리 ${lo === hi ? rate3(lo) : `${rate3(lo)} ~ ${rate3(hi)}`}(${win.list.length}건)`);
+  }
+
+  const views: string[] = [];
+  if (d.views.length) {
+    const latest = d.views[0].published_dt;
+    const terms = d.views.filter((v) => v.terminal != null);
+    const t350 = terms.filter((v) => Number(v.terminal) === 3.5).length;
+    views.push(`${yymmdd(latest)} 전후 증권사 ${d.views.length}곳 의견 정리, 최종 기준금리를 제시한 ${terms.length}곳 중 ${t350}곳이 **3.50%** 제시`);
+    const nov = d.views.filter((v) => /11월/.test(v.next_move ?? '')).length;
+    if (nov) views.push(`다음 인상 시점으로 11월을 꼽은 곳 ${nov}곳`);
+    const other = d.views.filter((v) => v.terminal == null || Number(v.terminal) !== 3.5);
+    if (other.length) views.push(`${other.map((v) => v.house).join(', ')}는 다른 경로 제시(아래 표)`);
+  }
+
+  return { lead, peers, compare, schedule, structure, structureRows, strengths, rates, corp, views };
+}
+
+function addMonths(s: string, n: number) {
+  const d = new Date(`${s}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+function addYears(s: string, n: number) {
+  return addMonths(s, n * 12);
+}
+function daysBetween(a: string, b: string) {
+  return Math.abs(new Date(b).getTime() - new Date(a).getTime()) / 86_400_000;
+}
+
+// ---------------------------------------------------------------------------------------------
+// AI 에게 주는 사실 묶음 (장표별). 숫자는 화면 표기 그대로 문자열로 넣어 검증과 맞춘다.
+export function factsFor(d: DeckData, inp: DeckInput) {
+  const sch = scheduleOf(d, inp);
+  const pool = peerPool(d, inp.peerScope);
+  const sel = pool.filter((p) => inp.peerKeys.includes(p.key));
+  const cmp = inp.compareKeys.map((k) => d.peers.find((p) => p.key === k)).filter(Boolean) as PeerIssue[];
+  const peerFact = (p: PeerIssue) => ({
+    회사: p.corp_name, 등급: p.rating, 수요예측일: p.demand_dt ? mdw(p.demand_dt) : null, 납입일: p.deal_dt ? mdw(p.deal_dt) : null,
+    만기구조: p.tenor_combo, 예측금액: eokW(p.initial_krw), 발행금액: eokW(p.amount_krw), 총참여: eokW(p.demand_krw), 밴드내참여: eokW(p.in_band_krw),
+    경쟁률: ratioX(p.ratio), 미달: p.under, 증액: p.increased, 금리밴드: bandText(p),
+    발행금리: p.tranches.map((t) => `${t.tenor} ${rate3(t.yield_pct)}`).join(', '), 대표주관: p.lead,
+  });
+  return {
+    회사: d.company.corp_name, 등급: d.company.rating, 등급군: d.company.rating_group, 기준일: d.asof,
+    제안조건: {
+      회차: inp.series, 만기: inp.tenors, 발행금액: inp.amountEok != null ? `${inp.amountEok}억원` : null, 최대: inp.maxEok != null ? `${inp.maxEok}억원` : null,
+      이자지급: inp.coupon, 금리밴드: inp.band.type === 'later' ? '추후 결정' : inp.band.type === 'fixed' ? `고정금리 ${inp.band.low}%~${inp.band.high}%` : `개별민평 ${inp.band.low}~${inp.band.high}bp`,
+    },
+    일정: sch && {
+      납입일: `${mdw(sch.pay)}, ${korDate(sch.pay)}`, 수요예측가능일: sch.demandOptions.map((x) => `${mdw(x)} ${korDate(x)}`), 권장수요예측일: korDate(sch.demand),
+      증권신고서제출: mdw(sch.filing), 대표주관계약: mdw(sch.leadContract), 협회신고: mdw(sch.kofia), 조건확정정정: mdw(sch.condFix),
+      금리확정정정: sch.rateFix ? mdw(sch.rateFix) : null, 상장: mdw(sch.listing), 주의: sch.warnings,
+    },
+    같은등급사례: { 범위: inp.peerScope === 'notch' ? d.company.rating : `${d.company.rating_group}등급`, 전체건수: pool.length, 표: sel.map(peerFact) },
+    비교사례: cmp.map(peerFact),
+    회사직전회차: d.own.slice(0, 3).map(peerFact),
+    만기도래: d.maturities.map((m) => ({ 만기일: yymmdd(m.dt), 회차: m.series, 금액: eokW(m.amount_krw), 금리: rate3(m.coupon_pct) })),
+    만기도래합계: { 향후3년: eokW(d.maturities.reduce((s, m) => s + (m.amount_krw ?? 0), 0)), 건수: d.maturities.length, '1년내': eokW(d.maturities.filter((m) => m.dt <= addYears(d.asof, 1)).reduce((s, m) => s + (m.amount_krw ?? 0), 0)) },
+    만기구조통계: d.combos.map((c) => ({ 구조: c.combo, 건수: c.issues, 비중: `${Math.round(c.share ?? 0)}%`, 경쟁률중간값: ratioX(c.medComp) })),
+    리그테이블: {
+      등급군: d.league.rows.slice(0, 6).map((r, i) => ({ 순위: i + 1, 증권사: r.firm, 실적: eokW(r.credit), 건수: r.deals })),
+      전체: d.leagueAll.rows.slice(0, 6).map((r, i) => ({ 순위: i + 1, 증권사: r.firm, 실적: eokW(r.credit), 점유율: `${((r.credit / (d.leagueAll.total || 1)) * 100).toFixed(1)}%` })),
+      NH회사대표주관: `${d.own.filter((p) => p.nh_lead).length}회/${d.own.length}회`,
+    },
+    금리: d.rates.map((r) => ({ 지표: r.label, 값: r.key === 'base_rate' ? rate2(r.value) : rate3(r.value), 기준일: yymmdd(r.dt), 변화1개월: bpS(r.chg1m), 변화1년: bpS(r.chg1y) })),
+    리서치전망표: d.forecast && {
+      하우스: d.forecast.house, 발표일: yymmdd(d.forecast.published_dt),
+      값: d.forecast.rows.map((r) => ({ 지표: r.label, 기준: r.basis, 값: r.cells.map((c) => `${c.period}${c.actual ? '(실적)' : ''} ${rate2(c.value)}`) })),
+    },
+    증권사의견: d.views.map((v) => ({ 하우스: v.house, 날짜: yymmdd(v.published_dt), 방향: v.stance, 다음조정: v.next_move, 최종금리: v.terminal != null ? rate2(v.terminal) : null, 요약: v.summary })),
+  };
+}
+
+export { eok, shortFirm, tenorYears };

@@ -1,10 +1,10 @@
 name: sql-test
 on:
   pull_request:
-    paths: ['supabase/**', 'tests/**', 'ingest/**', 'package.json', 'package-lock.json']
+    paths: ['supabase/**', 'tests/**', 'ingest/**', 'web/lib/deck/**', 'package.json', 'package-lock.json']
   push:
     branches: [main]
-    paths: ['supabase/**', 'tests/**', 'ingest/**', 'package.json', 'package-lock.json']
+    paths: ['supabase/**', 'tests/**', 'ingest/**', 'web/lib/deck/**', 'package.json', 'package-lock.json']
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -22,3 +22,4 @@ jobs:
       - run: npm run test:docparse
       - run: npm run test:issues
       - run: npm run test:feed
+      - run: npm run test:deck

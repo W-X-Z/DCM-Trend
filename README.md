@@ -1,7 +1,7 @@
 # 발행시장 트렌드 (DCM-Trend)
 
 커버리지 본부 RA·RM을 위한 딜 제안 Agent의 1단계(시장 모니터링)와 제안서 초안 도구.
-OpenDART·ECOS 공개 데이터로 **① 시장·공시 모니터링**, **② 대상 기업 신호**, **③ 제안서 데이터 채움·부족 데이터 안내**를 제공한다.
+OpenDART·ECOS 공개 데이터로 **① 시장·공시 모니터링**, **② 대상 기업 신호**, **③ 제안서 데이터 채움·부족 데이터 안내**, **④ NH 서식 공모 회사채 제안서(PPTX·PDF) 만들기**(`/proposal/deck`)를 제공한다.
 
 운영 주소: https://ib-deal-agent.vercel.app
 
@@ -34,6 +34,7 @@ npm run test:ingest      # 수집기 종단: 모의 OpenDART → 수집 RPC → 
 npm run test:transforms  # 실제 OpenDART 응답 샘플 → 딜 변환 결과 (원문 값 반영 포함)
 npm run test:insights    # AI 요약 숫자·전망 표현 검증, 규칙 문장
 npm run test:docparse    # 신고서 원문 파서 (실제 신고서 조각)
+npm run test:deck        # 제안서 덱: 발행 일정 역산, AI 문안 검증, 장표 레이아웃(실제 데이터 스냅샷)
 ```
 
 ## 키 (값은 채팅·코드에 두지 않음)
@@ -45,6 +46,7 @@ npm run test:docparse    # 신고서 원문 파서 (실제 신고서 조각)
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Vercel 환경변수 | 화면 데이터 없음 |
 | `ECOS_API_KEY` | GitHub Secrets | 금리 화면만 빔 |
 | `OPENAI_API_KEY` (선택 `OPENAI_MODEL`) | GitHub Secrets | 인사이트가 규칙 문장으로 표시 |
+| `OPENAI_API_KEY` (선택 `OPENAI_DECK_MODEL`) | Vercel 환경변수 | AI 질문 안 됨, 제안서는 규칙 문안으로 생성 |
 
 ## DB
 
