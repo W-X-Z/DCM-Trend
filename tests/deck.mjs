@@ -12,7 +12,7 @@ export * from './lib/deck/validate';
 export * from './lib/deck/rules';
 export * from './lib/deck/model';
 export { buildSlides, fileBase, staticSubs, available, parseTsv } from './lib/deck/layout';
-export { mixOf, valueAt, meetingVolatility, notchStats } from './lib/deck/analytics';
+export { mixOf, valueAt, meetingVolatility, notchStats, typedIssues, pp } from './lib/deck/analytics';
 export { planOf, defaultItems } from './lib/deck/catalog';
 export { assemble } from './lib/deck/assemble';
 export { PAGE } from './lib/deck/theme';
@@ -107,11 +107,14 @@ const check = (name, cond, detail = '') => {
   const tx = m.ruleText(d, inp);
   const slides = m.buildSlides(d, inp, tx);
   const ids = slides.map((s) => s.id);
-  const want = ['cover', 'contents', 'folder-I', 'terms', 'sizing', 'schedule', 'pipeline', 'folder-II', 'rates', 'bok', 'fomc', 'views', 'usviews', 'forecast', 'peers-0', 'compare', 'corp', 'folder-III', 'nh_core-0', 'league', 'strength', 'maturity', 'events', 'back'];
+  const want = ['cover', 'contents', 'folder-I', 'terms', 'sizing', 'schedule', 'sales', 'pipeline', 'folder-II', 'rates', 'bok', 'fomc', 'views', 'usviews', 'forecast', 'peers-0', 'compare', 'corp', 'folder-III', 'nh_core-0', 'league', 'strength', 'maturity', 'events', 'back'];
   check('장표: 기본 목차 순서', want.every((w, i) => ids.indexOf(w) >= 0 && (i === 0 || ids.indexOf(w) > ids.indexOf(want[i - 1]))), ids.join(','));
   check('장표: 발행조건 비고 근거', tx.termNotes && /수요예측 가능일/.test(tx.termNotes.demand) && tx.termNotes.tenor.length > 0, JSON.stringify(tx.termNotes));
   const fx = m.buildSlides(d, { ...inp, internal: { ...inp.internal, creditFc: '구분\t2026\nAA-\t3.10', investors: '기관\t참여\nA\t100' }, items: { ...inp.items, sales: true } }, tx);
   check('장표: 내부 자료 붙여넣기 → 회사채 전망 2쪽', fx.some((s) => s.id === 'forecast-2'));
+  const typed = m.typedIssues(d.own, 4);
+  check('장표: 투자자 구분은 수집된 회차만 집계·회차 표기', typed.list.length >= 1 && typed.list.every((p) => p.tranches.some((t) => t.byType?.length)) && tx.sales.some((x) => x.includes(typed.label)), `${typed.label} | ${tx.sales[0]}`);
+  check('장표: %p 차이 -0.0 없음', m.pp(-0.03) === '0.0' && m.pp(0.26) === '+0.3' && m.pp(-8.24) === '-8.2');
   check('장표: 레이아웃(표지·목차·간지·본문·뒷표지)', slides[0].layout === 'cover' && slides[1].layout === 'contents' && slides[2].layout === 'folder' && slides[3].layout === 'body' && slides.at(-1).layout === 'back');
   check('장표: 표지 제목에 다음 회차', slides[0].prims.some((p) => p.k === 'text' && p.paras.some((x) => x.runs.some((r) => /제112회 공모사채 발행 검토 및 제안/.test(r.t)))));
   const core = slides.find((s) => s.id === 'nh_core-0');
@@ -150,7 +153,7 @@ const check = (name, cond, detail = '') => {
   const facts = m.factsFor(d, inp);
   const allowed = m.allowedNumbers(facts, d);
   const lines = [tx.lead, ...tx.peers, ...tx.compare, ...tx.schedule, ...tx.structure, ...tx.rates, ...tx.corp, ...tx.views,
-    ...tx.sizing, ...tx.pipeline, ...tx.bok, ...tx.fomc, ...tx.usviews, ...tx.forecast, ...tx.league, ...tx.maturity];
+    ...tx.sizing, ...tx.pipeline, ...tx.bok, ...tx.fomc, ...tx.usviews, ...tx.forecast, ...tx.league, ...tx.maturity, ...tx.sales];
   const bad = lines.filter((l) => !m.lineOk(l, allowed, true).ok);
   check('문안: 규칙 문안이 자체 검증을 통과', !bad.length, bad.join(' | '));
   // 모든 장표를 켜도 페이지 안

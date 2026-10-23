@@ -9,7 +9,7 @@ import {
   BULLET_INDENT, P, cellBoxes, rich, textHeight, type Cell, type Para, type Prim, type Slide, type SlideLayout, type Table,
 } from './model';
 import { fullUnder, peerPool, recentWindow, scheduleOf, tenorText, totalEok, verdictOf } from './rules';
-import { TYPE_LABEL, TYPE_ORDER, mixOf, quarterOf, spreadVsKtb } from './analytics';
+import { TYPE_LABEL, TYPE_ORDER, mixOf, pp, quarterOf, spreadVsKtb, typedIssues } from './analytics';
 import { WD, korDate, md, weekday } from './schedule';
 import { C, PAGE, textW } from './theme';
 import type { DeckData, DeckInput, DeckText, MeetingPanel, PeerIssue } from './types';
@@ -405,12 +405,14 @@ function sales({ d, inp, tx }: Ctx, n: Numbered): Body {
   // 왼쪽: 회사 최근 4회 (만기별)
   const lw = 400;
   prims.push(...goldTitle(top, `${name} 최근 수요예측 투자자 구분별 참여`, X0, X0 + lw, '(단위: 억원, %)'));
-  const trs = d.own.slice(0, 4).flatMap((p) => p.tranches.filter((t) => t.byType?.length));
+  const typed = typedIssues(d.own, 4);
+  const trs = typed.trs;
   const tenors = [...new Set(trs.map((t) => t.tenor))].slice(0, 3);
   const all = mixOf(trs);
   const per = tenors.map((k) => ({ k, m: mixOf(trs.filter((t) => t.tenor === k)) }));
   if (all.total) {
-    const groups = [...per.map((x) => ({ label: x.k, m: x.m })), { label: '전체', m: all }];
+    // 만기가 하나면 '전체' 열은 같은 값이라 뺀다
+    const groups = [...per.map((x) => ({ label: x.k, m: x.m })), ...(per.length > 1 ? [{ label: '전체', m: all }] : [])];
     const rows: (Cell | null)[][] = [
       [TH('구분', { rowspan: 2 }), ...groups.flatMap((g) => [TH(g.label, { colspan: 2 }), null])],
       [null, ...groups.flatMap(() => [TH('금액', { size: 7 }), TH('비중', { size: 7 })])],
@@ -439,7 +441,7 @@ function sales({ d, inp, tx }: Ctx, n: Numbered): Body {
       ...peerMix.rows.map((r) => {
         const o = all.rows.find((x) => x.t === r.t)?.share ?? 0;
         const gap = o - r.share;
-        return [LB(r.label, { size: 7 }), TD(eok(r.q), { size: 7 }), TD(`${r.share.toFixed(1)}%`, { size: 7 }), TD(all.total ? `${o.toFixed(1)}%` : '–', { size: 7 }), TD(all.total ? `${gap > 0 ? '+' : ''}${gap.toFixed(1)}` : '–', { size: 7, color: gap <= -5 ? C.red : undefined, bold: gap <= -5 })];
+        return [LB(r.label, { size: 7 }), TD(eok(r.q), { size: 7 }), TD(`${r.share.toFixed(1)}%`, { size: 7 }), TD(all.total ? `${o.toFixed(1)}%` : '–', { size: 7 }), TD(all.total ? pp(gap) : '–', { size: 7, color: gap <= -5 ? C.red : undefined, bold: gap <= -5 })];
       }),
     ];
     const rh = fitRows(rows.length - 1, top + 18 + 26, tableBottom, 14, 24);
@@ -451,7 +453,7 @@ function sales({ d, inp, tx }: Ctx, n: Numbered): Body {
     prims.push(...goldTitle(by, '기관별 수요예측 참여·배정 내역', X0, X1, '(내부 자료)'));
     prims.push(...pastedTable(X0, by + 18, CW, bottomH - 18, inv, 7));
   }
-  prims.push(...footnote(['주) 투자자 구분은 발행조건확정 증권신고서(정정)의 수요예측 참여 내역 기준(운용사(집합)은 투자일임·집합투자재산). 배정 내역은 공시에 기관 합계만 있어 내부 자료로 보완.', '자료: 금융감독원 DART']));
+  prims.push(...footnote([`주) ${typed.label ? `${name} ${typed.label} 기준. ` : ''}투자자 구분은 발행조건확정 증권신고서(정정)의 수요예측 참여 내역 기준(운용사(집합)은 투자일임·집합투자재산). 배정 내역은 공시에 기관 합계만 있어 내부 자료로 보완.`, '자료: 금융감독원 DART']));
   return { id: 'sales', title: n.title, prims };
 }
 

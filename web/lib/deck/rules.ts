@@ -3,7 +3,7 @@
 import { bandText, bpS, eok, eokW, mdw, ratioX, rate2, rate3, shortFirm, tenorYears, yy, yymmdd } from './fmt';
 import { BizCal, buildSchedule, korDate, type Schedule } from './schedule';
 import { defaultItems } from './catalog';
-import { meetingVolatility, mixOf, notchStats, spreadVsKtb, yearsOf } from './analytics';
+import { meetingVolatility, mixOf, notchStats, spreadVsKtb, typedIssues, yearsOf } from './analytics';
 import type { DeckData, DeckInput, DeckText, PeerIssue, TermNotes } from './types';
 
 const median = (xs: (number | null | undefined)[]) => {
@@ -294,10 +294,11 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     const best = tenorStats.reduce((a, b) => (a.avg >= b.avg ? a : b));
     sizing.push(`최근 4회 만기별 평균 경쟁률 ${tenorStats.map((x) => `${x.k} ${ratioX(x.avg)}`).join(', ')}로 **${best.k}물 수요가 가장 견조**하여 ${best.k}물 중심 구성이 적합하다고 판단`);
   }
-  const mix = mixOf(d.own.slice(0, 3).flatMap((p) => p.tranches));
+  const typed = typedIssues(d.own, 4);
+  const mix = mixOf(typed.trs);
   if (mix.total) {
     const top2 = [...mix.rows].sort((a, b) => b.q - a.q).slice(0, 2);
-    sizing.push(`최근 3회 수요예측 참여 ${eokW(mix.total)} 중 ${top2.map((x) => `${x.label} ${x.share.toFixed(0)}%`).join(', ')}로 참여 기관 구성 확인`);
+    sizing.push(`${typed.label} 수요예측 참여 ${eokW(mix.total)} 중 ${top2.map((x) => `${x.label} ${x.share.toFixed(0)}%`).join(', ')}로 참여 기관 구성 확인`);
   }
   const spreads = d.own.slice(0, 4).flatMap((p) => p.tranches.map((t) => ({ p, t, s: t.spread_bp })).filter((x) => x.s != null));
   if (spreads.length >= 2) {
@@ -386,14 +387,15 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
 
   // Sales 전략: 투자자 구분별 참여(회사·같은 등급)
   const sales: string[] = [];
-  const ownMix = mixOf(d.own.slice(0, 4).flatMap((p) => p.tranches));
+  const ownTyped = typedIssues(d.own, 4);
+  const ownMix = mixOf(ownTyped.trs);
   const peerMix = mixOf(peerPool(d, inp.peerScope).flatMap((p) => p.tranches));
   if (ownMix.total) {
     const top = [...ownMix.rows].sort((a, b) => b.q - a.q)[0];
-    sales.push(`${name} 최근 4회 수요예측 참여 ${eokW(ownMix.total)} 중 **${top.label} ${top.share.toFixed(0)}%**로 주력 수요층 확인`);
+    sales.push(`${name} ${ownTyped.label} 수요예측 참여 ${eokW(ownMix.total)} 중 **${top.label} ${top.share.toFixed(0)}%**로 주력 수요층 확인`);
   }
   if (peerMix.total) {
-    sales.push(`최근 1년 ${grp}등급 수요예측 참여 구성: ${peerMix.rows.slice(0, 4).map((x) => `${x.label} ${x.share.toFixed(0)}%`).join(', ')}`);
+    sales.push(`최근 1년 ${grp}등급 수요예측 참여 구성: ${peerMix.rows.filter((x) => x.share >= 0.5).slice(0, 4).map((x) => `${x.label} ${x.share.toFixed(0)}%`).join(', ')}`);
     if (ownMix.total) {
       const gap = peerMix.rows.map((x) => ({ x, own: ownMix.rows.find((o) => o.t === x.t)?.share ?? 0 })).sort((a, b) => (b.x.share - b.own) - (a.x.share - a.own))[0];
       if (gap && gap.x.share - gap.own >= 5) sales.push(`같은 등급 대비 ${gap.x.label} 참여 비중이 ${(gap.x.share - gap.own).toFixed(0)}%p 낮아 해당 투자자군 대상 IR·NDR 집중 필요`);
@@ -472,7 +474,7 @@ export function factsFor(d: DeckData, inp: DeckInput) {
     },
     같은등급사례: { 범위: inp.peerScope === 'notch' ? d.company.rating : `${d.company.rating_group}등급`, 전체건수: pool.length, 표: sel.map(peerFact) },
     비교사례: cmp.map(peerFact),
-    회사직전회차: d.own.slice(0, 3).map(peerFact),
+    회사직전회차: d.own.slice(0, 4).map(peerFact),
     만기도래: d.maturities.map((m) => ({ 만기일: yymmdd(m.dt), 회차: m.series, 금액: eokW(m.amount_krw), 금리: rate3(m.coupon_pct) })),
     만기도래합계: { 향후3년: eokW(d.maturities.reduce((s, m) => s + (m.amount_krw ?? 0), 0)), 건수: d.maturities.length, '1년내': eokW(d.maturities.filter((m) => m.dt <= addYears(d.asof, 1)).reduce((s, m) => s + (m.amount_krw ?? 0), 0)) },
     만기구조통계: d.combos.map((c) => ({ 구조: c.combo, 건수: c.issues, 비중: `${Math.round(c.share ?? 0)}%`, 경쟁률중간값: ratioX(c.medComp) })),
@@ -504,7 +506,10 @@ export function factsFor(d: DeckData, inp: DeckInput) {
     })(),
     만기도래상하반기: { 앞6개월: eokW(d.maturityByGrade.total.slice(0, 6).reduce((a, b) => a + b, 0)), 뒤6개월: eokW(d.maturityByGrade.total.slice(6).reduce((a, b) => a + b, 0)) },
     투자자구분참여: {
-      회사최근4회: mixOf(d.own.slice(0, 4).flatMap((p) => p.tranches)).rows.map((x) => ({ 구분: x.label, 금액: eokW(x.q), 비중: `${x.share.toFixed(0)}%` })),
+      회사회차: typedIssues(d.own, 4).label || null,
+      회사합계: eokW(mixOf(typedIssues(d.own, 4).trs).total),
+      회사: mixOf(typedIssues(d.own, 4).trs).rows.map((x) => ({ 구분: x.label, 금액: eokW(x.q), 비중: `${x.share.toFixed(0)}%` })),
+      같은등급합계: eokW(mixOf(pool.flatMap((p) => p.tranches)).total),
       같은등급최근1년: mixOf(pool.flatMap((p) => p.tranches)).rows.map((x) => ({ 구분: x.label, 금액: eokW(x.q), 비중: `${x.share.toFixed(0)}%` })),
     },
     회사트랜치별결과: d.own.slice(0, 4).flatMap((p) => p.tranches.map((t) => ({

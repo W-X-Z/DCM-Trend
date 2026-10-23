@@ -19,6 +19,18 @@ export function mixOf(trs: PeerTranche[]) {
   return { total, rows: TYPE_ORDER.filter((k) => sums.has(k)).map((k) => ({ t: k, label: TYPE_LABEL[k], n: sums.get(k)!.n, q: sums.get(k)!.q, share: total ? (sums.get(k)!.q / total) * 100 : 0 })) };
 }
 
+// 투자자 구분 참여가 수집된 회차만 (최근 n회 안에서). 문장·표에 회차를 그대로 밝힌다.
+export function typedIssues(ps: PeerIssue[], n: number) {
+  const list = ps.slice(0, n).filter((p) => p.tranches.some((t) => t.byType?.length));
+  return { list, label: list.length ? `제${list.map((p) => p.series ?? '?').join('·')}회` : '', trs: list.flatMap((p) => p.tranches.filter((t) => t.byType?.length)) };
+}
+
+// %p 차이 표기: -0.0 을 0.0 으로
+export const pp = (v: number) => {
+  const r = Math.round(v * 10) / 10 || 0;
+  return `${r > 0 ? '+' : ''}${r.toFixed(1)}`;
+};
+
 // 만기 연수 버킷: 1.5년은 '1.5년', 2년 미만 개월은 그대로
 export const yearsOf = (months: number | null) => (months == null ? null : Math.round((months / 12) * 10) / 10);
 
