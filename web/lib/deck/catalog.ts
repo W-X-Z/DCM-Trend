@@ -29,7 +29,7 @@ export const SECTIONS: Section[] = [
       { title: '발행조건 제안(案)', items: [{ id: 'terms', title: '발행조건 제안(案)', kind: 'gen', on: true }] },
       { title: '적정 발행규모 및 트랜치 구성 검토', items: [{ id: 'sizing', title: '적정 발행규모 및 트랜치 구성 검토', kind: 'gen', on: true }] },
       { title: '회사채 발행 일정 검토', items: [{ id: 'schedule', title: '회사채 발행 일정 검토', kind: 'gen', on: true }] },
-      { title: 'Sales 전략', items: [{ id: 'sales', title: 'Sales 전략', kind: 'shell', on: false, note: '기관별 수요예측 참여·배정은 내부 자료(빈 표)' }] },
+      { title: 'Sales 전략', items: [{ id: 'sales', title: 'Sales 전략', kind: 'gen', on: true, note: '투자자 구분별 참여는 공시, 기관별 내역은 내부 자료 붙여넣기' }] },
       { title: '회사채 수요예측 예정 내역', items: [{ id: 'pipeline', title: '회사채 수요예측 예정 내역', kind: 'gen', on: true }] },
     ],
   },

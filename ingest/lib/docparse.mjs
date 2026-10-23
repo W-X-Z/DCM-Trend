@@ -40,6 +40,34 @@ const ymdKr = (s) => {
 
 const normSeries = (s) => String(s ?? '').replace(/^제\s*/, '').replace(/\s*회$/, '').replace(/\s+/g, '').trim();
 
+// 수요예측 참여 내역의 투자자 구분 (표준 서식 열 순서)
+const DEMAND_TYPES = [
+  ['fund', /운용사\s*\(\s*집합/],
+  ['broker', /투자매매|중개업/],
+  ['inst', /연기금|고유|은행|보험/],
+  ['etc', /^기타/],
+  ['foreign_y', /거래\s*실적\s*유/],
+  ['foreign_n', /거래\s*실적\s*무/],
+];
+const cellsOf = (row) => row.split('|').map((c) => c.trim()).filter((c) => c !== '');
+const numOrZero = (c) => (c === '-' ? 0 : num(c));
+
+// 머리글(구분~건수 사이)과 건수·수량 행으로 투자자 구분별 참여를 만든다. 합계 열은 빼고, 머리글을 읽지 못하면 표준 순서로 본다.
+function demandByType(head, countRow, qtyRow, unit) {
+  const counts = cellsOf(countRow).map(numOrZero);
+  const qtys = cellsOf(qtyRow).map(numOrZero);
+  if (counts.length < 3 || counts.length !== qtys.length || counts.some((v) => v === null) || qtys.some((v) => v === null)) return null;
+  const n = counts.length - 1; // 마지막은 합계
+  const labels = cellsOf(head.slice(head.lastIndexOf('구분') + 2))
+    .filter((c) => !/^(국내\s*기관|외국\s*기관|합계|\(단위)/.test(c) && !/단위\s*:/.test(c));
+  let keys = labels.length === n ? labels.map((l) => DEMAND_TYPES.find(([, re]) => re.test(l))?.[0] ?? null) : null;
+  if (!keys || keys.some((k) => !k) || new Set(keys).size !== keys.length) keys = n === DEMAND_TYPES.length ? DEMAND_TYPES.map(([k]) => k) : null;
+  if (!keys) return null;
+  const sum = qtys.slice(0, n).reduce((a, b) => a + b, 0);
+  if (Math.abs(sum - qtys[n]) > Math.max(1, qtys[n] * 0.01)) return null; // 합계가 맞지 않으면 버린다
+  return keys.map((k, i) => ({ t: k, n: counts[i], q: qtys[i] * unit })).filter((x) => x.n || x.q);
+}
+
 // 회사채 ----------------------------------------------------------------------
 export function parseBond(text) {
   const out = [];
@@ -148,6 +176,18 @@ export function parseBond(text) {
     push('demand_count', series, count);
     push('demand_krw', series, qty !== null ? qty * unit : null);
     push('competition_ratio', series, ratio);
+    const byType = demandByType(m[0].slice(0, m[0].indexOf('건수')), m[2], m[3], unit);
+    if (byType) push('demand_by_type', series, JSON.stringify(byType));
+  }
+
+  // 5-1) 증액 한도: "최대 800억원까지 증액", "최대 일천억원(\100,000,000,000)까지 증액"
+  //       "전자등록총액은 합계 금 삼천오백억원(\350,000,000,000) 이하의 범위 내에서 결정 또는 변경"
+  const mx = text.match(/최대\s*[^\s(]{0,12}?\s*\(\s*[\\₩]\s*([\d,]{9,})\s*\)\s*까지\s*증액/)
+    ?? text.match(/최대\s*([\d,]+)\s*억\s*원\s*(?:까지|이내|한도|범위)[^.|]{0,20}?증액/)
+    ?? text.match(/(?:전자등록|권면)\s*총액은\s*(?:합계\s*)?금\s*[^\s(]{0,12}\s*\(\s*[\\₩]\s*([\d,]{9,})\s*\)\s*이하의?\s*범위/);
+  if (mx) {
+    const v = num(mx[1]);
+    if (v !== null) push('amount_max_krw', null, v >= 1e8 ? v : v * 1e8);
   }
 
   // 6) 유효수요(공모희망금리 밴드 안 참여 물량): '수요예측 신청가격 분포' 표에서 '포함' 행의 합계 수량을 더한다

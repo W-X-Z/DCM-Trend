@@ -48,6 +48,7 @@ const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
   { key: 'structure', item: 'terms', label: '발행조건 제안(案)' },
   { key: 'sizing', item: 'sizing', label: '적정 발행규모 및 트랜치 구성' },
   { key: 'schedule', item: 'schedule', label: '발행 일정' },
+  { key: 'sales', item: 'sales', label: 'Sales 전략' },
   { key: 'pipeline', item: 'pipeline', label: '수요예측 예정 내역' },
   { key: 'rates', item: 'rates', label: '금리 동향' },
   { key: 'bok', item: 'bok', label: '금통위' },
@@ -60,6 +61,17 @@ const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
   { key: 'corp', item: 'corp', label: '회사채 금리' },
   { key: 'league', item: 'league', label: '연간 League Table' },
   { key: 'maturity', item: 'maturity', label: '등급별 회사채 만기도래' },
+];
+
+const TERM_NOTES: [keyof DeckText['termNotes'], string][] = [
+  ['rating', '신용등급'], ['tenor', '만기'], ['amount', '발행금액'], ['band', '금리 밴드'], ['coupon', '이자지급'],
+  ['demand', '수요예측일'], ['pay', '발행일'], ['uw', '인수희망금액'], ['fee', '수수료'],
+];
+const INTERNAL: [keyof DeckInput['internal'], string, string][] = [
+  ['rateFc', '리서치 금리 전망표', '금리 전망 장표의 전망표를 대체합니다(예: NH 리서치 월간 전망표).'],
+  ['creditFc', '등급별 회사채 금리 전망표', '금리 전망 장표 2쪽(AA+~A- 2·3·5년 전망)을 만듭니다.'],
+  ['minpyeong', '개별민평·등급민평 표', '적정 발행규모 장표 오른쪽 위 금리 표를 대체합니다.'],
+  ['investors', '기관별 참여·배정 내역', 'Sales 전략 장표 아래에 들어갑니다.'],
 ];
 
 export function DeckStudio({ corp }: { corp: string }) {
@@ -89,7 +101,7 @@ export function DeckStudio({ corp }: { corp: string }) {
         const s = load(corp);
         const base = defaultInput(d);
         if (s) {
-          setInput({ ...base, ...s.input, items: { ...base.items, ...s.input.items }, band: { ...base.band, ...s.input.band } });
+          setInput({ ...base, ...s.input, items: { ...base.items, ...s.input.items }, band: { ...base.band, ...s.input.band }, internal: { ...base.internal, ...s.input.internal } });
           setText(s.text);
           setMode(s.mode);
           setFactsKey(s.factsKey);
@@ -338,11 +350,17 @@ export function DeckStudio({ corp }: { corp: string }) {
                 <textarea rows={Math.min(8, (shownText[f.key] as string[]).length + 1)} value={(shownText[f.key] as string[]).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
               </Field>
             ))}
-            {input.items.sizing && shownText.structureRows.map((r, i) => (
-              <Field key={`sr-${i}`} label={`만기 구조 설명: ${r.label}`}>
-                <textarea rows={2} value={r.desc} onChange={(e) => editText('structureRows', shownText.structureRows.map((x, j) => (j === i ? { ...x, desc: e.target.value } : x)))} />
-              </Field>
-            ))}
+            {input.items.terms && (
+              <fieldset className="dk-notes">
+                <legend className="dk-label">발행조건 표 비고</legend>
+                {TERM_NOTES.map(([k, label]) => (
+                  <label key={k} className="dk-note-row">
+                    <span className="small muted">{label}</span>
+                    <input value={shownText.termNotes[k]} onChange={(e) => editText('termNotes', { ...shownText.termNotes, [k]: e.target.value })} />
+                  </label>
+                ))}
+              </fieldset>
+            )}
             {input.items.strength && shownText.strengths.map((s, i) => (
               <div key={`st-${i}`} className="dk-row">
                 <Field label={`강점 ${i + 1} 제목`}><input value={s.title} onChange={(e) => editText('strengths', shownText.strengths.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field>
@@ -350,6 +368,17 @@ export function DeckStudio({ corp }: { corp: string }) {
               </div>
             ))}
             {mode !== 'rule' && <button type="button" className="linklike small" onClick={() => { setMode('rule'); setText(null); setFactsKey(null); }}>규칙 문안으로 되돌리기</button>}
+          </details>
+
+          <details>
+            <summary>
+              내부 자료 <Info>공시로 구할 수 없는 표를 엑셀에서 복사해 붙여넣으면 장표에 그대로 들어갑니다. 첫 줄은 머리글, 첫 열은 항목입니다. 이 브라우저에만 저장되고 AI 문안 요청에는 보내지 않습니다.</Info>
+            </summary>
+            {INTERNAL.map(([k, label, where]) => (
+              <Field key={k} label={label} hint={where}>
+                <textarea rows={3} className="dk-tsv" placeholder="엑셀에서 표를 복사해 붙여넣기" value={input.internal[k]} onChange={(e) => set('internal', { ...input.internal, [k]: e.target.value })} />
+              </Field>
+            ))}
           </details>
 
           <details>
