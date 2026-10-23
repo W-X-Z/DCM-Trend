@@ -204,7 +204,7 @@ function peerRows(list: PeerIssue[], self: string): { rows: (Cell | null)[][]; n
         first ? TD(p.demand_dt ? mdw(p.demand_dt) : '–', { rowspan: span, valign: 'm' }) : null,
         first ? TD(p.deal_dt ? mdw(p.deal_dt) : '–', { rowspan: span, valign: 'm' }) : null,
         TD(dem),
-        TD(under ? `!!${ratioX(ratio)}!!` : ratioX(ratio)),
+        TD(under || (ratio != null && ratio < 1) ? `!!${ratioX(ratio)}!!` : ratioX(ratio)),
       ]);
     });
   }

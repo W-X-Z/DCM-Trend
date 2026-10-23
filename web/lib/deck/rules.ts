@@ -58,10 +58,14 @@ export function defaultInput(d: DeckData): DeckInput {
   const pay = cal.add(d.asof, 25);
   const pool = peerPool(d, 'group');
   const peerKeys = pool.slice(0, 6).map((p) => p.key);
-  const under = pool.find(fullUnder) ?? pool.find((p) => p.under);
-  const best = [...pool].filter((p) => p.ratio != null).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
+  // 비교 장표 기본: 회사 직전 회차 + 최근 미매각 사례 + 같은 노치(없으면 같은 등급군)의 경쟁률 최고 사례
   const ownRecent = pool.find((p) => p.corp_code === d.company.corp_code);
-  const compareKeys = [...new Set([ownRecent?.key, best?.key, under?.key].filter(Boolean) as string[])].slice(0, 3);
+  const taken = new Set([ownRecent?.key]);
+  const under = pool.find((p) => fullUnder(p) && !taken.has(p.key)) ?? pool.find((p) => !!p.under && !taken.has(p.key));
+  taken.add(under?.key);
+  const byRatio = (xs: PeerIssue[]) => xs.filter((p) => p.ratio != null && !taken.has(p.key)).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
+  const best = byRatio(pool.filter((p) => p.rating === d.company.rating)) ?? byRatio(pool);
+  const compareKeys = [ownRecent?.key, under?.key, best?.key].filter(Boolean) as string[];
   const m = d.asof;
   const slides = Object.fromEntries(SLIDES.map((s) => [s.id, true])) as Record<SlideId, boolean>;
   if (!d.views.length) slides.views = false;
