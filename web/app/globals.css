@@ -4334,3 +4334,278 @@ table.data th.col-cta {
   display: inline-flex;
   align-items: center;
 }
+
+/* 제안서 노하우 관리 ------------------------------------------------------- */
+.kb-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.kb-filters,
+.kb-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.kb-bar select,
+.kb-bar input {
+  font: inherit;
+  font-size: var(--s-1);
+  padding: 7px 9px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  min-width: 0;
+}
+
+.kb-bar input[type='search'] {
+  width: 12rem;
+}
+
+.kb-who input {
+  width: 8rem;
+}
+
+.kb-who .btn {
+  font-size: var(--s-1);
+  padding: 8px 14px;
+}
+
+.kb-group {
+  margin-top: 22px;
+  max-width: 780px;
+}
+
+.kb-group h2 {
+  font-family: var(--serif);
+  font-size: var(--s1);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.kb-group h2 .small {
+  font-family: var(--sans);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.kb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.kb-item {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  gap: 2px 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.kb-item > .kb-edit {
+  grid-column: 1 / -1;
+}
+
+.kb-tags {
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.kb-kind {
+  font-size: var(--s-1);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.kb-kind.k-judge {
+  color: var(--accent-ink);
+}
+
+.kb-kind.k-style {
+  color: var(--ipo);
+}
+
+.kb-kind.k-caution {
+  color: var(--alert);
+}
+
+.kb-body {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.kb-meta {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+}
+
+.kb-act {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .kb-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kb-tags {
+    grid-row: auto;
+    flex-direction: row;
+  }
+  .kb-meta,
+  .kb-act {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .kb-bar input[type='search'] {
+    width: 100%;
+  }
+}
+
+.kb-edit {
+  max-width: 780px;
+  margin-top: 12px;
+  padding: 12px 14px 14px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.kb-item > .kb-edit {
+  margin-top: 0;
+}
+
+.kb-edit-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .kb-edit-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.kb-edit-act {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.kb-edit-act .muted {
+  margin-left: auto;
+}
+
+.kb-log {
+  max-width: 780px;
+  margin-top: 28px;
+  border-top: 1px solid var(--rule);
+  padding-top: 10px;
+}
+
+.kb-log summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.kb-log-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.kb-log-list li {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(4rem, 8rem) 3rem minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+  align-items: baseline;
+}
+
+.kb-log-list li > span:last-child {
+  white-space: nowrap;
+  justify-self: end;
+  padding-right: 2px;
+}
+
+.kb-log-body {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-act-delete {
+  color: var(--alert);
+}
+
+@media (max-width: 640px) {
+  .kb-log-list li {
+    grid-template-columns: auto auto auto;
+  }
+  .kb-log-body {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+}
+
+/* 제안서 화면: 장표별 노하우 */
+.dk-tips {
+  margin-top: 3px;
+  font-size: var(--s-1);
+}
+
+.dk-tips summary {
+  cursor: pointer;
+  color: var(--accent-ink);
+  list-style: none;
+  font-weight: 400;
+}
+
+.dk-tips summary::-webkit-details-marker {
+  display: none;
+}
+
+.dk-tips ul {
+  margin: 4px 0 0;
+  padding-left: 1.1em;
+  color: var(--ink-2);
+  display: grid;
+  gap: 3px;
+}
+
+.dk-tips .dk-tag {
+  margin-right: 4px;
+}
+
+.dk-form details.dk-tips {
+  border-bottom: 0;
+  padding: 0;
+}
+
+.dk-links {
+  display: flex;
+  gap: 14px;
+}

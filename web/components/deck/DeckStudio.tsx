@@ -1,12 +1,13 @@
 'use client';
 
-// 제안서 작성: 조건 입력 → 일정·사례 선택 → AI 문안 → 미리보기 → PPTX·PDF 내려받기.
-// 입력값·문안은 이 브라우저(localStorage)에만 저장한다. 서버에는 공개 데이터 조회와 AI 문안 요청만 보낸다.
+// 제안서 작성: 조건 입력 → 일정·사례 선택 → 문안(규칙, 또는 현업 노하우를 반영한 AI 문안) → 미리보기 → PPTX·PDF 내려받기.
+// 입력값·문안은 이 브라우저(localStorage)에만 저장한다. 서버에는 공개 데이터·노하우 조회와 AI 문안 요청만 보낸다.
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Info } from '@/components/Ui';
 import { bandRange, eok, mdw, ratioX, rate3, yy } from '@/lib/deck/fmt';
 import { BACK, FRONT, SECTIONS, defaultItems, type Item, type ItemId } from '@/lib/deck/catalog';
+import { KIND_LABEL, forGrade, type Knowledge, type KnowledgeSlide } from '@/lib/deck/knowledge';
 import { available, buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
 import { defaultInput, factsFor, peerPool, ruleText, scheduleOf, totalEok } from '@/lib/deck/rules';
 import type { DeckData, DeckInput, DeckText } from '@/lib/deck/types';
@@ -84,6 +85,15 @@ export function DeckStudio({ corp }: { corp: string }) {
   const [busy, setBusy] = useState<'' | 'ai' | 'pptx' | 'pdf'>('');
   const [note, setNote] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [tips, setTips] = useState<Knowledge[]>([]);
+
+  // 현업 노하우(장표별): 문안 칸 아래에 보여 주고, AI 문안에 넣는다
+  useEffect(() => {
+    fetch('/api/deck/knowledge', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((j) => setTips(j.items ?? []))
+      .catch(() => setTips([]));
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -143,13 +153,15 @@ export function DeckStudio({ corp }: { corp: string }) {
     setBusy('ai');
     setNote(null);
     try {
-      const r = await fetch('/api/deck/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts, rule }) });
+      const slides = Object.entries(input!.items).filter(([, v]) => v).map(([k]) => k);
+      const r = await fetch('/api/deck/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts, rule, grade: data?.company.rating_group ?? null, slides }) });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? 'AI 문안을 만들지 못했습니다.');
       setText(j.text);
       setMode('ai');
       setFactsKey(curKey);
-      setNote(j.dropped ? `AI 문안 중 근거 숫자가 없거나 전망 표현이 있는 ${j.dropped}줄은 규칙 문안으로 바꿨습니다.` : 'AI 문안을 반영했습니다. 내려받기 전에 숫자를 확인하세요.');
+      const used = j.applied ? `노하우 ${j.applied}개를 반영했습니다.` : '반영할 노하우가 없어 문장만 다듬었습니다.';
+      setNote(j.dropped ? `${used} 근거 숫자가 없거나 전망 표현이 있는 ${j.dropped}줄은 규칙 문안으로 바꿨습니다.` : `${used} 내려받기 전에 숫자를 확인하세요.`);
     } catch (e) {
       setNote((e as Error).message);
     } finally {
@@ -203,6 +215,7 @@ export function DeckStudio({ corp }: { corp: string }) {
 
   const sch = scheduleOf(data, input);
   const pool = peerPool(data, input.peerScope);
+  const myTips = forGrade(tips, data.company.rating_group);
 
   return (
     <div className="dk">
@@ -216,16 +229,16 @@ export function DeckStudio({ corp }: { corp: string }) {
         <div className="dk-actions">
           <span className="dk-ai">
             <button type="button" className="btn btn-ghost" onClick={runAi} disabled={!!busy}>
-              {busy === 'ai' ? 'AI 문안 만드는 중…' : mode === 'ai' ? 'AI 문안 다시 만들기' : 'AI 문안 만들기'}
+              {busy === 'ai' ? '노하우 반영 중…' : mode === 'ai' ? '노하우 다시 반영(AI)' : '노하우 반영(AI)'}
             </button>
-            <Info>회사명과 입력한 조건, 공시·금리 사실 묶음이 OpenAI로 전송됩니다. 결과는 숫자 검증을 거쳐 이 브라우저에만 저장됩니다.</Info>
+            <Info>기본 문안은 공시·금리 숫자로 규칙이 만듭니다. 이 버튼은 현업 노하우(이 회사 등급·켠 장표에 맞는 것)를 더해 AI가 판단 문장을 고칩니다. 사실에 없는 숫자나 출처 없는 시장 전망이 든 줄은 규칙 문안으로 되돌립니다. 회사명·조건·숫자가 OpenAI로 전송되고, 결과는 이 브라우저에만 저장됩니다.</Info>
           </span>
           <button type="button" className="btn" onClick={() => exportAs('pptx')} disabled={!!busy}>{busy === 'pptx' ? 'PPTX 만드는 중…' : 'PPTX 내려받기'}</button>
           <button type="button" className="btn" onClick={() => exportAs('pdf')} disabled={!!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF 내려받기'}</button>
         </div>
       </div>
       <p className="dk-status small" role="status">
-        <span className={`dk-mode m-${mode}`}>{mode === 'rule' ? '규칙 문안' : mode === 'ai' ? 'AI 문안' : '직접 고친 문안'}</span>
+        <span className={`dk-mode m-${mode}`}>{mode === 'rule' ? '규칙 문안' : mode === 'ai' ? '노하우 반영 문안' : '직접 고친 문안'}</span>
         {stale && <span className="dk-stale">조건이 바뀌었습니다. 문안을 다시 만들거나 확인하세요.</span>}
         {note && <span>{note}</span>}
         {savedAt && <span className="muted">이 브라우저에 저장됨 {new Date(savedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>}
@@ -342,13 +355,17 @@ export function DeckStudio({ corp }: { corp: string }) {
             <summary>
               문안 <Info>한 줄이 글머리 하나입니다. **굵게+밑줄**, !!빨강!! 표기를 쓸 수 있습니다. 숫자는 공시·금리 데이터 값이므로 고칠 때 원문을 확인하세요.</Info>
             </summary>
+            <Tips list={myTips} slide="all" />
             <Field label="주요 제안 첫 문장">
               <textarea rows={3} value={shownText.lead} onChange={(e) => editText('lead', e.target.value)} />
             </Field>
             {TEXT_FIELDS.filter((f) => input.items[f.item]).map((f) => (
-              <Field key={f.key} label={f.label}>
-                <textarea rows={Math.min(8, (shownText[f.key] as string[]).length + 1)} value={(shownText[f.key] as string[]).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
-              </Field>
+              <div key={f.key}>
+                <Field label={f.label}>
+                  <textarea rows={Math.min(8, (shownText[f.key] as string[]).length + 1)} value={(shownText[f.key] as string[]).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
+                </Field>
+                <Tips list={myTips} slide={f.item as KnowledgeSlide} />
+              </div>
             ))}
             {input.items.terms && (
               <fieldset className="dk-notes">
@@ -393,6 +410,22 @@ export function DeckStudio({ corp }: { corp: string }) {
         <Preview slides={slides} />
       </div>
     </div>
+  );
+}
+
+// 이 장표에 쓰는 노하우 (접어 두고 개수만 보인다)
+function Tips({ list, slide }: { list: Knowledge[]; slide: KnowledgeSlide }) {
+  const mine = list.filter((k) => k.slide === slide);
+  if (!mine.length) return null;
+  return (
+    <details className="dk-tips">
+      <summary>{slide === 'all' ? '모든 장표 공통 노하우' : '노하우'} {mine.length}</summary>
+      <ul>
+        {mine.map((k) => (
+          <li key={k.id}><span className="dk-tag">{KIND_LABEL[k.kind]}</span>{k.body}</li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

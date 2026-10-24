@@ -1,5 +1,7 @@
-// 제안서 장표 문안 (OpenAI). 브라우저가 보낸 사실 묶음·규칙 문안만 근거로 쓰고, 결과를 검증해 돌려준다.
+// 제안서 장표 문안 (OpenAI). 브라우저가 보낸 사실 묶음·규칙 문안과 현업 노하우(DB)를 근거로 쓰고, 결과를 검증해 돌려준다.
 // 요청 내용(회사명·제안 조건)은 서버에 저장하거나 기록하지 않는다.
+import { selectFresh } from '@/lib/db';
+import { knowledgeForPrompt, type Knowledge } from '@/lib/deck/knowledge';
 import { allowedNumbers, mergeValidated } from '@/lib/deck/validate';
 import type { DeckText } from '@/lib/deck/types';
 
@@ -31,7 +33,7 @@ const SYSTEM = `너는 NH투자증권 IB(DCM) RA다. 공모 회사채 대표주�
 - 금리·스프레드·수요의 방향을 예측하는 문장(예: "금리가 하락할 것으로 예상")은 리서치 하우스·한국은행·연준 등 출처를 주어로 인용할 때만 쓴다(예: "NH투자증권 리서치는 …를 제시"). 확실·보장 표현 금지.
 - 투자자 실명, 내부 정보, 근거 없는 수식어("압도적", "최고의")를 쓰지 않는다.
 - 초안의 사실 범위를 벗어나지 않되 설득력 있게 다듬고, 장표 간 내용이 겹치지 않게 한다.
-- 문체 예시(숫자·회사는 자리표시): "최근 1년 BBB등급 공모 회사채 수요예측 N건 진행", "OO는 경쟁률 x.xx:1에 그쳐 **대규모 미매각 발생**", "정기보고서 제출 이후 타 발행사 수요예측 전 **최대한 신속히 발행하는 일정** 제안", "증권신고서 제출 및 추가청약 가능성을 고려해 수요예측 전후 하루 여유 확보".
+- '노하우'는 NH 현업이 정리한 판단 기준·관행·표현이다. 키(장표 필드)에 맞는 문안에 반영해 판단의 이유를 보강한다. 노하우가 사실과 맞지 않는 회사에는 쓰지 않는다(예: 해당 만기가 없음). 노하우에 있어도 사실에 없는 기관명은 쓰지 않으며, 노하우가 위 규칙과 부딪히면 위 규칙을 따른다.
 출력: 지정한 JSON 형식만.`;
 
 const arr = (min: number, max: number) => ({ type: 'array', items: { type: 'string' }, description: `${min}~${max}줄` });
@@ -81,14 +83,19 @@ export async function POST(req: Request) {
   const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'local';
   if (limited(ip)) return Response.json({ error: '요청이 많아 잠시 쉬어 갑니다. 몇 분 뒤 다시 시도하세요.', code: 'rate' }, { status: 429 });
 
-  let body: { facts?: unknown; rule?: DeckText; focus?: string };
+  let body: { facts?: unknown; rule?: DeckText; focus?: string; grade?: string; slides?: string[] };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: 'bad request' }, { status: 400 });
   }
   if (!body.facts || !body.rule) return Response.json({ error: 'bad request' }, { status: 400 });
-  const payload = JSON.stringify({ 사실: body.facts, 초안: body.rule, 요청: (body.focus ?? '').slice(0, 300) || undefined });
+  // 현업 노하우: 이 회사 등급·켠 장표에 맞는 것만. 못 읽으면 노하우 없이 진행한다.
+  const known = await selectFresh<Knowledge>('v_deck_knowledge', { limit: 1000 }).catch(() => [] as Knowledge[]);
+  const slides = Array.isArray(body.slides) ? body.slides.filter((x) => typeof x === 'string').slice(0, 40) : null;
+  const tips = knowledgeForPrompt(known, typeof body.grade === 'string' ? body.grade : null, slides);
+  const applied = Object.values(tips).reduce((n, xs) => n + xs.length, 0);
+  const payload = JSON.stringify({ 사실: body.facts, 초안: body.rule, 노하우: applied ? tips : undefined, 요청: (body.focus ?? '').slice(0, 300) || undefined });
   if (payload.length > 60_000) return Response.json({ error: '입력이 너무 깁니다. 비교 사례 수를 줄여 주세요.' }, { status: 413 });
 
   try {
@@ -106,9 +113,10 @@ export async function POST(req: Request) {
     if (!res.ok) throw new Error(String(j?.error?.message ?? res.status).slice(0, 200));
     const content = j.choices?.[0]?.message?.content ?? '{}';
     const ai = JSON.parse(content) as Partial<DeckText>;
-    const allowed = allowedNumbers(body.facts, body.rule);
+    // 노하우에 적힌 숫자(예: 1~3월)는 현업이 정한 기준이라 문안에 써도 된다
+    const allowed = allowedNumbers(body.facts, body.rule, tips);
     const { text, dropped } = mergeValidated(ai, body.rule, allowed);
-    return Response.json({ text, dropped: dropped.length, droppedLines: dropped.slice(0, 20), model: MODEL }, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ text, dropped: dropped.length, droppedLines: dropped.slice(0, 20), applied, model: MODEL }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
     return Response.json({ error: `AI 문안을 만들지 못했습니다. 규칙 문안을 그대로 씁니다. (${(e as Error).message.slice(0, 120)})` }, { status: 502 });
   }
