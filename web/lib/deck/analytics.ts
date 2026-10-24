@@ -42,6 +42,46 @@ export function tenorDemand(own: PeerIssue[], n = 4) {
   }));
 }
 
+// 회사 공모채 연도별 만기도래(향후 3년)
+export function maturityByYear(d: DeckData, rows = d.maturities) {
+  const by = new Map<string, number>();
+  for (const m of rows) by.set(m.dt.slice(0, 4), (by.get(m.dt.slice(0, 4)) ?? 0) + Number(m.amount_krw ?? 0));
+  return by;
+}
+
+// 해 전체가 자료 기간 안에 있는 연도의 만기도래(내년부터). 없는 해는 0.
+export function fullYearLoads(d: DeckData) {
+  const long = d.maturitiesLong;
+  const by = maturityByYear(d, long?.rows ?? d.maturities);
+  const until = long?.to ?? d.maturities.at(-1)?.dt ?? d.asof;
+  const out = new Map<string, number>();
+  for (let y = Number(d.asof.slice(0, 4)) + 1; `${y}-12-31` <= until; y++) out.set(String(y), by.get(String(y)) ?? 0);
+  return out;
+}
+
+// 제안 트랜치가 만기되는 연도의 기존 만기도래. 그 해 전체가 만기도래 자료 기간 안에 있을 때만 센다.
+export function proposedMaturityLoad(d: DeckData, tranches: { tenor: string }[], pay: string | null) {
+  const long = d.maturitiesLong;
+  const by = maturityByYear(d, long?.rows ?? d.maturities);
+  const until = long?.to ?? (() => {
+    const x = new Date(`${d.asof}T00:00:00Z`);
+    x.setUTCMonth(x.getUTCMonth() + 36);
+    return x.toISOString().slice(0, 10);
+  })();
+  const base = new Date(`${pay ?? d.asof}T00:00:00Z`);
+  const out: { tenor: string; year: string; amount: number }[] = [];
+  for (const t of tranches) {
+    const m = t.tenor.match(/(\d+(?:\.\d+)?)\s*년/);
+    if (!m) continue;
+    const end = new Date(base);
+    end.setUTCMonth(end.getUTCMonth() + Math.round(Number(m[1]) * 12));
+    const year = String(end.getUTCFullYear());
+    if (`${year}-12-31` > until) continue;
+    out.push({ tenor: t.tenor, year, amount: by.get(year) ?? 0 });
+  }
+  return out;
+}
+
 // %p 차이 표기: -0.0 을 0.0 으로
 export const pp = (v: number) => {
   const r = Math.round(v * 10) / 10 || 0;

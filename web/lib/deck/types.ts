@@ -34,6 +34,8 @@ export type DeckData = {
   own: PeerIssue[];
   peers: PeerIssue[]; // 같은 등급군, 최근 12개월 (회사 자신 포함)
   maturities: { dt: string; series: string | null; amount_krw: number | null; coupon_pct: number | null; months: number | null; lead: string | null }[];
+  // 제안 트랜치 만기 연도 비교용(64개월). 없으면 maturities 로 본다.
+  maturitiesLong?: { to: string; rows: DeckData['maturities'] };
   league: { scope: string; since: string; rows: LeagueRow[]; total: number; deals: number };
   leagueAll: { scope: string; since: string; rows: LeagueRow[]; total: number; deals: number };
   combos: { combo: string; issues: number; share: number | null; medComp: number | null; incShare: number | null; avgAmount: number | null }[];

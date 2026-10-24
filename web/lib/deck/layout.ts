@@ -407,9 +407,17 @@ function sales({ d, inp, tx }: Ctx, n: Numbered): Body {
   prims.push(...goldTitle(top, `${name} 최근 수요예측 투자자 구분별 참여`, X0, X0 + lw, '(단위: 억원, %)'));
   const typed = typedIssues(d.own, 4);
   const trs = typed.trs;
-  const tenors = [...new Set(trs.map((t) => t.tenor))].slice(0, 3);
+  // 만기가 4개 이상이면 참여금액 상위 3개 만기만 열로 두고 나머지는 '그 외'로 묶는다(합계가 맞게)
+  const yrs = (k: string) => Number(k.match(/[\d.]+/)?.[0] ?? 99);
+  const qOf = (k: string) => mixOf(trs.filter((t) => t.tenor === k)).total;
+  const allTenors = [...new Set(trs.map((t) => t.tenor))];
+  const shownTenors = (allTenors.length > 3 ? [...allTenors].sort((a, b) => qOf(b) - qOf(a)).slice(0, 3) : allTenors).sort((a, b) => yrs(a) - yrs(b));
+  const restTrs = trs.filter((t) => !shownTenors.includes(t.tenor));
   const all = mixOf(trs);
-  const per = tenors.map((k) => ({ k, m: mixOf(trs.filter((t) => t.tenor === k)) }));
+  const per = [
+    ...shownTenors.map((k) => ({ k, m: mixOf(trs.filter((t) => t.tenor === k)) })),
+    ...(restTrs.length ? [{ k: '그 외', m: mixOf(restTrs) }] : []),
+  ];
   if (all.total) {
     // 만기가 하나면 '전체' 열은 같은 값이라 뺀다
     const groups = [...per.map((x) => ({ label: x.k, m: x.m })), ...(per.length > 1 ? [{ label: '전체', m: all }] : [])];
@@ -534,7 +542,8 @@ function policyChart(d: DeckData, x: number, y: number, w: number, h: number): P
 }
 
 // 국고 3년 대비 회사채 3년 스프레드 (AA-, BBB-), bp
-function spreadChart(d: DeckData, x: number, y: number, w: number, h: number): Prim {
+// key: 월말 대체 차트에 쓸 회사채 시계열(BBB 등급 회사는 BBB-)
+function spreadChart(d: DeckData, x: number, y: number, w: number, h: number, key: 'corp3y_aa' | 'corp3y_bbb' = 'corp3y_aa'): Prim {
   const k3 = dailyOf(d, 'ktb3y');
   const aa = dailyOf(d, 'corp3y_aa');
   const bbb = dailyOf(d, 'corp3y_bbb');
@@ -549,12 +558,12 @@ function spreadChart(d: DeckData, x: number, y: number, w: number, h: number): P
     if (bbb) series.push({ name: 'BBB- 3년 − 국고 3년', color: C.bar, values: dates.map((dt) => (mb.has(dt) ? Math.round((mb.get(dt)! - mk.get(dt)!) * 1000) / 10 : null)) });
   } else {
     const ks = d.series.find((s) => s.key === 'ktb3y');
-    const as = d.series.find((s) => s.key === 'corp3y_aa');
+    const as = d.series.find((s) => s.key === key) ?? d.series.find((s) => s.key === 'corp3y_aa');
     if (!ks || !as) return { k: 'text', x, y: y + 40, w, h: 40, paras: [P('금리 시계열이 부족해 차트를 그리지 않았습니다.')], size: 9, color: C.muted, align: 'c', valign: 'm' };
     const mk = new Map(ks.pts.map((p) => [p[0].slice(0, 7), p[1]]));
     const pts = as.pts.filter((p) => mk.has(p[0].slice(0, 7)));
     cats = pts.map((p) => fmtCat(p[0]));
-    series.push({ name: 'AA- 3년 − 국고 3년(월말)', color: C.th, values: pts.map((p) => Math.round((p[1] - mk.get(p[0].slice(0, 7))!) * 100)) });
+    series.push({ name: `${as.key === 'corp3y_bbb' ? 'BBB-' : 'AA-'} 3년 − 국고 3년(월말)`, color: C.th, values: pts.map((p) => Math.round((p[1] - mk.get(p[0].slice(0, 7))!) * 100)) });
   }
   const all = series.flatMap((s) => s.values).filter((v): v is number => v != null);
   const ax = axis(all, 10);
@@ -903,8 +912,10 @@ function corp({ d, inp, tx }: Ctx, n: Numbered): Body {
     const ax = axis(all, 0.5);
     prims.push({ k: 'chart', x: X0, y: top + 22, w: lw, h: BOTTOM - top - 26, chart: { kind: 'line', cats: dates.map(fmtCat), series, min: ax.min, max: ax.max, step: ax.max - ax.min > 6 ? 1 : 0.5, unit: '%', labelEvery: Math.max(1, Math.round(dates.length / 7)) } });
   } else {
-    prims.push(...goldTitle(top, '회사채 3년 AA- 신용스프레드 (국고채 3년 대비, 월말)', X0, X0 + lw, '(단위: bp)'));
-    prims.push(spreadChart(d, X0, top + 22, lw, BOTTOM - top - 26));
+    // BBB 등급 회사는 BBB- 스프레드를 본다(월말 시계열이 있으면)
+    const useBbb = d.company.rating_group === 'BBB' && d.series.some((s) => s.key === 'corp3y_bbb');
+    prims.push(...goldTitle(top, `회사채 3년 ${useBbb ? 'BBB-' : 'AA-'} 신용스프레드 (국고채 3년 대비, 월말)`, X0, X0 + lw, '(단위: bp)'));
+    prims.push(spreadChart(d, X0, top + 22, lw, BOTTOM - top - 26, useBbb ? 'corp3y_bbb' : 'corp3y_aa'));
   }
   const rx = X0 + lw + 14;
   const rw = X1 - rx;
