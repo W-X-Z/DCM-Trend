@@ -10,10 +10,17 @@ import { BACK, FRONT, SECTIONS, defaultItems, type Item, type ItemId } from '@/l
 import { KIND_LABEL, forGrade, type Knowledge, type KnowledgeSlide } from '@/lib/deck/knowledge';
 import { available, buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
 import { defaultInput, factsFor, peerPool, ruleText, scheduleOf, totalEok } from '@/lib/deck/rules';
+import { PAGE } from '@/lib/deck/theme';
+import type { Slide } from '@/lib/deck/model';
 import type { DeckData, DeckInput, DeckText } from '@/lib/deck/types';
 import { SlideView } from './SlideView';
 
 type Mode = 'rule' | 'ai' | 'edited';
+// 고칠 항목 탭: 평소에는 접어 두고 장표만 크게 보인다
+type Tab = 'terms' | 'schedule' | 'peers' | 'toc' | 'text' | 'internal' | 'cover';
+const TABS: [Tab, string][] = [
+  ['terms', '발행 조건'], ['schedule', '일정'], ['peers', '비교 사례'], ['toc', '목차'], ['text', '문안'], ['internal', '내부 자료'], ['cover', '표지'],
+];
 type Saved = { v: 2; input: DeckInput; text: DeckText | null; mode: Mode; factsKey: string | null; at: string };
 const KEY = (corp: string) => `deck:v2:${corp}`;
 
@@ -86,6 +93,8 @@ export function DeckStudio({ corp }: { corp: string }) {
   const [note, setNote] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [tips, setTips] = useState<Knowledge[]>([]);
+  const [tab, setTab] = useState<Tab | null>(null);
+  const [cur, setCur] = useState(0);
 
   // 현업 노하우(장표별): 문안 칸 아래에 보여 주고, AI 문안에 넣는다
   useEffect(() => {
@@ -210,12 +219,203 @@ export function DeckStudio({ corp }: { corp: string }) {
     setNote('기본값으로 되돌렸습니다.');
   }
 
-  if (err) return <p className="empty">{err} <Link href="/proposal">다른 회사 고르기</Link></p>;
-  if (!data || !input || !shownText) return <p className="empty" aria-busy="true">공시·금리 데이터를 모으는 중입니다…</p>;
+  if (err) return <p className="empty">{err} <Link href="/proposal/deck">다른 회사 고르기</Link></p>;
+  if (!data || !input || !shownText) return <Loading />;
 
   const sch = scheduleOf(data, input);
   const pool = peerPool(data, input.peerScope);
   const myTips = forGrade(tips, data.company.rating_group);
+  const at = Math.min(cur, Math.max(slides.length - 1, 0));
+  const targets = slides[at] ? editTargets(slides[at].id) : [];
+
+  // 탭 버튼: 같은 탭을 다시 누르면 닫는다
+  const toggle = (t: Tab) => setTab((x) => (x === t ? null : t));
+  // 장표 아래 바로가기: 그 탭을 열고, anchor 가 있으면 그 칸으로 옮겨 간다
+  function open(t: Tab, anchor?: string) {
+    setTab(t);
+    if (anchor) {
+      // 창 전체가 아니라 패널 안에서만 그 칸으로 옮긴다
+      setTimeout(() => {
+        const el = document.getElementById(anchor);
+        const box = el?.closest('.dk-form') as HTMLElement | null;
+        if (el && box) box.scrollTo({ top: el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8, behavior: 'smooth' });
+        (el?.querySelector('textarea, input') as HTMLElement | null)?.focus({ preventScroll: true });
+      }, 60);
+    }
+  }
+
+  const panel: Record<Tab, React.ReactNode> = {
+    terms: (
+      <>
+        <Field label="회사명 표기"><input value={input.issuer} onChange={(e) => set('issuer', e.target.value)} /></Field>
+        <div className="dk-row">
+          <Field label="회차"><input value={input.series} onChange={(e) => set('series', e.target.value)} inputMode="numeric" /></Field>
+          <Field label="신용등급"><input value={input.rating} onChange={(e) => set('rating', e.target.value)} /></Field>
+        </div>
+        <Field label="등급 비고"><input value={input.ratingNote} onChange={(e) => set('ratingNote', e.target.value)} /></Field>
+        <h4 className="dk-sub">트랜치</h4>
+        <Tranches input={input} set={set} />
+        <Field label="이자지급">
+          <select value={input.coupon} onChange={(e) => set('coupon', e.target.value)}>
+            {['3개월 이표채', '월단위 이표채', '6개월 이표채', '만기일시'].map((x) => <option key={x}>{x}</option>)}
+          </select>
+        </Field>
+        <Field label="금리 밴드">
+          <select value={input.band.type} onChange={(e) => set('band', { ...input.band, type: e.target.value as DeckInput['band']['type'] })}>
+            <option value="later">추후 결정</option>
+            <option value="fixed">고정금리(%)</option>
+            <option value="spread">개별민평(bp)</option>
+          </select>
+        </Field>
+        {input.band.type !== 'later' && (
+          <div className="dk-row">
+            <Field label={input.band.type === 'fixed' ? '하단(%)' : '하단(bp)'}><NumIn v={input.band.low} on={(v) => set('band', { ...input.band, low: v })} step="any" /></Field>
+            <Field label={input.band.type === 'fixed' ? '상단(%)' : '상단(bp)'}><NumIn v={input.band.high} on={(v) => set('band', { ...input.band, high: v })} step="any" /></Field>
+          </div>
+        )}
+        <Field label="밴드 비고"><input value={input.bandNote} onChange={(e) => set('bandNote', e.target.value)} /></Field>
+        <Field label="인수희망금액"><input value={input.uw} onChange={(e) => set('uw', e.target.value)} /></Field>
+        <div className="dk-row">
+          <Field label="인수수수료(bp)"><NumIn v={input.feeUw} on={(v) => set('feeUw', v)} step="any" /></Field>
+          <Field label="대표주관수수료(bp)"><NumIn v={input.feeLead} on={(v) => set('feeLead', v)} step="any" /></Field>
+        </div>
+        <Field label="수수료 비고"><input value={input.feeNote} onChange={(e) => set('feeNote', e.target.value)} /></Field>
+        <p className="small dk-reset"><button type="button" className="linklike" onClick={reset}>입력값 처음으로</button></p>
+      </>
+    ),
+    schedule: (
+      <>
+        <Field label="희망 납입일"><input type="date" value={input.pay} onChange={(e) => set('pay', e.target.value)} /></Field>
+        {sch && (
+          <>
+            <fieldset className="dk-radios">
+              <legend>수요예측일</legend>
+              {sch.demandOptions.map((d2, i) => (
+                <label key={d2}>
+                  <input type="radio" name="demand" checked={sch.demand === d2} onChange={() => set('demand', d2)} />
+                  {mdw(d2)} <span className="muted small">{['7', '6', '5'][i]}영업일 전</span>
+                </label>
+              ))}
+            </fieldset>
+            <ul className="dk-sched small">
+              <li><span>대표주관계약</span>{mdw(sch.leadContract)}</li>
+              <li><span>증권신고서</span>{mdw(sch.filing)}</li>
+              <li><span>조건확정 정정</span>{mdw(sch.condFix)}</li>
+              <li><span>납입</span><strong>{mdw(sch.pay)}</strong></li>
+            </ul>
+            {sch.warnings.map((w) => <p key={w} className="dk-warn small">{w}</p>)}
+          </>
+        )}
+      </>
+    ),
+    peers: (
+      <>
+        <div className="seg dk-seg" role="group" aria-label="사례 범위">
+          {(['group', 'notch'] as const).map((sc) => (
+            <button key={sc} type="button" aria-pressed={input.peerScope === sc} onClick={() => set('peerScope', sc)}>
+              {sc === 'group' ? `${data.company.rating_group ?? ''}등급 전체` : `${data.company.rating ?? ''}만`}
+            </button>
+          ))}
+        </div>
+        <p className="small muted dk-count">표 {input.peerKeys.length}건 · 비교 {input.compareKeys.length}/3</p>
+        <div className="dk-peers" role="table" aria-label="같은 등급 최근 1년 공모 회사채">
+          <div role="row" className="dk-peer dk-peer-h small">
+            <span role="columnheader">표</span><span role="columnheader">비교</span><span role="columnheader">발행사</span><span role="columnheader">수요예측</span><span role="columnheader">경쟁률</span>
+          </div>
+          {pool.map((p) => {
+            const inT = input.peerKeys.includes(p.key);
+            const inC = input.compareKeys.includes(p.key);
+            return (
+              <div role="row" key={p.key} className={`dk-peer${p.corp_code === data.company.corp_code ? ' is-self' : ''}`}>
+                <span role="cell"><input type="checkbox" aria-label={`${p.corp_name} 표에 넣기`} checked={inT} onChange={() => set('peerKeys', inT ? input.peerKeys.filter((k) => k !== p.key) : [...input.peerKeys, p.key])} /></span>
+                <span role="cell"><input type="checkbox" aria-label={`${p.corp_name} 비교 장표에 넣기`} checked={inC} disabled={!inC && input.compareKeys.length >= 3} onChange={() => set('compareKeys', inC ? input.compareKeys.filter((k) => k !== p.key) : [...input.compareKeys, p.key])} /></span>
+                <span role="cell" title={`${p.rating ?? ''} ${p.tenor_combo} ${eok(p.amount_krw)}억 ${p.tranches.map((t) => rate3(t.yield_pct)).join('/')} ${p.band_low != null ? bandRange(p) : ''}`}>
+                  {p.corp_name} <span className="muted">{p.rating} {p.tenor_combo}</span>
+                </span>
+                <span role="cell" className="tnum">{p.demand_dt ? mdw(p.demand_dt) : yy(p.deal_dt)}</span>
+                <span role="cell" className={`tnum${p.under ? ' neg' : ''}`}>{ratioX(p.ratio)}</span>
+              </div>
+            );
+          })}
+          {!pool.length && <p className="empty small">최근 1년 같은 등급 발행이 없습니다.</p>}
+        </div>
+      </>
+    ),
+    toc: <Toc data={data} input={input} set={set} />,
+    text: (
+      <>
+        <p className="small dk-text-head">
+          <span className={`dk-mode m-${mode}`}>{mode === 'rule' ? '규칙 문안' : mode === 'ai' ? '노하우 반영 문안' : '직접 고친 문안'}</span>
+          <Info>한 줄이 글머리 하나입니다. **굵게+밑줄**, !!빨강!! 표기를 쓸 수 있습니다. 숫자는 공시·금리 데이터 값이므로 고칠 때 원문을 확인하세요.</Info>
+          {mode !== 'rule' && <button type="button" className="linklike" onClick={() => { setMode('rule'); setText(null); setFactsKey(null); }}>규칙 문안으로 되돌리기</button>}
+        </p>
+        <Tips list={myTips} slide="all" />
+        <div id="dk-t-lead">
+          <Field label="주요 제안 첫 문장">
+            <textarea rows={3} value={shownText.lead} onChange={(e) => editText('lead', e.target.value)} />
+          </Field>
+        </div>
+        {TEXT_FIELDS.filter((f) => input.items[f.item]).map((f) => (
+          <div key={f.key} id={`dk-t-${f.key}`}>
+            <Field label={f.label}>
+              <textarea rows={Math.min(8, (shownText[f.key] as string[]).length + 1)} value={(shownText[f.key] as string[]).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
+            </Field>
+            <Tips list={myTips} slide={f.item as KnowledgeSlide} />
+          </div>
+        ))}
+        {input.items.terms && (
+          <fieldset className="dk-notes" id="dk-t-termNotes">
+            <legend className="dk-label">발행조건 표 비고</legend>
+            {TERM_NOTES.map(([k, label]) => (
+              <label key={k} className="dk-note-row">
+                <span className="small muted">{label}</span>
+                <input value={shownText.termNotes[k]} onChange={(e) => editText('termNotes', { ...shownText.termNotes, [k]: e.target.value })} />
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {input.items.strength && (
+          <div id="dk-t-strengths">
+            {shownText.strengths.map((st, i) => (
+              <div key={`st-${i}`} className="dk-row">
+                <Field label={`강점 ${i + 1} 제목`}><input value={st.title} onChange={(e) => editText('strengths', shownText.strengths.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field>
+                <Field label="내용"><input value={st.text} onChange={(e) => editText('strengths', shownText.strengths.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field>
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    ),
+    internal: (
+      <>
+        <p className="small muted dk-panel-note">
+          엑셀 표를 붙여넣으면 장표에 그대로 들어갑니다
+          <Info>첫 줄은 머리글, 첫 열은 항목입니다. 이 브라우저에만 저장되고 AI 문안 요청에는 보내지 않습니다.</Info>
+        </p>
+        {INTERNAL.map(([k, label, where]) => (
+          <Field key={k} label={label} hint={where}>
+            <textarea rows={3} className="dk-tsv" placeholder="엑셀에서 표를 복사해 붙여넣기" value={input.internal[k]} onChange={(e) => set('internal', { ...input.internal, [k]: e.target.value })} />
+          </Field>
+        ))}
+      </>
+    ),
+    cover: (
+      <>
+        <Field label="표지 제목"><input value={input.coverTitle} onChange={(e) => set('coverTitle', e.target.value)} /></Field>
+        <Field label="제안 월"><input value={input.month} onChange={(e) => set('month', e.target.value)} placeholder="2026. 11" /></Field>
+        <div id="dk-a-back">
+          <Field label="뒷표지 부서명"><input value={input.dept} onChange={(e) => set('dept', e.target.value)} /></Field>
+          <Field label="연락처" hint="직접 입력한 경우에만 표시합니다. 이 브라우저에만 저장됩니다."><textarea rows={3} value={input.contacts} onChange={(e) => set('contacts', e.target.value)} /></Field>
+        </div>
+      </>
+    ),
+  };
+  const tabLabel = (t: Tab) => TABS.find((x) => x[0] === t)![1];
+  const tabMeta: Partial<Record<Tab, string>> = {
+    peers: `${input.compareKeys.length}/3`,
+    toc: `${slides.length}장`,
+    text: mode === 'rule' ? '' : mode === 'ai' ? 'AI' : '수정',
+  };
 
   return (
     <div className="dk">
@@ -228,186 +428,46 @@ export function DeckStudio({ corp }: { corp: string }) {
         </div>
         <div className="dk-actions">
           <span className="dk-ai">
-            <button type="button" className="btn btn-ghost" onClick={runAi} disabled={!!busy}>
+            <button type="button" className="btn dk-cta" onClick={runAi} disabled={!!busy} aria-busy={busy === 'ai'}>
               {busy === 'ai' ? '노하우 반영 중…' : mode === 'ai' ? '노하우 다시 반영(AI)' : '노하우 반영(AI)'}
             </button>
             <Info>기본 문안은 공시·금리 숫자로 규칙이 만듭니다. 이 버튼은 현업 노하우(이 회사 등급·켠 장표에 맞는 것)를 더해 AI가 판단 문장을 고칩니다. 사실에 없는 숫자나 출처 없는 시장 전망이 든 줄은 규칙 문안으로 되돌립니다. 회사명·조건·숫자가 OpenAI로 전송되고, 결과는 이 브라우저에만 저장됩니다.</Info>
           </span>
-          <button type="button" className="btn" onClick={() => exportAs('pptx')} disabled={!!busy}>{busy === 'pptx' ? 'PPTX 만드는 중…' : 'PPTX 내려받기'}</button>
-          <button type="button" className="btn" onClick={() => exportAs('pdf')} disabled={!!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF 내려받기'}</button>
+          <button type="button" className="btn btn-ghost" onClick={() => exportAs('pptx')} disabled={!!busy}>{busy === 'pptx' ? 'PPTX 만드는 중…' : 'PPTX'}</button>
+          <button type="button" className="btn btn-ghost" onClick={() => exportAs('pdf')} disabled={!!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF'}</button>
         </div>
       </div>
-      <p className="dk-status small" role="status">
-        <span className={`dk-mode m-${mode}`}>{mode === 'rule' ? '규칙 문안' : mode === 'ai' ? '노하우 반영 문안' : '직접 고친 문안'}</span>
-        {stale && <span className="dk-stale">조건이 바뀌었습니다. 문안을 다시 만들거나 확인하세요.</span>}
-        {note && <span>{note}</span>}
-        {savedAt && <span className="muted">이 브라우저에 저장됨 {new Date(savedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>}
-      </p>
 
-      <div className="dk-layout">
-        <form className="dk-form" onSubmit={(e) => e.preventDefault()} aria-label="제안 조건">
-          <details open>
-            <summary>기본 정보</summary>
-            <Field label="회사명 표기"><input value={input.issuer} onChange={(e) => set('issuer', e.target.value)} /></Field>
-            <Field label="표지 제목"><input value={input.coverTitle} onChange={(e) => set('coverTitle', e.target.value)} /></Field>
-            <div className="dk-row">
-              <Field label="회차"><input value={input.series} onChange={(e) => set('series', e.target.value)} inputMode="numeric" /></Field>
-              <Field label="제안 월"><input value={input.month} onChange={(e) => set('month', e.target.value)} placeholder="2026. 11" /></Field>
+      <div className="dk-tabbar">
+        <nav className="dk-tabs" aria-label="고칠 항목">
+          {TABS.map(([t, label]) => (
+            <button key={t} type="button" className="dk-tab" aria-pressed={tab === t} aria-controls="dk-panel" onClick={() => toggle(t)}>
+              {label}{tabMeta[t] && <span className="dk-tab-meta">{tabMeta[t]}</span>}
+            </button>
+          ))}
+        </nav>
+        <p className="dk-status small" role="status">
+          {stale && <span className="dk-stale">조건이 바뀌었습니다. 문안을 다시 만들거나 확인하세요.</span>}
+          {note && <span>{note}</span>}
+          {savedAt && !note && !stale && <span className="muted">이 브라우저에 저장됨 {new Date(savedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>}
+        </p>
+      </div>
+
+      <div className={`dk-work${tab ? ' has-panel' : ''}`}>
+        <Rail slides={slides} cur={at} setCur={setCur} />
+        <Stage slides={slides} cur={at} setCur={setCur} busy={busy === 'ai'}
+          edit={targets.map((x) => ({ label: x.label, go: () => open(x.tab, x.anchor) }))} />
+        {tab && (
+          <aside className="dk-panel" id="dk-panel" aria-label={tabLabel(tab)}>
+            <div className="dk-panel-h">
+              <h3>{tabLabel(tab)}</h3>
+              <button type="button" className="dk-x" aria-label="닫기" onClick={() => setTab(null)}>×</button>
             </div>
-            <div className="dk-row">
-              <Field label="신용등급"><input value={input.rating} onChange={(e) => set('rating', e.target.value)} /></Field>
-              <Field label="등급 비고"><input value={input.ratingNote} onChange={(e) => set('ratingNote', e.target.value)} /></Field>
-            </div>
-          </details>
-
-          <details open>
-            <summary>발행 조건</summary>
-            <Tranches input={input} set={set} />
-            <Field label="이자지급">
-              <select value={input.coupon} onChange={(e) => set('coupon', e.target.value)}>
-                {['3개월 이표채', '월단위 이표채', '6개월 이표채', '만기일시'].map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </Field>
-            <Field label="금리 밴드">
-              <select value={input.band.type} onChange={(e) => set('band', { ...input.band, type: e.target.value as DeckInput['band']['type'] })}>
-                <option value="later">추후 결정</option>
-                <option value="fixed">고정금리(%)</option>
-                <option value="spread">개별민평(bp)</option>
-              </select>
-            </Field>
-            {input.band.type !== 'later' && (
-              <div className="dk-row">
-                <Field label={input.band.type === 'fixed' ? '하단(%)' : '하단(bp)'}><NumIn v={input.band.low} on={(v) => set('band', { ...input.band, low: v })} step="any" /></Field>
-                <Field label={input.band.type === 'fixed' ? '상단(%)' : '상단(bp)'}><NumIn v={input.band.high} on={(v) => set('band', { ...input.band, high: v })} step="any" /></Field>
-              </div>
-            )}
-            <Field label="밴드 비고"><input value={input.bandNote} onChange={(e) => set('bandNote', e.target.value)} /></Field>
-            <Field label="인수희망금액"><input value={input.uw} onChange={(e) => set('uw', e.target.value)} /></Field>
-            <div className="dk-row">
-              <Field label="인수수수료(bp)"><NumIn v={input.feeUw} on={(v) => set('feeUw', v)} step="any" /></Field>
-              <Field label="대표주관수수료(bp)"><NumIn v={input.feeLead} on={(v) => set('feeLead', v)} step="any" /></Field>
-            </div>
-            <Field label="수수료 비고"><input value={input.feeNote} onChange={(e) => set('feeNote', e.target.value)} /></Field>
-          </details>
-
-          <details open>
-            <summary>일정</summary>
-            <Field label="희망 납입일"><input type="date" value={input.pay} onChange={(e) => set('pay', e.target.value)} /></Field>
-            {sch && (
-              <>
-                <fieldset className="dk-radios">
-                  <legend>수요예측일</legend>
-                  {sch.demandOptions.map((d2, i) => (
-                    <label key={d2}>
-                      <input type="radio" name="demand" checked={sch.demand === d2} onChange={() => set('demand', d2)} />
-                      {mdw(d2)} <span className="muted small">{['7', '6', '5'][i]}영업일 전</span>
-                    </label>
-                  ))}
-                </fieldset>
-                <ul className="dk-sched small">
-                  <li><span>대표주관계약</span>{mdw(sch.leadContract)}</li>
-                  <li><span>증권신고서</span>{mdw(sch.filing)}</li>
-                  <li><span>조건확정 정정</span>{mdw(sch.condFix)}</li>
-                  <li><span>납입</span><strong>{mdw(sch.pay)}</strong></li>
-                </ul>
-                {sch.warnings.map((w) => <p key={w} className="dk-warn small">{w}</p>)}
-              </>
-            )}
-          </details>
-
-          <details open>
-            <summary>
-              비교 사례 <span className="muted small">표 {input.peerKeys.length} · 비교 {input.compareKeys.length}/3</span>
-            </summary>
-            <div className="seg dk-seg" role="group" aria-label="사례 범위">
-              {(['group', 'notch'] as const).map((s) => (
-                <button key={s} type="button" aria-pressed={input.peerScope === s} onClick={() => set('peerScope', s)}>
-                  {s === 'group' ? `${data.company.rating_group ?? ''}등급 전체` : `${data.company.rating ?? ''}만`}
-                </button>
-              ))}
-            </div>
-            <div className="dk-peers" role="table" aria-label="같은 등급 최근 1년 공모 회사채">
-              <div role="row" className="dk-peer dk-peer-h small">
-                <span role="columnheader">표</span><span role="columnheader">비교</span><span role="columnheader">발행사</span><span role="columnheader">수요예측</span><span role="columnheader">경쟁률</span>
-              </div>
-              {pool.map((p) => {
-                const inT = input.peerKeys.includes(p.key);
-                const inC = input.compareKeys.includes(p.key);
-                return (
-                  <div role="row" key={p.key} className={`dk-peer${p.corp_code === data.company.corp_code ? ' is-self' : ''}`}>
-                    <span role="cell"><input type="checkbox" aria-label={`${p.corp_name} 표에 넣기`} checked={inT} onChange={() => set('peerKeys', inT ? input.peerKeys.filter((k) => k !== p.key) : [...input.peerKeys, p.key])} /></span>
-                    <span role="cell"><input type="checkbox" aria-label={`${p.corp_name} 비교 장표에 넣기`} checked={inC} disabled={!inC && input.compareKeys.length >= 3} onChange={() => set('compareKeys', inC ? input.compareKeys.filter((k) => k !== p.key) : [...input.compareKeys, p.key])} /></span>
-                    <span role="cell" title={`${p.rating ?? ''} ${p.tenor_combo} ${eok(p.amount_krw)}억 ${p.tranches.map((t) => rate3(t.yield_pct)).join('/')} ${p.band_low != null ? bandRange(p) : ''}`}>
-                      {p.corp_name} <span className="muted">{p.rating} {p.tenor_combo}</span>
-                    </span>
-                    <span role="cell" className="tnum">{p.demand_dt ? mdw(p.demand_dt) : yy(p.deal_dt)}</span>
-                    <span role="cell" className={`tnum${p.under ? ' neg' : ''}`}>{ratioX(p.ratio)}</span>
-                  </div>
-                );
-              })}
-              {!pool.length && <p className="empty small">최근 1년 같은 등급 발행이 없습니다.</p>}
-            </div>
-          </details>
-
-          <Toc data={data} input={input} set={set} />
-
-          <details>
-            <summary>
-              문안 <Info>한 줄이 글머리 하나입니다. **굵게+밑줄**, !!빨강!! 표기를 쓸 수 있습니다. 숫자는 공시·금리 데이터 값이므로 고칠 때 원문을 확인하세요.</Info>
-            </summary>
-            <Tips list={myTips} slide="all" />
-            <Field label="주요 제안 첫 문장">
-              <textarea rows={3} value={shownText.lead} onChange={(e) => editText('lead', e.target.value)} />
-            </Field>
-            {TEXT_FIELDS.filter((f) => input.items[f.item]).map((f) => (
-              <div key={f.key}>
-                <Field label={f.label}>
-                  <textarea rows={Math.min(8, (shownText[f.key] as string[]).length + 1)} value={(shownText[f.key] as string[]).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
-                </Field>
-                <Tips list={myTips} slide={f.item as KnowledgeSlide} />
-              </div>
-            ))}
-            {input.items.terms && (
-              <fieldset className="dk-notes">
-                <legend className="dk-label">발행조건 표 비고</legend>
-                {TERM_NOTES.map(([k, label]) => (
-                  <label key={k} className="dk-note-row">
-                    <span className="small muted">{label}</span>
-                    <input value={shownText.termNotes[k]} onChange={(e) => editText('termNotes', { ...shownText.termNotes, [k]: e.target.value })} />
-                  </label>
-                ))}
-              </fieldset>
-            )}
-            {input.items.strength && shownText.strengths.map((s, i) => (
-              <div key={`st-${i}`} className="dk-row">
-                <Field label={`강점 ${i + 1} 제목`}><input value={s.title} onChange={(e) => editText('strengths', shownText.strengths.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} /></Field>
-                <Field label="내용"><input value={s.text} onChange={(e) => editText('strengths', shownText.strengths.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} /></Field>
-              </div>
-            ))}
-            {mode !== 'rule' && <button type="button" className="linklike small" onClick={() => { setMode('rule'); setText(null); setFactsKey(null); }}>규칙 문안으로 되돌리기</button>}
-          </details>
-
-          <details>
-            <summary>
-              내부 자료 <Info>공시로 구할 수 없는 표를 엑셀에서 복사해 붙여넣으면 장표에 그대로 들어갑니다. 첫 줄은 머리글, 첫 열은 항목입니다. 이 브라우저에만 저장되고 AI 문안 요청에는 보내지 않습니다.</Info>
-            </summary>
-            {INTERNAL.map(([k, label, where]) => (
-              <Field key={k} label={label} hint={where}>
-                <textarea rows={3} className="dk-tsv" placeholder="엑셀에서 표를 복사해 붙여넣기" value={input.internal[k]} onChange={(e) => set('internal', { ...input.internal, [k]: e.target.value })} />
-              </Field>
-            ))}
-          </details>
-
-          <details>
-            <summary>뒷표지</summary>
-            <Field label="부서명"><input value={input.dept} onChange={(e) => set('dept', e.target.value)} /></Field>
-            <Field label="연락처" hint="직접 입력한 경우에만 표시합니다. 이 브라우저에만 저장됩니다."><textarea rows={3} value={input.contacts} onChange={(e) => set('contacts', e.target.value)} /></Field>
-          </details>
-
-          <p className="small"><button type="button" className="linklike" onClick={reset}>입력값 처음으로</button></p>
-        </form>
-
-        <Preview slides={slides} />
+            <form className="dk-form" onSubmit={(e) => e.preventDefault()} aria-label={tabLabel(tab)}>
+              {panel[tab]}
+            </form>
+          </aside>
+        )}
       </div>
     </div>
   );
@@ -494,8 +554,8 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
   };
   const staticOn = (['ir', 'nh_org'] as ItemId[]).some((id) => on[id]);
   return (
-    <details open>
-      <summary>목차 <span className="muted small">{count}개 항목</span></summary>
+    <>
+      <p className="small muted dk-count">{count}개 항목</p>
       <ul className="dk-toc">{FRONT.map((i) => row(i))}</ul>
       {SECTIONS.map((sec) => (
         <fieldset key={sec.key} className="dk-toc-sec">
@@ -519,7 +579,7 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
         </Field>
       )}
       <p className="small"><button type="button" className="linklike" onClick={() => set('items', defaultItems())}>기본 목차로</button></p>
-    </details>
+    </>
   );
 }
 
@@ -527,24 +587,110 @@ function NumIn({ v, on, step }: { v: number | null; on: (v: number | null) => vo
   return <input type="number" inputMode="decimal" step={step ?? '1'} value={v ?? ''} onChange={(e) => on(e.target.value === '' ? null : Number(e.target.value))} />;
 }
 
-function Preview({ slides }: { slides: ReturnType<typeof buildSlides> }) {
-  const ref = useRef<HTMLDivElement>(null);
+// 장표별 고치기 바로가기: 조건이 바뀌는 장표는 해당 탭, 요약 상자는 문안 칸으로
+const TEXT_OF: Record<string, string> = {
+  sizing: 'sizing', sales: 'sales', pipeline: 'pipeline', rates: 'rates', bok: 'bok', fomc: 'fomc', views: 'views', usviews: 'usviews',
+  forecast: 'forecast', peers: 'peers', compare: 'compare', corp: 'corp', league: 'league', strength: 'strengths', maturity: 'maturity', schedule: 'schedule', terms: 'structure',
+};
+function editTargets(id: string): { tab: Tab; anchor?: string; label: string }[] {
+  const base = id.replace(/-\d+$/, '');
+  const out: { tab: Tab; anchor?: string; label: string }[] = [];
+  if (base === 'cover') out.push({ tab: 'cover', label: '표지 고치기' });
+  if (base === 'back') out.push({ tab: 'cover', anchor: 'dk-a-back', label: '뒷표지 고치기' });
+  if (base === 'contents' || base.startsWith('folder')) out.push({ tab: 'toc', label: '목차 고치기' });
+  if (base === 'terms') out.push({ tab: 'terms', label: '발행 조건 고치기' });
+  if (base === 'schedule') out.push({ tab: 'schedule', label: '일정 고치기' });
+  if (base === 'peers' || base === 'compare') out.push({ tab: 'peers', label: '사례 고르기' });
+  if (base === 'sales' || base === 'forecast' || base === 'sizing') out.push({ tab: 'internal', label: '내부 자료 붙여넣기' });
+  if (TEXT_OF[base]) out.push({ tab: 'text', anchor: `dk-t-${TEXT_OF[base]}`, label: '문안 고치기' });
+  return out;
+}
+
+function Loading() {
+  return (
+    <div className="dk dk-loading" aria-busy="true">
+      <div className="dk-skel"><span>공시·금리 데이터를 모아 장표를 만드는 중…</span></div>
+    </div>
+  );
+}
+
+// 왼쪽 장표 목록(썸네일)
+function Rail({ slides, cur, setCur }: { slides: Slide[]; cur: number; setCur: (i: number) => void }) {
+  const ref = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    ref.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [cur]);
+  return (
+    <ol className="dk-rail" ref={ref} aria-label="장표 목록">
+      {slides.map((s, i) => (
+        <li key={`${s.id}-${i}`}>
+          <button type="button" aria-current={i === cur} aria-label={`${i + 1}. ${s.title}`} onClick={() => setCur(i)}>
+            <span className="dk-rail-no tnum" aria-hidden>{i + 1}</span>
+            <SlideView slide={s} width={128} />
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// 가운데 큰 장표: 화면 높이에 맞춰 키우고, ←·→ 로 넘긴다
+function Stage({ slides, cur, setCur, edit, busy }: { slides: Slide[]; cur: number; setCur: (i: number) => void; edit: { label: string; go: () => void }[]; busy: boolean }) {
+  const ref = useRef<HTMLElement>(null);
   const [w, setW] = useState(720);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setW(Math.max(280, el.clientWidth)));
+    // 안쪽 폭(여백 제외)과 화면 높이(머리말·아래 줄 제외) 안에 들어가게
+    const fit = () => {
+      const cs = getComputedStyle(el);
+      const inner = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const maxH = Math.max(280, window.innerHeight - 330);
+      setW(Math.max(240, Math.floor(Math.min(inner, (maxH * PAGE.w) / PAGE.h))));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener('resize', fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', fit);
+    };
   }, []);
+  const n = slides.length;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest('input, textarea, select, [contenteditable="true"]') || e.altKey || e.metaKey || e.ctrlKey)) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') setCur(Math.min(n - 1, cur + 1));
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') setCur(Math.max(0, cur - 1));
+      else if (e.key === 'Home') setCur(0);
+      else if (e.key === 'End') setCur(n - 1);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cur, n, setCur]);
+  const s = slides[cur];
   return (
-    <section className="dk-preview" ref={ref} aria-label="미리보기">
-      {slides.map((s, i) => (
-        <figure key={`${s.id}-${i}`} className="dk-fig">
-          <SlideView slide={s} width={w} />
-          <figcaption className="small muted">{i + 1}. {s.title}</figcaption>
-        </figure>
-      ))}
+    <section className="dk-stage" ref={ref} aria-label="장표 보기">
+      <div className={`dk-stage-frame${busy ? ' is-busy' : ''}`} style={{ width: w }}>
+        {s && <SlideView slide={s} width={w} />}
+      </div>
+      <div className="dk-stage-foot" style={{ width: w }}>
+        <div className="dk-nav">
+          <button type="button" aria-label="이전 장표" disabled={cur <= 0} onClick={() => setCur(cur - 1)}>‹</button>
+          <span className="tnum" aria-live="polite">{n ? cur + 1 : 0} / {n}</span>
+          <button type="button" aria-label="다음 장표" disabled={cur >= n - 1} onClick={() => setCur(cur + 1)}>›</button>
+          <span className="dk-stage-title">{s?.title}</span>
+        </div>
+        {!!edit.length && (
+          <div className="dk-stage-edit small">
+            {edit.map((x) => <button key={x.label} type="button" className="linklike" onClick={x.go}>{x.label}</button>)}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
