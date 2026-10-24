@@ -12,7 +12,7 @@ export * from './lib/deck/validate';
 export * from './lib/deck/rules';
 export * from './lib/deck/model';
 export { buildSlides, fileBase, staticSubs, available, parseTsv } from './lib/deck/layout';
-export { mixOf, valueAt, meetingVolatility, notchStats, typedIssues, pp } from './lib/deck/analytics';
+export { mixOf, valueAt, meetingVolatility, notchStats, typedIssues, pp, tenorDemand } from './lib/deck/analytics';
 export { planOf, defaultItems } from './lib/deck/catalog';
 export { assemble } from './lib/deck/assemble';
 export { PAGE } from './lib/deck/theme';
@@ -114,6 +114,15 @@ const check = (name, cond, detail = '') => {
   check('장표: 내부 자료 붙여넣기 → 회사채 전망 2쪽', fx.some((s) => s.id === 'forecast-2'));
   const typed = m.typedIssues(d.own, 4);
   check('장표: 투자자 구분은 수집된 회차만 집계·회차 표기', typed.list.length >= 1 && typed.list.every((p) => p.tranches.some((t) => t.byType?.length)) && tx.sales.some((x) => x.includes(typed.label)), `${typed.label} | ${tx.sales[0]}`);
+  {
+    // 경쟁률은 작은 2년물이 높고 참여금액은 3년물이 많은 경우(LG헬로비전 제12~15회 형태) → 3년물 중심 판단
+    const tr = (tenor, init, dem) => ({ tenor, initial_krw: init * 1e8, demand_krw: dem * 1e8, ratio: dem / init, byType: null });
+    const own = [{ ...d.own[0], series: '15', tranches: [tr('2년', 300, 2200), tr('3년', 1200, 3450)] }, { ...d.own[0], series: '13', tranches: [tr('2년', 200, 2100), tr('3년', 800, 9500)] }];
+    const st = m.tenorDemand(own, 4);
+    const tx2 = m.ruleText({ ...d, own }, inp);
+    const line = tx2.sizing.find((x) => /평균 경쟁률/.test(x) && /트랜치|중심/.test(x)) ?? '';
+    check('문안: 만기 판단은 경쟁률과 참여금액을 함께 봄', st.length === 2 && /3년물 중심/.test(line) && /2년물은 보조 트랜치/.test(line), line);
+  }
   check('장표: %p 차이 -0.0 없음', m.pp(-0.03) === '0.0' && m.pp(0.26) === '+0.3' && m.pp(-8.24) === '-8.2');
   check('장표: 레이아웃(표지·목차·간지·본문·뒷표지)', slides[0].layout === 'cover' && slides[1].layout === 'contents' && slides[2].layout === 'folder' && slides[3].layout === 'body' && slides.at(-1).layout === 'back');
   check('장표: 표지 제목에 다음 회차', slides[0].prims.some((p) => p.k === 'text' && p.paras.some((x) => x.runs.some((r) => /제112회 공모사채 발행 검토 및 제안/.test(r.t)))));

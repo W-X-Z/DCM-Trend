@@ -25,6 +25,23 @@ export function typedIssues(ps: PeerIssue[], n: number) {
   return { list, label: list.length ? `제${list.map((p) => p.series ?? '?').join('·')}회` : '', trs: list.flatMap((p) => p.tranches.filter((t) => t.byType?.length)) };
 }
 
+// 회사 최근 n회 만기별 수요: 평균 경쟁률·참여금액 합·평균 신고금액.
+// 신고금액이 작은 만기는 경쟁률이 부풀어 보이므로 판단은 참여금액과 함께 본다.
+export function tenorDemand(own: PeerIssue[], n = 4) {
+  const by = new Map<string, { ratios: number[]; demand: number; init: number; n: number }>();
+  for (const p of own.slice(0, n)) for (const t of p.tranches) {
+    const e = by.get(t.tenor) ?? { ratios: [], demand: 0, init: 0, n: 0 };
+    if (t.ratio != null) e.ratios.push(t.ratio);
+    e.demand += t.demand_krw ?? 0;
+    e.init += t.initial_krw ?? 0;
+    e.n++;
+    by.set(t.tenor, e);
+  }
+  return [...by.entries()].filter(([, e]) => e.ratios.length).map(([k, e]) => ({
+    k, avg: e.ratios.reduce((a, b) => a + b, 0) / e.ratios.length, demand: e.demand, initAvg: e.init / e.n, n: e.n,
+  }));
+}
+
 // %p 차이 표기: -0.0 을 0.0 으로
 export const pp = (v: number) => {
   const r = Math.round(v * 10) / 10 || 0;
