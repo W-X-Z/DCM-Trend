@@ -61,6 +61,20 @@ export async function select<T>(view: string, query: Query = {}): Promise<T[]> {
   return res.json();
 }
 
+// 화면에서 바로 고치는 데이터(제안서 노하우 등): 데이터 버전과 무관하게 바뀌므로 캐시하지 않는다
+export async function selectFresh<T>(view: string, query: Query = {}): Promise<T[]> {
+  assertEnv();
+  const url = new URL(`${URL_BASE}/rest/v1/${view}`);
+  url.searchParams.set('select', String(query.select ?? '*'));
+  for (const [k, v] of Object.entries(query)) {
+    if (k === 'select' || v === undefined) continue;
+    url.searchParams.append(k, String(v));
+  }
+  const res = await fetch(url, { headers: headers({ 'Accept-Profile': 'mart' }), cache: 'no-store' });
+  if (!res.ok) throw new DbError(`${view} 조회 실패 (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
 // 1,000행 제한(PostgREST max-rows)을 넘는 조회: offset 으로 나눠 받는다
 export async function selectAll<T>(view: string, query: Query = {}, pageSize = 1000, maxRows = 20000): Promise<T[]> {
   const out: T[] = [];

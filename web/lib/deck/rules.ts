@@ -3,7 +3,7 @@
 import { bandText, bpS, eok, eokW, mdw, ratioX, rate2, rate3, shortFirm, tenorYears, yy, yymmdd } from './fmt';
 import { BizCal, buildSchedule, korDate, type Schedule } from './schedule';
 import { defaultItems } from './catalog';
-import { meetingVolatility, mixOf, notchStats, spreadVsKtb, typedIssues, yearsOf } from './analytics';
+import { meetingVolatility, mixOf, notchStats, spreadVsKtb, tenorDemand, typedIssues, yearsOf } from './analytics';
 import type { DeckData, DeckInput, DeckText, PeerIssue, TermNotes } from './types';
 
 const median = (xs: (number | null | undefined)[]) => {
@@ -278,21 +278,18 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   const ownInc = d.own.slice(0, 4).filter((p) => p.increased);
   if (ownInc.length) sizing.push(`최근 4회 중 ${ownInc.length}회 증액 발행(${ownInc.map((p) => `제${p.series ?? ''}회 ${eokW(p.initial_krw)} → ${eokW(p.amount_krw)}`).join(', ')})`);
   if (d.combos[0]) sizing.push(`최근 6개월 ${d.company.rating_group ?? ''}등급은 ${d.combos[0].combo} 구조가 가장 많음(${d.combos[0].issues}건)`);
-  // 만기별 수요: 회사 최근 발행의 트랜치별 경쟁률·참여금액
-  const ownTr = d.own.slice(0, 4).flatMap((p) => p.tranches.map((t) => ({ p, t })));
-  const byTenor = new Map<string, { ratios: number[]; demand: number; n: number }>();
-  for (const { t } of ownTr) {
-    const k = t.tenor;
-    const e = byTenor.get(k) ?? { ratios: [], demand: 0, n: 0 };
-    if (t.ratio != null) e.ratios.push(t.ratio);
-    e.demand += t.demand_krw ?? 0;
-    e.n++;
-    byTenor.set(k, e);
-  }
-  const tenorStats = [...byTenor.entries()].filter(([, e]) => e.ratios.length).map(([k, e]) => ({ k, avg: e.ratios.reduce((a, b) => a + b, 0) / e.ratios.length, n: e.n }));
+  // 만기별 수요: 경쟁률이 높아도 신고금액이 작으면 수요 규모는 작다 → 참여금액과 함께 판단
+  const tenorStats = tenorDemand(d.own, 4);
   if (tenorStats.length >= 2) {
-    const best = tenorStats.reduce((a, b) => (a.avg >= b.avg ? a : b));
-    sizing.push(`최근 4회 만기별 평균 경쟁률 ${tenorStats.map((x) => `${x.k} ${ratioX(x.avg)}`).join(', ')}로 **${best.k}물 수요가 가장 견조**하여 ${best.k}물 중심 구성이 적합하다고 판단`);
+    const byRatio = tenorStats.reduce((a, b) => (a.avg >= b.avg ? a : b));
+    const byDemand = tenorStats.reduce((a, b) => (a.demand >= b.demand ? a : b));
+    // 문장 길이: 참여금액 상위 3개 만기만 적는다
+    const top = [...tenorStats].sort((a, b) => b.demand - a.demand).slice(0, 3);
+    if (byRatio.k === byDemand.k) {
+      sizing.push(`최근 4회 만기별 평균 경쟁률 ${top.map((x) => `${x.k} ${ratioX(x.avg)}`).join(', ')}, 참여금액 ${top.map((x) => `${x.k} ${eokW(x.demand)}`).join(', ')}으로 **${byDemand.k}물 수요가 가장 견조**하여 ${byDemand.k}물 중심 구성이 적합하다고 판단`);
+    } else {
+      sizing.push(`최근 4회 ${byRatio.k}물 평균 경쟁률이 ${ratioX(byRatio.avg)}로 가장 높으나(평균 신고 ${eokW(byRatio.initAvg)}) 참여금액은 ${byDemand.k}물 ${eokW(byDemand.demand)}, ${byRatio.k}물 ${eokW(byRatio.demand)}으로 **${byDemand.k}물 중심**에 ${byRatio.k}물은 보조 트랜치로 두는 구성이 적합하다고 판단`);
+    }
   }
   const typed = typedIssues(d.own, 4);
   const mix = mixOf(typed.trs);
@@ -495,11 +492,7 @@ export function factsFor(d: DeckData, inp: DeckInput) {
     수요예측예정합계: { 건수: d.pipeline.length, 금액: eokW(d.pipeline.reduce((t, p) => t + p.tranches.reduce((a, x) => a + (x.initial_krw ?? 0), 0), 0)) },
     수요예측예정: d.pipeline.map((p) => ({ 회사: p.corp_name, 등급: p.rating, 수요예측일: p.demand_dt ? mdw(p.demand_dt) : null, 납입일: p.pay_dt ? mdw(p.pay_dt) : null, 트랜치: p.tranches.map((t) => `${t.tenor} ${eokW(t.initial_krw)}`) })),
     연간리그테이블: d.leagueYearly.map((y) => ({ 연도: y.ytd ? `${y.year}(누적)` : y.year, NH: y.lead.find((x) => x.isNh) && { 순위: y.lead.find((x) => x.isNh)!.rank, 금액: eokW(y.lead.find((x) => x.isNh)!.krw), 점유율: `${y.lead.find((x) => x.isNh)!.share.toFixed(1)}%` } })),
-    만기별평균경쟁률: (() => {
-      const by = new Map<string, number[]>();
-      for (const p of d.own.slice(0, 4)) for (const t of p.tranches) if (t.ratio != null) by.set(t.tenor, [...(by.get(t.tenor) ?? []), t.ratio]);
-      return [...by.entries()].map(([k, xs]) => `${k} ${ratioX(xs.reduce((a, b) => a + b, 0) / xs.length)}`);
-    })(),
+    만기별수요_최근4회: tenorDemand(d.own, 4).map((x) => ({ 만기: x.k, 평균경쟁률: ratioX(x.avg), 참여금액합: eokW(x.demand), 평균신고: eokW(x.initAvg), 트랜치수: x.n })),
     최근3회평균참여: (() => {
       const xs = d.own.slice(0, 3).filter((p) => p.demand_krw != null);
       return xs.length ? eokW(xs.reduce((t, p) => t + Number(p.demand_krw), 0) / xs.length) : null;

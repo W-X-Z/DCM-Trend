@@ -244,6 +244,34 @@ await check('피드백: 앞뒤 공백 정리·한국 시간 보기',
   `select kind_label || '|' || body || '|' || author || '|' || page from ops.v_feedback where client_id = 'c1' and kind_label = '개선 의견'`,
   '개선 의견|만기 화면에 풋 금액도 보여 주세요|인더스트리1부|/maturities', one);
 
+// 9. 제안서 노하우: anon 이 읽고 쓰기, 변경 이력, 삭제는 숨김 ------------------
+await db.exec('set role anon');
+await check('노하우: 초기값 12개를 anon 이 읽음', `select count(*)::int from mart.v_deck_knowledge`, 12, one);
+await check('노하우: 추가',
+  `select mart.save_deck_knowledge(null, 'schedule', 'judge', 'AA', '  금리확정일이 금통위와 겹치면 하루 옮긴다  ', '현업', '홍길동', 'k1') > 0`, true, one);
+await check('노하우: 앞뒤 공백 정리', `select body || '|' || grade || '|' || updated_by from mart.v_deck_knowledge where source = '현업'`,
+  '금리확정일이 금통위와 겹치면 하루 옮긴다|AA|홍길동', one);
+await check('노하우: 수정은 이력에 전후 값',
+  `select mart.save_deck_knowledge((select id from mart.v_deck_knowledge where source = '현업'), 'schedule', 'judge', null, '금리확정일이 금통위·FOMC와 겹치면 하루 옮긴다', '현업', '김철수', 'k1') > 0`, true, one);
+await check('노하우: 이력(수정)',
+  `select (before->>'grade') || '|' || coalesce(after->>'grade', 'null') || '|' || author from mart.v_deck_knowledge_log where action = 'update' limit 1`,
+  'AA|null|김철수', one);
+await check('노하우: 같은 값으로 저장하면 이력 없음',
+  `select mart.save_deck_knowledge((select id from mart.v_deck_knowledge where source = '현업'), 'schedule', 'judge', null, '금리확정일이 금통위·FOMC와 겹치면 하루 옮긴다', '현업', '김철수', 'k1'),
+          (select count(*)::int from mart.v_deck_knowledge_log)`, 2, (rows) => rows[0].count);
+await db.query(`select mart.delete_deck_knowledge((select id from mart.v_deck_knowledge where source = '현업'), '김철수', 'k1')`);
+await check('노하우: 삭제하면 목록에서 빠짐', `select count(*)::int from mart.v_deck_knowledge where source = '현업'`, 0, one);
+await check('노하우: 삭제 이력에 삭제 표시', `select is_deleted from mart.v_deck_knowledge_log where action = 'delete' limit 1`, true, one);
+await db.query(`select mart.restore_deck_knowledge((select knowledge_id from mart.v_deck_knowledge_log where action = 'delete' limit 1), '김철수', 'k1')`);
+await check('노하우: 삭제 항목 되살리기', `select count(*)::int from mart.v_deck_knowledge where source = '현업'`, 1, one);
+await check('노하우: 잘못된 장표는 거절', `select mart.save_deck_knowledge(null, 'cover', 'judge', null, '내용 다섯 글자', null)`, 'ERROR: invalid slide');
+await check('노하우: 너무 짧은 내용은 거절', `select mart.save_deck_knowledge(null, 'all', 'judge', null, '짧음', null)`, 'ERROR: invalid body');
+await check('노하우: 없는 항목 수정은 거절', `select mart.save_deck_knowledge(999999, 'all', 'judge', null, '내용 다섯 글자', null)`, 'ERROR: not found');
+await check('노하우: anon 은 원본 테이블 직접 쓰기 불가', `update ops.deck_knowledge set body = 'x'`, 'permission denied', () => 'allowed');
+results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');
+if (results[results.length - 1].ok) failed--;
+await db.exec('reset role');
+
 // 결과 출력 -------------------------------------------------------------
 for (const r of results) {
   const mark = r.ok ? 'PASS' : 'FAIL';
