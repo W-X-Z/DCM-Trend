@@ -10,6 +10,7 @@
   --accent: #0f6e6e;
   --accent-ink: #0b5555;
   --accent-soft: #e3efee;
+  --canvas: #e7eaef;
   --alert: #b42318;
   --alert-soft: #fdecea;
   --bond: #2a78d6;
@@ -4608,4 +4609,352 @@ table.data th.col-cta {
 .dk-links {
   display: flex;
   gap: 14px;
+}
+
+
+/* 제안서 만들기: 장표가 먼저, 고칠 항목은 탭 → 오른쪽 패널 ------------------- */
+.deck-page.is-studio {
+  max-width: 1480px;
+}
+
+.dk-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 14px 0 6px;
+}
+
+.dk-crumbs a {
+  color: var(--muted);
+}
+
+.dk-cta {
+  font-size: var(--s0);
+  padding: 9px 18px;
+}
+
+.dk-actions .btn-ghost {
+  font-size: var(--s-1);
+  padding: 8px 13px;
+}
+
+.dk-bar {
+  border-bottom: 0;
+  padding-bottom: 6px;
+}
+
+.dk-tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.dk-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dk-tab {
+  font: inherit;
+  font-size: var(--s-1);
+  color: var(--ink-2);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 10px 11px 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dk-tab:hover {
+  color: var(--ink);
+}
+
+.dk-tab[aria-pressed='true'] {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.dk-tab-meta {
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.dk-tabbar .dk-status {
+  margin: 0 0 0 auto;
+  min-height: 0;
+  padding: 6px 0;
+}
+
+.dk-work {
+  display: grid;
+  grid-template-columns: 158px minmax(0, 1fr);
+  align-items: start;
+  background: var(--canvas);
+  border: 1px solid var(--rule);
+  border-top: 0;
+  min-height: calc(100vh - 230px);
+}
+
+.dk-work.has-panel {
+  grid-template-columns: 158px minmax(0, 1fr) 380px;
+}
+
+.dk-rail {
+  list-style: none;
+  margin: 0;
+  padding: 14px 10px 14px 8px;
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border-right: 1px solid var(--rule);
+}
+
+.dk-rail li + li {
+  margin-top: 10px;
+}
+
+.dk-rail button {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.dk-rail-no {
+  width: 16px;
+  padding-top: 1px;
+  font-size: 11px;
+  text-align: right;
+  color: var(--muted);
+}
+
+.dk-rail .dk-slide {
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  pointer-events: none;
+}
+
+.dk-rail button:hover .dk-slide {
+  outline-color: var(--rule-strong);
+}
+
+.dk-rail button[aria-current='true'] .dk-slide {
+  outline-color: var(--accent);
+}
+
+.dk-rail button[aria-current='true'] .dk-rail-no {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.dk-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding: 22px 22px 18px;
+}
+
+.dk-stage-frame {
+  position: relative;
+}
+
+.dk-stage-frame .dk-slide {
+  box-shadow: 0 1px 2px rgb(20 33 61 / 0.12), 0 8px 24px rgb(20 33 61 / 0.1);
+}
+
+.dk-stage-frame.is-busy::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(255 255 255 / 0.5);
+  animation: dk-busy 1s ease-in-out infinite alternate;
+}
+
+@keyframes dk-busy {
+  from { opacity: 0.2; }
+  to { opacity: 0.8; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dk-stage-frame.is-busy::after {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.dk-stage-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px 16px;
+  margin-top: 12px;
+  font-size: var(--s-1);
+  color: var(--ink-2);
+}
+
+.dk-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dk-nav .tnum {
+  white-space: nowrap;
+}
+
+.dk-nav button {
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.dk-nav button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.dk-stage-title {
+  margin-left: 6px;
+  font-weight: 600;
+  color: var(--ink);
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dk-stage-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.dk-panel {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 40px);
+  background: var(--surface);
+  border-left: 1px solid var(--rule);
+  min-width: 0;
+}
+
+.dk-panel-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.dk-panel-h h3 {
+  font-size: var(--s0);
+  font-weight: 700;
+}
+
+.dk-x {
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dk-x:hover {
+  color: var(--ink);
+}
+
+.dk-panel .dk-form {
+  position: static;
+  max-height: none;
+  overflow-y: auto;
+  padding: 4px 16px 24px;
+}
+
+.dk-sub {
+  margin: 18px 0 0;
+  font-size: var(--s-1);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.dk-count {
+  margin: 8px 0 0;
+}
+
+.dk-text-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 10px 0 2px;
+}
+
+.dk-panel-note {
+  margin: 10px 0 0;
+}
+
+.dk-reset {
+  margin-top: 18px;
+}
+
+.dk-loading .dk-skel {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 780 / 540;
+  max-width: 960px;
+  margin: 28px auto;
+  background: var(--canvas);
+  border: 1px solid var(--rule);
+  color: var(--muted);
+}
+
+@media (max-width: 899px) {
+  .dk-work,
+  .dk-work.has-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dk-rail {
+    display: none;
+  }
+  .dk-panel {
+    order: -1;
+    position: static;
+    max-height: none;
+    border-left: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .dk-stage {
+    padding: 14px 10px;
+  }
+  .dk-tabbar .dk-status {
+    margin-left: 0;
+  }
 }

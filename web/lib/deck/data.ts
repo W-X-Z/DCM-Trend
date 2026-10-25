@@ -75,9 +75,10 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
     group
       ? select<BondIssue>('v_bond_issues', { rating_group: `eq.${group}`, deal_dt: `gte.${since12}`, order: 'deal_dt.desc', limit: 400 })
       : Promise.resolve([] as BondIssue[]),
-    getMaturities({ from: today, to: shiftMonths(today, 36), corp, product: 'bond', eventType: '만기' }).catch(() => []),
+    // 5년물 제안 만기 연도까지 보려고 64개월을 받는다. 장표·문안의 '향후 3년'은 36개월로 자른다.
+    getMaturities({ from: today, to: shiftMonths(today, 64), corp, product: 'bond', eventType: '만기' }).catch(() => []),
     getRateLatest().catch(() => []),
-    getRates(shiftMonths(today, -12), ['ktb3y', 'ktb10y', 'corp3y_aa', 'cd91']).catch(() => []),
+    getRates(shiftMonths(today, -12), ['ktb3y', 'ktb10y', 'corp3y_aa', 'corp3y_bbb', 'cd91']).catch(() => []),
     select<{ house: string; published_dt: string; source_title: string; source_url: string; series_key: string; series_label: string; period: string; period_order: number; basis: string; is_actual: boolean; value_pct: number }>(
       'v_research_forecasts', { order: 'published_dt.desc,series_key.asc,period_order.asc', limit: 200 },
     ).catch(() => []),
@@ -167,15 +168,18 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
   const bySeries = new Map<string, { dt: string; value: number }[]>();
   for (const r of rateRows) bySeries.set(r.series_key, [...(bySeries.get(r.series_key) ?? []), r]);
 
+  const matRows = mats.map((m) => ({ dt: m.event_dt, series: m.series, amount_krw: n(m.amount_krw), coupon_pct: n(m.coupon_pct), months: n(m.tenor_months), lead: m.lead_managers }));
   return {
     asof: today,
     company: {
       corp_code: c.corp_code, corp_name: c.corp_name, market: c.market, rating, rating_group: group,
       outstanding_bond_krw: n(c.outstanding_bond_krw), last_series: last?.base_series ?? null, bond_count: c.bond_deal_count,
     },
-    own: ownRows.map(toPeer),
+    // 수요예측 결과가 없는 회차(수요예측 없이 발행한 리테일·외화 등, 원문 미수집)는 비교 근거가 없어 뺀다
+    own: ownRows.map(toPeer).filter((p) => p.demand_krw != null || p.ratio != null || p.tranches.some((t) => t.demand_krw != null)),
     peers,
-    maturities: mats.map((m) => ({ dt: m.event_dt, series: m.series, amount_krw: n(m.amount_krw), coupon_pct: n(m.coupon_pct), months: n(m.tenor_months), lead: m.lead_managers })),
+    maturities: matRows.filter((m) => m.dt <= shiftMonths(today, 36)),
+    maturitiesLong: { to: shiftMonths(today, 64), rows: matRows },
     league: league(peerRows.filter((p) => (p.sub_type ?? '일반회사채') === '일반회사채'), group ? `${group}급 일반 공모 회사채` : '공모 회사채', since12),
     leagueAll: league(tdeals, '일반 공모 회사채', since12),
     combos: comboStats(recent6, 5).map((r) => ({ combo: r.combo, issues: r.issues, share: r.share, medComp: r.medComp, incShare: r.incShare, avgAmount: r.avgAmount })),
@@ -183,7 +187,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
       .filter((r) => ['base_rate', 'cd91', 'ktb2y', 'ktb3y', 'ktb5y', 'ktb10y', 'corp3y_aa', 'corp3y_bbb'].includes(r.series_key))
       .map((r) => ({ key: r.series_key, label: r.label_ko, value: Number(r.value), dt: r.dt, chg1m: n(r.chg_1m_bp), chg3m: n(r.chg_3m_bp), chg1y: n(r.chg_1y_bp), source: r.source })),
     // 차트에는 6개월 이상 값이 있는 시계열만 쓴다
-    series: ['ktb3y', 'ktb10y', 'corp3y_aa', 'cd91']
+    series: ['ktb3y', 'ktb10y', 'corp3y_aa', 'corp3y_bbb', 'cd91']
       .map((k) => ({ key: k, label: label[k] ?? k, pts: monthly(bySeries.get(k) ?? []) }))
       .filter((x) => x.pts.length >= 6),
     forecast: fcHouse

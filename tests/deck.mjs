@@ -120,9 +120,11 @@ const check = (name, cond, detail = '') => {
     const tr = (tenor, init, dem) => ({ tenor, initial_krw: init * 1e8, demand_krw: dem * 1e8, ratio: dem / init, byType: null });
     const own = [{ ...d.own[0], series: '15', tranches: [tr('2년', 300, 2200), tr('3년', 1200, 3450)] }, { ...d.own[0], series: '13', tranches: [tr('2년', 200, 2100), tr('3년', 800, 9500)] }];
     const st = m.tenorDemand(own, 4);
-    const tx2 = m.ruleText({ ...d, own }, inp);
+    const tx2 = m.ruleText({ ...d, own }, { ...inp, tranches: [{ tenor: '2년', eok: 300 }, { tenor: '3년', eok: 1200 }] });
     const line = tx2.sizing.find((x) => /평균 경쟁률/.test(x) && /트랜치|중심/.test(x)) ?? '';
     check('문안: 만기 판단은 경쟁률과 참여금액을 함께 봄', st.length === 2 && /3년물 중심/.test(line) && /2년물은 보조 트랜치/.test(line), line);
+    const tx3 = m.ruleText({ ...d, own }, { ...inp, tranches: [{ tenor: '2년', eok: 300 }] });
+    check('문안: 제안에 없는 만기에 수요가 가장 많으면 추가 검토', tx3.sizing.some((x) => /제안에 없는 3년물/.test(x)), tx3.sizing.join(' | '));
   }
   {
     // 노하우: 등급이 맞거나 비어 있는 것, 켠 장표와 공통만 AI 요청에 들어간다
