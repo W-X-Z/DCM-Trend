@@ -1,6 +1,7 @@
 // AI 질문: OpenAI 함수 호출로 mart 조회 도구를 부르고 답을 쓴다.
 // 응답은 줄 단위 JSON(NDJSON): {type:'step', label} … {type:'answer', text, refs} 또는 {type:'error', message}
 import { TOOL_LABEL, TOOL_SCHEMAS, runTool, type Ref } from '@/lib/ai-tools';
+import { ASK_MAX_ROUNDS, askSystem } from '@/lib/ai-prompt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,7 @@ export const maxDuration = 60;
 
 const KEY = process.env.OPENAI_API_KEY ?? '';
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
-const MAX_ROUNDS = 6;
+const MAX_ROUNDS = ASK_MAX_ROUNDS;
 const MAX_Q = 400;
 
 // 공개 사이트라 IP 마다 10분에 8번까지 (서버 인스턴스 기준, 대략적인 보호)
@@ -25,16 +26,7 @@ function limited(ip: string) {
 
 const today = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 
-const SYSTEM = () => `너는 NH투자증권 커버리지 본부 RM·RA를 돕는 발행시장 데이터 도우미다. 오늘은 ${today()}(한국 시간)이다.
-- 반드시 도구로 조회한 데이터만 근거로 답한다. 도구 결과에 없는 사실·숫자는 쓰지 않는다. 모르면 "수집한 데이터에서 찾지 못했다"고 말하고 어떤 데이터가 있으면 답할 수 있는지 한 줄로 알려 준다.
-- 데이터 범위: 공모 회사채 2019년~, 메자닌(CB·BW·EB) 2021년~, 유상증자·IPO 2024년 10월~ (OpenDART 공시 기준), 정기보고서 회사채 미상환 잔액, 시장금리, 최근 120일 주요 공시(단기차입금·시설투자·최대주주 변경·채무보증·원리금 미지급 등, 원문에서 읽은 금액·상대방 포함). 증권신고서 본문 문장(투자위험요소 등)은 없다. 은행·카드·캐피탈의 일괄신고 채권은 빠져 있다.
-- 회사 이름이 나오면 먼저 search_companies 로 corp_code 를 찾는다. 날짜 표현(최근 한 달, 올해 등)은 오늘 기준으로 YYYY-MM-DD 로 바꿔 도구에 넣는다.
-- 시장 전체의 공시(어느 회사가 단기차입을 늘렸나, 최대주주가 바뀐 곳 등)는 key_filings 를 쓴다. 회사 하나의 공시 제목 목록은 company_disclosures.
-- 공모 회사채 질문은 bond_issues(발행 단위: 트랜치 조합·최초→확정 금액·전체 경쟁률)를 먼저 쓰고, 트랜치별 세부가 필요할 때만 list_deals 를 쓴다. 같은 발행의 트랜치를 따로따로 나열하지 않는다.
-- 단위를 붙인다: 경쟁률은 '배', 금리는 '%', 가산금리는 'bp', 만기는 '년'(24개월 → 2년). 도구 필드 이름(NH대표주관: true, 만기_개월 등)을 그대로 쓰지 않고 'NH 대표주관'처럼 말로 쓴다. 회차 번호는 질문에 필요할 때만.
-- 답은 한국어 평서문(~다)으로 짧게: 첫 줄에 결론 1~2문장, 이어서 근거를 "- " 목록으로 최대 7줄. 각 줄은 '회사 (날짜): 내용' 한 문장으로, 항목을 '—'로 이어 붙이지 않는다. 금액은 도구가 준 억원 숫자를 쓰고 1조 이상은 조원으로 바꿔도 된다. 증액 폭처럼 두 값의 차이는 계산해도 되지만 비율·합계를 새로 만들 때는 '계산값'이라고 밝힌다.
-- 기준일이나 집계 기준(납입일/결정일)이 답에 영향을 주면 한 줄로 밝힌다.
-- 금지: 예측·전망, 투자 권유, 고객 실명 수요예측 정보 추정, 표(마크다운 표) 사용.`;
+const SYSTEM = () => askSystem(today());
 
 type Msg = { role: 'system' | 'user' | 'assistant' | 'tool'; content: string | null; tool_calls?: ToolCall[]; tool_call_id?: string };
 type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };

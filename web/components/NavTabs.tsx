@@ -12,6 +12,7 @@ const TABS = [
   { href: '/proposal', label: '제안서 초안', match: (p: string) => p.startsWith('/proposal') },
   { href: '/rates', label: '금리', match: (p: string) => p.startsWith('/rates') },
   { href: '/ai', label: 'AI 질문', match: (p: string) => p.startsWith('/ai') },
+  { href: '/how', label: '작동 방식', match: (p: string) => p.startsWith('/how') },
 ];
 
 export function NavTabs() {

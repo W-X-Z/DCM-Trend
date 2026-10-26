@@ -5,7 +5,7 @@
 
 import { createHash } from 'node:crypto';
 
-const PROMPT_VERSION = 3;
+export const PROMPT_VERSION = 3;
 const MIN_ITEMS = 4;
 const TARGET_ITEMS = 6;
 const MAX_ITEMS = 9;
@@ -123,7 +123,7 @@ export function ruleSelect(cands, n = TARGET_ITEMS, exclude = new Set()) {
   return out;
 }
 
-const SYSTEM = `너는 증권사 IB 커버리지 본부의 RM(기업 영업 담당)을 돕는 리서처다.
+export const SYSTEM = `너는 증권사 IB 커버리지 본부의 RM(기업 영업 담당)을 돕는 리서처다.
 입력은 만기·풋옵션·차입 잔액 데이터에서 규칙으로 뽑은 '다가오는 자금 조달 수요' 후보 회사 목록이다. RM이 이번 주에 먼저 연락할 회사를 ${TARGET_ITEMS}곳 골라라.
 고르는 기준:
 - 3~6개월 뒤 공모채 만기가 돌아오는데 차환 신고서가 없는 회사, 6개월 안에 메자닌 조기상환청구(풋)가 시작되는 회사, 공모채 없이 단기 차입이 큰 회사.

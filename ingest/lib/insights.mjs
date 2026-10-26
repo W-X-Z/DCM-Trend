@@ -92,9 +92,9 @@ export function ruleSummary(facts) {
 }
 
 // 프롬프트를 바꾸면 올린다 → 사실이 같아도 요약을 다시 만든다
-const PROMPT_VERSION = 4;
+export const PROMPT_VERSION = 4;
 
-const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을 정리해 주는 애널리스트다.
+export const SYSTEM = `너는 증권사 IB 커버리지 RM에게 발행시장 동향을 정리해 주는 애널리스트다.
 규칙:
 - 주어진 JSON 사실만 쓴다. 숫자는 JSON의 문자열을 그대로 옮기고 새 숫자를 만들거나 계산하지 않는다.
 - 예측, 전망, 권고, 추측("~할 것", "~로 보인다", "~해야")은 쓰지 않는다.
