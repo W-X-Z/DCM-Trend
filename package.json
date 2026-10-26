@@ -11,7 +11,9 @@
     "test:docparse": "node tests/docparse.mjs",
     "test:issues": "node tests/issues.mjs",
     "test:feed": "node tests/feed.mjs",
-    "test:deck": "node tests/deck.mjs"
+    "test:deck": "node tests/deck.mjs",
+    "prompts:sync": "node scripts/sync-prompts.mjs",
+    "test:prompts": "node tests/prompts.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17",

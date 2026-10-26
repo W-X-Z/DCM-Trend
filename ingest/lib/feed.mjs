@@ -5,7 +5,7 @@
 
 import { createHash } from 'node:crypto';
 
-const PROMPT_VERSION = 3;
+export const PROMPT_VERSION = 3;
 const TARGET = 10;
 const MIN_ITEMS = 6;
 const MAX_ITEMS = 12;
@@ -226,7 +226,7 @@ function toCard(cand, text, model) {
   };
 }
 
-const SYSTEM = `너는 증권사 IB 커버리지 본부 RM(기업 영업 담당)을 위한 발행시장 카드뉴스 에디터다.
+export const SYSTEM = `너는 증권사 IB 커버리지 본부 RM(기업 영업 담당)을 위한 발행시장 카드뉴스 에디터다.
 입력은 최근 2주의 공시·발행 데이터에서 규칙으로 뽑은 후보다(구분: 발행 또는 공시, 특징: 규칙이 붙인 이유). RM이 오늘 알아야 할 것을 ${TARGET}건 골라 카드로 써라.
 고르는 기준:
 - 발행: 이례적인 발행 (수요예측 미달, 큰 증액, 첫 공모채, 장기물·저등급, 높은 가산금리, 대형·공모 메자닌, 공모가 밴드 밖 확정, 대규모 희석 증자).

@@ -16,6 +16,7 @@ export default function DeckPage({ searchParams }: { searchParams: { corp?: stri
           <Link href="/proposal/deck">다른 회사</Link>
           <Link href={`/proposal?corp=${corp}&type=bond`}>초안 점검 화면</Link>
           <Link href="/proposal/knowledge">노하우 관리</Link>
+          <Link href={`/how?corp=${corp}#trace`}>작동 방식</Link>
         </p>
         <DeckStudio corp={corp} />
       </main>
