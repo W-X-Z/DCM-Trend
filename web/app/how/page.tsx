@@ -183,7 +183,7 @@ export default function HowPage({ searchParams }: { searchParams: { corp?: strin
         info="수집한 데이터가 규칙과 AI를 거쳐 화면에 나오기까지의 흐름입니다. 프롬프트는 실제 코드에 있는 글을 그대로 보여 줍니다. 외부 추적 도구(Langfuse 등)는 붙이지 않았고, 실행 추적은 이 브라우저에서 직접 잰 값입니다."
       >
         <p className="small dk-links">
-          <Link href="/proposal/deck">제안서 만들기</Link>
+          <Link href="/proposal">제안서 초안</Link>
           <Link href="/proposal/knowledge">노하우 관리</Link>
           <Link href="/ai">AI 질문</Link>
         </p>

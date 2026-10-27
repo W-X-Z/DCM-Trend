@@ -4,7 +4,7 @@ import { type ItemId } from './catalog';
 import { mdw, rate3, yymmdd } from './fmt';
 import { allowedNumbers } from './validate';
 import { parseTsv } from './tsv';
-import { factsFor, ruleText, scheduleOf } from './rules';
+import { factsFor, forecastStale, ruleText, scheduleOf } from './rules';
 import type { DeckData, DeckInput, DeckText, PeerIssue } from './types';
 
 export type Qa = { level: 'warn' | 'info'; item: ItemId | null; text: string };
@@ -114,7 +114,8 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   // 2. 공개 전망표가 오래됨(내부 전망표가 없을 때)
   if (on('forecast') && d.forecast && parseTsv(inp.internal?.rateFc ?? '').length < 2) {
     const ago = days(d.forecast.published_dt, d.asof);
-    if (ago > 90) out.push({ level: 'info', item: 'forecast', text: `금리 전망표는 ${yymmdd(d.forecast.published_dt)} 발표 공개본입니다(${Math.round(ago)}일 전). NH 분기별 전망표(내부 데이터)를 연결하면 최신으로 바뀝니다.` });
+    if (forecastStale(d)) out.push({ level: 'warn', item: 'forecast', text: `공개 금리 전망표(${yymmdd(d.forecast.published_dt)} 발표)가 이후 금통위·FOMC 결과를 반영하지 않아 표를 뺐습니다. 최신 전망표(내부 데이터)를 붙여 넣으면 표가 들어갑니다.` });
+    else if (ago > 90) out.push({ level: 'info', item: 'forecast', text: `금리 전망표는 ${yymmdd(d.forecast.published_dt)} 발표 공개본입니다(${Math.round(ago)}일 전). NH 분기별 전망표(내부 데이터)를 연결하면 최신으로 바뀝니다.` });
   }
   // 3. 등급별 회사채 전망표(내부 데이터) 점검
   if (on('credit_fc')) for (const s of creditGridIssues(parseTsv(inp.internal?.creditFc ?? ''))) out.push({ level: 'warn', item: 'credit_fc', text: `회사채 전망표: ${s}` });
@@ -122,6 +123,8 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   if (on('peers')) {
     const sel = inp.peerKeys.map((k) => d.peers.find((p) => p.key === k)).filter(Boolean) as PeerIssue[];
     if (!sel.length) out.push({ level: 'warn', item: 'peers', text: '수요예측 결과 표에 넣은 사례가 없습니다.' });
+    const odd = sel.filter((p) => p.tranches.some((t) => t.in_band_krw != null && t.demand_krw != null && t.in_band_krw > t.demand_krw));
+    if (odd.length) out.push({ level: 'warn', item: 'peers', text: `수요예측 결과 표: ${odd.map((p) => p.corp_name).join('·')}의 밴드 내 금액이 총참여보다 커서 총참여만 표시했습니다(원자료 확인).` });
     for (const s of repeatedYields(sel)) out.push({ level: 'warn', item: 'peers', text: `수요예측 결과 표: 같은 발행금리 ${s}(원자료 확인).` });
   }
   // 5. 일정·표지

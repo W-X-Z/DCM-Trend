@@ -4,7 +4,7 @@
 // 화면의 '데이터' 탭과 Appendix '데이터 사용 현황' 장표가 같은 결과를 쓴다.
 import { itemOf, planOf, type ItemId, type Plan } from './catalog';
 import { maturityBuckets, tenorMix } from './analytics';
-import { horizonOf, peerPool, scheduleOf } from './rules';
+import { forecastStale, horizonOf, peerPool, pipelineOf, scheduleOf } from './rules';
 import { hasTable } from './tsv';
 import type { DeckData, DeckInput } from './types';
 
@@ -96,7 +96,7 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
       const fc = d.forecast;
       const pasted = hasTable(inp.internal?.rateFc);
       return [
-        ...(pasted ? [] : [{ kind: 'ext', label: '리서치 공개 금리 전망표', source: fc ? `${fc.house} ${fc.title}` : 'NH 리서치 공개 자료', status: fc ? 'alt' : 'missing', asof: fc?.published_dt ?? null, note: fc ? '분기 전망표 대신 공개 요약표(발표 이후 회의 미반영)' : '공개 전망표 없음' } as Src]),
+        ...(pasted ? [] : [{ kind: 'ext', label: '리서치 공개 금리 전망표', source: fc ? `${fc.house} ${fc.title}` : 'NH 리서치 공개 자료', status: fc && !forecastStale(d) ? 'alt' : 'missing', asof: fc?.published_dt ?? null, note: !fc ? '공개 전망표 없음' : forecastStale(d) ? '발표 이후 금통위·FOMC가 있어 표 생략(의견만 사용)' : '분기 전망표 대신 공개 요약표' } as Src]),
         ext('리서치 주제별 의견', fc ? fc.house : 'NH 리서치', !!fc?.notes.length, latest(fc?.notes.map((x) => x.date) ?? [])),
         int('NH 분기별 금리 전망표(기준금리·국고·미국채)', 'NH 리서치', pasted, '공개 전망표로 대체'),
       ];
@@ -123,7 +123,7 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
     case 'corp':
       return [ext('국고·회사채 3년 금리', '한국은행 ECOS', d.rates.length > 0, rateDt), ext('같은 등급 최근 발행금리', 'DART 발행조건확정 공시', d.peers.length > 0)];
     case 'pipeline':
-      return [ext('발행 예정 공모채(신고서 제출~납입 전)', 'DART 증권신고서', true, d.asof, `${d.pipeline.length}건`)];
+      return [ext('발행 예정 일반 공모 회사채(신고서 제출~납입 전)', 'DART 증권신고서', true, d.asof, `${pipelineOf(d).length}건`)];
     case 'league':
     case 'strength':
       return [ext('대표주관·인수 실적', 'DART 증권신고서', d.leagueYearly.length > 0 || d.league.rows.length > 0)];
