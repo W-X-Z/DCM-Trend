@@ -1,6 +1,6 @@
 // PPTX 렌더러 (브라우저에서 실행). 표·차트는 PowerPoint에서 바로 고칠 수 있게 기본 표·차트로 만든다.
 import type PptxGenJS from 'pptxgenjs';
-import { BULLET_INDENT, type Cell, type Para, type Prim, type Slide, type Table, type TextBox } from './model';
+import { BULLET_INDENT, axisDigits, type Cell, type Para, type Prim, type Slide, type Table, type TextBox } from './model';
 import { assemble, type AsmSlide, type Subs } from './assemble';
 import { C, FONT, LINE, PAGE } from './theme';
 
@@ -118,6 +118,16 @@ function addPrim(pptx: Pptx, s: PSlide, p: Prim, logos: Record<string, string>) 
           valAxisHidden: true, valGridLine: { style: 'none' }, catAxisLabelFontSize: 9, catAxisLabelFontFace: FONT.face,
           catAxisLabelColor: C.sub, catAxisLineShow: true, catAxisLineColor: C.grid,
         } as never);
+      } else if (c.kind === 'cols') {
+        const dg = axisDigits(c.step, c.digits);
+        const fmt = (d: number) => (d ? `#,##0.${'0'.repeat(d)}` : '#,##0');
+        s.addChart(pptx.ChartType.bar, c.series.map((sr) => ({ name: sr.name, labels: c.cats, values: sr.values.map((v) => v ?? 0) })), {
+          ...box, barDir: 'col', barGrouping: c.stacked ? 'stacked' : 'clustered', overlap: c.stacked ? 100 : 0, barGapWidthPct: c.stacked ? 60 : 80,
+          chartColors: c.series.map((sr) => sr.color), showLegend: c.legend !== false && c.series.length > 1, legendPos: 't', legendFontSize: 7.5, legendFontFace: FONT.face,
+          showValue: c.labels !== false && !c.stacked, dataLabelFormatCode: fmt(c.digits ?? 0), dataLabelPosition: 'outEnd', dataLabelFontSize: 7, dataLabelFontFace: FONT.face, dataLabelColor: C.ink,
+          valAxisMinVal: c.min, valAxisMaxVal: c.max, valAxisMajorUnit: c.step, valAxisLabelFormatCode: fmt(dg), valAxisLabelFontSize: 7, valAxisLabelFontFace: FONT.face,
+          valGridLine: { color: C.grid, size: 0.5 }, catAxisLabelFontSize: 7, catAxisLabelFontFace: FONT.face, catAxisLabelColor: C.sub,
+        } as never);
       } else {
         // 빈 주는 직전 값으로 채운다
         const series = c.series.map((sr) => {
@@ -126,12 +136,15 @@ function addPrim(pptx: Pptx, s: PSlide, p: Prim, logos: Record<string, string>) 
           const firstVal = values.find((v) => v != null) ?? 0;
           return { name: sr.name, labels: c.cats, values: values.map((v) => v ?? firstVal) };
         });
+        const dg = axisDigits(c.step, c.digits);
+        // 축 이름 간격: 지정한 칸(ticks)이 있으면 그 평균 간격
+        const every = c.ticks && c.ticks.length > 1 ? Math.max(1, Math.round((c.ticks[c.ticks.length - 1] - c.ticks[0]) / (c.ticks.length - 1))) : c.labelEvery;
         s.addChart(pptx.ChartType.line, series, {
-          ...box, chartColors: c.series.map((sr) => sr.color), lineSize: 2, lineDataSymbol: 'none',
-          valAxisMinVal: c.min, valAxisMaxVal: c.max, valAxisMajorUnit: c.step, valAxisLabelFormatCode: c.step >= 1 ? '0' : c.step < 0.5 ? '0.00' : '0.0',
-          valAxisLabelFontSize: 7.5, catAxisLabelFontSize: 7.5, catAxisLabelFrequency: c.labelEvery,
+          ...box, chartColors: c.series.map((sr) => sr.color), lineSize: c.cats.length > 200 ? 1 : 2, lineDataSymbol: 'none',
+          valAxisMinVal: c.min, valAxisMaxVal: c.max, valAxisMajorUnit: c.step, valAxisLabelFormatCode: dg ? `#,##0.${'0'.repeat(dg)}` : '#,##0',
+          valAxisLabelFontSize: 7.5, catAxisLabelFontSize: 7.5, catAxisLabelFrequency: every,
           catAxisLabelFontFace: FONT.face, valAxisLabelFontFace: FONT.face,
-          valGridLine: { color: C.grid, size: 0.5 }, showLegend: true, legendPos: 'b', legendFontSize: 8, legendFontFace: FONT.face,
+          valGridLine: { color: C.grid, size: 0.5 }, showLegend: c.legend !== false, legendPos: 'b', legendFontSize: 8, legendFontFace: FONT.face,
         } as never);
       }
     }

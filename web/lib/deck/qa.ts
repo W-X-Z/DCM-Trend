@@ -99,7 +99,9 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   const out: Qa[] = [];
   const { on } = opts;
   // 1. 회의 요약·증권사 전망이 최근 회의보다 오래됨
-  for (const [id, kind, m] of [['bok', '금통위', d.policy.bok], ['fomc', 'FOMC', d.policy.fomc]] as const) {
+  // 장표가 쓰는 회의: DM 판 회의가 DB 회의보다 오래되지 않았으면 DM 판(layout 과 같은 규칙)
+  const used = (db: DeckData['policy']['bok'], dmm: { meeting_dt: string } | undefined) => (dmm && (!db || dmm.meeting_dt >= db.meeting_dt) ? dmm : db);
+  for (const [id, kind, m] of [['bok', '금통위', used(d.policy.bok, d.dm?.meetings?.bok)], ['fomc', 'FOMC', used(d.policy.fomc, d.dm?.meetings?.fomc)]] as const) {
     const last = lastMeeting(d, kind);
     // FOMC 는 회의 첫날·결과일 표기가 섞여 있어 이틀 여유를 둔다
     if (on(id) && m && last && days(m.meeting_dt, last) > 2) {
@@ -112,7 +114,7 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
     if (on(id) && newest && last && newest < last) out.push({ level: 'warn', item: id, text: `증권사별 ${id === 'views' ? '국내' : '미국'} 전망이 최근 ${kind}(${yymmdd(last)}) 이전 자료입니다(최신 ${yymmdd(newest)}).` });
   }
   // 2. 공개 전망표가 오래됨(내부 전망표가 없을 때)
-  if (on('forecast') && d.forecast && parseTsv(inp.internal?.rateFc ?? '').length < 2) {
+  if (on('forecast') && d.forecast && !d.dm?.forecastTable && parseTsv(inp.internal?.rateFc ?? '').length < 2) {
     const ago = days(d.forecast.published_dt, d.asof);
     if (forecastStale(d)) out.push({ level: 'warn', item: 'forecast', text: `공개 금리 전망표(${yymmdd(d.forecast.published_dt)} 발표)가 이후 금통위·FOMC 결과를 반영하지 않아 표를 뺐습니다. 최신 전망표(내부 데이터)를 붙여 넣으면 표가 들어갑니다.` });
     else if (ago > 90) out.push({ level: 'info', item: 'forecast', text: `금리 전망표는 ${yymmdd(d.forecast.published_dt)} 발표 공개본입니다(${Math.round(ago)}일 전). NH 분기별 전망표(내부 데이터)를 연결하면 최신으로 바뀝니다.` });
@@ -120,7 +122,7 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   // 3. 등급별 회사채 전망표(내부 데이터) 점검
   if (on('credit_fc')) for (const s of creditGridIssues(parseTsv(inp.internal?.creditFc ?? ''))) out.push({ level: 'warn', item: 'credit_fc', text: `회사채 전망표: ${s}` });
   // 3-0. 시장 자료(DM) 판 이후 금통위·FOMC 가 있었으면 시장 장표 문구가 이전 시점 기준임을 알린다
-  if (d.dm && (on('rates') || on('forecast') || on('credit_fc'))) {
+  if (d.dm && (on('rates') || on('bok') || on('fomc') || on('forecast') || on('credit_fc') || on('issuance'))) {
     const after = d.events.filter((e) => (e.kind === '금통위' || e.kind === 'FOMC') && (e.end_dt ?? e.event_dt) > d.dm!.edition && (e.end_dt ?? e.event_dt) < d.asof).map((e) => `${e.kind}(${yymmdd(e.end_dt ?? e.event_dt)})`);
     if (after.length) out.push({ level: 'warn', item: 'rates', text: `시장 장표 문구는 ${d.dm.title} ${yymmdd(d.dm.edition)} 판입니다. 이후 ${after.join('·')}가 있어 판 갱신이 필요합니다.` });
   }
@@ -128,9 +130,10 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   //      시장 수급 이슈(만기 집중·정책 자금, 만기도래 및 수급 장표)는 회의 결과로 바뀌는 내용이 아니라 30일 기준만
   {
     const meets = d.events.filter((e) => (e.kind === '금통위' || e.kind === 'FOMC') && (e.end_dt ?? e.event_dt) < d.asof).map((e) => e.end_dt ?? e.event_dt);
+    // DM 판 주요 이슈를 쓰면 판 기준일 점검(위 3-0)으로 갈음한다. 만기도래 장표는 DM 양식(차트·표)이라 수급 문구가 없다
     const list = [
-      ...(on('issues') ? pickIssues(d).map((x) => ({ x, item: 'issues' as const, what: '주요 이슈' })) : []),
-      ...(on('maturity') ? supplyIssues(d).map((x) => ({ x, item: 'maturity' as const, what: '시장 수급' })) : []),
+      ...(on('issues') && !d.dm?.issuePages?.length ? pickIssues(d).map((x) => ({ x, item: 'issues' as const, what: '주요 이슈' })) : []),
+      ...(on('liquidity') && !d.dm?.liquidity ? supplyIssues(d).map((x) => ({ x, item: 'liquidity' as const, what: '시장 수급' })) : []),
     ];
     for (const { x, item, what } of list) {
       const after = item === 'issues' ? meets.filter((m) => m > x.as_of).sort().pop() : undefined;

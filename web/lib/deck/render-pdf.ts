@@ -1,5 +1,6 @@
 // PDF 렌더러 (브라우저에서 실행). 나눔고딕을 내장하고(사용한 글자만), 표시 목록을 그대로 그린다.
-import { BULLET_INDENT, cellBoxes, wrapPara, type Para, type Prim, type Slide, type Table, type TextBox, type BarChart, type LineChart } from './model';
+import { BULLET_INDENT, cellBoxes, wrapPara, type Para, type Prim, type Slide, type Table, type TextBox, type BarChart } from './model';
+import { colsGeom, lineGeom, type Geom } from './chart';
 import { C, LINE, PAGE } from './theme';
 
 type PDFLib = typeof import('pdf-lib');
@@ -136,34 +137,30 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
     });
   }
 
-  function line(page: Page, c: LineChart, x0: number, y0: number, w: number, h: number) {
-    const left = 28;
-    const bottom = h - 34;
-    const pw = w - left - 6;
-    const sx = (i: number) => x0 + left + (c.cats.length <= 1 ? 0 : (i / (c.cats.length - 1)) * pw);
-    const sy = (v: number) => y0 + 6 + (1 - (v - c.min) / (c.max - c.min || 1)) * (bottom - 6);
-    for (let v = c.min; v <= c.max + 1e-9; v += c.step) {
-      page.drawLine({ start: { x: x0 + left, y: Y(sy(v)) }, end: { x: x0 + left + pw, y: Y(sy(v)) }, thickness: 0.5, color: col(C.grid) });
-      const lab = v.toFixed(c.step >= 1 ? 0 : c.step < 0.5 ? 2 : 1);
-      page.drawText(lab, { x: x0 + left - 4 - fR.widthOfTextAtSize(lab, 7), y: Y(sy(v) + 3), size: 7, font: fR, color: col(C.sub) });
+  // 선·묶은 막대: 미리보기와 같은 도형 계산(chart.ts)을 그대로 그린다
+  function geom(page: Page, g: Geom, x0: number, y0: number) {
+    for (const l of g.grid) page.drawLine({ start: { x: x0 + l.x1, y: Y(y0 + l.y) }, end: { x: x0 + l.x2, y: Y(y0 + l.y) }, thickness: 0.5, color: col(C.grid) });
+    if (g.base) page.drawLine({ start: { x: x0 + g.base.x1, y: Y(y0 + g.base.y) }, end: { x: x0 + g.base.x2, y: Y(y0 + g.base.y) }, thickness: 0.6, color: col(C.sub) });
+    for (const r of g.rects) page.drawRectangle({ x: x0 + r.x, y: Y(y0 + r.y + r.h), width: r.w, height: r.h, color: col(r.color) });
+    for (const p of g.paths) {
+      for (let i = 1; i < p.pts.length; i++) {
+        const a = p.pts[i - 1];
+        const b = p.pts[i];
+        page.drawLine({ start: { x: x0 + a[0], y: Y(y0 + a[1]) }, end: { x: x0 + b[0], y: Y(y0 + b[1]) }, thickness: 1.4, color: col(p.color) });
+      }
     }
-    c.cats.forEach((k, i) => {
-      if (i % c.labelEvery) return;
-      page.drawText(k, { x: sx(i) - fR.widthOfTextAtSize(k, 7) / 2, y: Y(y0 + bottom + 11), size: 7, font: fR, color: col(C.sub) });
-    });
-    c.series.forEach((s, si) => {
-      let prev: [number, number] | null = null;
-      s.values.forEach((v, i) => {
-        if (v == null) return;
-        const pt: [number, number] = [sx(i), sy(v)];
-        if (prev) page.drawLine({ start: { x: prev[0], y: Y(prev[1]) }, end: { x: pt[0], y: Y(pt[1]) }, thickness: 1.8, color: col(s.color) });
-        prev = pt;
-      });
-      const lx = x0 + left + si * Math.min(110, (w - left) / c.series.length);
-      const ly = y0 + h - 10;
-      page.drawLine({ start: { x: lx, y: Y(ly - 3) }, end: { x: lx + 14, y: Y(ly - 3) }, thickness: 2, color: col(s.color) });
-      page.drawText(clean(s.name), { x: lx + 18, y: Y(ly), size: 7.5, font: fR, color: col(C.ink) });
-    });
+    for (const t of g.texts) {
+      const f = t.bold ? fB : fR;
+      const s = clean(t.t);
+      const w = f.widthOfTextAtSize(s, t.size);
+      const x = t.anchor === 'middle' ? x0 + t.x - w / 2 : t.anchor === 'end' ? x0 + t.x - w : x0 + t.x;
+      page.drawText(s, { x, y: Y(y0 + t.y), size: t.size, font: f, color: col(t.color) });
+    }
+    for (const l of g.legend) {
+      if (l.kind === 'line') page.drawLine({ start: { x: x0 + l.x, y: Y(y0 + l.y - 2.5) }, end: { x: x0 + l.x + 12, y: Y(y0 + l.y - 2.5) }, thickness: 2, color: col(l.color) });
+      else page.drawRectangle({ x: x0 + l.x + 2, y: Y(y0 + l.y + 0.5), width: 8, height: 7, color: col(l.color) });
+      page.drawText(clean(l.name), { x: x0 + l.x + 16, y: Y(y0 + l.y), size: 7.5, font: fR, color: col(C.ink) });
+    }
   }
 
   function prim(page: Page, p: Prim) {
@@ -188,7 +185,7 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
         return;
       case 'chart':
         if (p.chart.kind === 'bar') bar(page, p.chart, p.x, p.y, p.w, p.h);
-        else line(page, p.chart, p.x, p.y, p.w, p.h);
+        else geom(page, p.chart.kind === 'line' ? lineGeom(p.chart, p.w, p.h) : colsGeom(p.chart, p.w, p.h), p.x, p.y);
     }
   }
 

@@ -516,7 +516,7 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   const use = (x: string[] | undefined, fb: string[]) => (x?.length ? [...x] : fb);
   return {
     lead, peers, compare, schedule, structure, structureRows, strengths,
-    rates: use(dmp?.rates, rates), corp, views: use(dmp?.views, views), sizing, pipeline, bok: use(dmp?.bok, bok), fomc, usviews,
+    rates: use(dmp?.rates, rates), corp, views: use(dmp?.views, views), sizing, pipeline, bok: use(dmp?.bok, bok), fomc: use(dmp?.fomc, fomc), usviews: use(dmp?.usviews, usviews),
     forecast: use(dmp?.forecast, forecast), league, maturity, sales, termNotes,
   };
 }
