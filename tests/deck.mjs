@@ -119,6 +119,16 @@ const check = (name, cond, detail = '') => {
   check('장표: 발행조건 비고 근거', tx.termNotes && /수요예측 가능일/.test(tx.termNotes.demand) && tx.termNotes.tenor.length > 0, JSON.stringify(tx.termNotes));
   const fx = m.buildSlides(d, { ...inp, internal: { ...inp.internal, creditFc: '구분\t2026\nAA-\t3.10', investors: '기관\t참여\nA\t100' }, items: { ...inp.items, sales: true } }, tx);
   check('장표: 내부 데이터(등급별 전망표) 연결 → 회사채 금리 장표', fx.some((s) => s.id === 'credit_fc') && ids.indexOf('forecast') >= 0 && !ids.includes('credit_fc'));
+  {
+    // 회사채 금리(3-②): 현업 샘플 양식 = 우량채·비우량채 전망 단락(하우스 이름 없이) + 등급별 금리 표. 내부 전망표 없으면 실적표로 대체
+    const notes = [
+      { topic: '우량 회사채', house: '가증권', title: 'T1', url: 'u1', date: d.asof, text: 'AA급 수요 강함' },
+      { topic: '비우량 회사채', house: '나증권', title: 'T2', url: 'u2', date: d.asof, text: 'BBB 스프레드 확대' },
+    ];
+    const cs = m.buildSlides({ ...d, marketNotes: notes }, { ...inp, items: { ...inp.items, credit_fc: true } }, tx).find((s) => s.id === 'credit_fc');
+    const txt = (cs?.prims ?? []).flatMap((p) => (p.k === 'text' ? p.paras : p.k === 'table' ? p.rows.flat().filter(Boolean).flatMap((c) => c.paras) : [])).map((q) => q.runs.map((r) => r.t).join('')).join('\n');
+    check('장표: 회사채 금리 = 우량채·비우량채 전망 단락 + 등급별 금리 표', !!cs && /AA등급 이상\(우량채\) 회사채 시장 전망/.test(txt) && /A등급 이하\(비우량채\)/.test(txt) && /등급별 회사채 금리 추이/.test(txt) && /회사채 AA-/.test(txt) && !/■[^\n]*가증권/.test(txt) && /가증권 T1/.test(txt), txt.slice(0, 400));
+  }
   const typed = m.typedIssues(d.own, 4);
   check('장표: 투자자 구분은 수집된 회차만 집계·회차 표기', typed.list.length >= 1 && typed.list.every((p) => p.tranches.some((t) => t.byType?.length)) && tx.sales.some((x) => x.includes(typed.label)), `${typed.label} | ${tx.sales[0]}`);
   {
