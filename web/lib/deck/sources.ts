@@ -4,7 +4,7 @@
 // 화면의 '데이터' 탭과 Appendix '데이터 사용 현황' 장표가 같은 결과를 쓴다.
 import { itemOf, planOf, type ItemId, type Plan } from './catalog';
 import { maturityBuckets, tenorMix } from './analytics';
-import { forecastStale, horizonOf, peerPool, pickIssues, pipelineOf, scheduleOf } from './rules';
+import { forecastStale, horizonOf, peerPool, pickIssues, pipelineOf, scheduleOf, supplyIssues } from './rules';
 import { hasTable } from './tsv';
 import type { DeckData, DeckInput } from './types';
 
@@ -110,7 +110,7 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
     case 'issues': {
       const xs = pickIssues(d);
       return [
-        ext('주요 이슈(시장 자료 팩)', xs.map((x) => x.topic).join('·') || '시장 자료 팩', xs.length > 0, latest(xs.map((x) => x.as_of)), '중요도·기준일로 선택'),
+        ext('주요 이슈(시장 자료 팩)', xs.map((x) => x.topic).join('·') || '시장 자료 팩', xs.length > 0, latest(xs.map((x) => x.as_of)), '중요도·기준일로 선택(수급 이슈는 만기도래 및 수급 장표)'),
         ext('시장 지표(환율·KOSPI·유가·아파트값)', '한국은행 ECOS·FRED', (d.market ?? []).length > 0, latest((d.market ?? []).map((m) => m.pts[m.pts.length - 1]?.[0] ?? ''))),
         int('NH Discussion Material 주요 이슈', 'IB·리서치', false, '공개 자료로 만든 시장 자료 팩으로 대체'),
       ];
@@ -139,8 +139,13 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
     case 'league':
     case 'strength':
       return [ext('대표주관·인수 실적', 'DART 증권신고서', d.leagueYearly.length > 0 || d.league.rows.length > 0)];
-    case 'maturity':
-      return [ext('등급별 월별 만기도래', 'DART 발행 내역', true, d.maturityByGrade.asof)];
+    case 'maturity': {
+      const xs = supplyIssues(d);
+      return [
+        ext('등급별 월별 만기도래', 'DART 발행 내역', true, d.maturityByGrade.asof),
+        ...(xs.length ? [ext('시장 수급(만기 집중·정책 자금)', xs.map((x) => x.topic).join('·'), true, latest(xs.map((x) => x.as_of)), 'Discussion Material 시장 수급 문구')] : []),
+      ];
+    }
     case 'events':
       return [ext('금통위·FOMC·정기보고서 일정', '한국은행·미 연준·금융감독원', d.events.length > 0)];
     case 'ir': case 'nh_company': case 'nh_core': case 'nh_scope': case 'nh_org': case 'ceo':

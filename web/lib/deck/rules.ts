@@ -143,7 +143,6 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   const under = pool.filter(fullUnder);
   const part = pool.filter((p) => p.under && !fullUnder(p));
   const inc = pool.filter((p) => p.initial_krw != null);
-  const own = d.own[0];
   const tmix = tenorMix(pool);
   const nOwn = Math.min(4, d.own.length); // 문장의 '최근 n회'는 실제 회차 수
   // 제안 구조(예: 3년+5년)의 최근 6개월 통계, 없으면 최근 1년 만기별 비중
@@ -185,7 +184,7 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   } else {
     peers.push(`최근 1년 ${grp}등급 일반 공모 회사채 수요예측 사례 없음`);
   }
-  if (own) peers.push(`${name} 직전 회차(제${own.series ?? ''}회)는 ${own.demand_dt ? `${mdw(own.demand_dt)} 수요예측, ` : ''}${own.tenor_combo} ${eokW(own.amount_krw)} 발행${own.ratio != null ? `(경쟁률 ${ratioX(own.ratio)})` : ''}`);
+  // 회사 직전 회차는 Ⅰ부(Term-sheet·트랜치 검토)에 있어 여기(Ⅱ부 시장)에는 쓰지 않는다
 
   const cmp = inp.compareKeys.map((k) => d.peers.find((p) => p.key === k)).filter(Boolean) as PeerIssue[];
   const compare = cmp.map((p) => {
@@ -424,8 +423,7 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     if (e26) usviews.push(`2026년 말 정책금리(상단)를 제시한 ${d.usViews.filter((v) => v.end2026 != null).length}곳 중 ${e26.n}곳이 **${rate2(e26.v)}** 제시`);
     const tm = d.usViews.filter((v) => v.terminal != null).map((v) => v.terminal!);
     if (tm.length >= 2) usviews.push(`최종금리(상단)를 제시한 ${tm.length}곳 기준 ${rate2(Math.min(...tm))} ~ ${rate2(Math.max(...tm))}`);
-    const nhUs = d.usViews.find((v) => /NH/.test(v.house));
-    if (nhUs) usviews.push(`NH투자증권(${yymmdd(nhUs.published_dt)}): ${nhUs.summary}`);
+    // NH 의견은 표 첫 줄(강조)과 금리 전망 장표에 있어 요약에는 다시 쓰지 않는다
   }
 
   const forecast: string[] = [];
@@ -449,19 +447,24 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     if (nhc) league.push(`${cur.year}년${cur.ytd ? ' 누적' : ''} 대표주관 ${eokW(nhc.krw)}, 점유율 **${nhc.share.toFixed(1)}%**`);
   }
 
+  // 만기도래: DM 시장 수급 문구(supplyIssues)가 있으면 그 문구가 시장 전체 흐름을 말하므로 숫자 두 줄(합계·고객 등급)만
   const maturity: string[] = [];
   const mg = d.maturityByGrade;
+  const sup = supplyIssues(d).length > 0;
   if (mg.months.length) {
     const tot = mg.total.reduce((a, b) => a + b, 0);
     maturity.push(`${mg.months[0].replace('-', '.')} ~ ${mg.months[mg.months.length - 1].replace('-', '.')} 일반 공모 회사채 만기도래 ${eokW(tot)}`);
     const peak = mg.total.indexOf(Math.max(...mg.total));
-    maturity.push(`만기도래가 가장 많은 달은 ${Number(mg.months[peak].slice(5, 7))}월(${eokW(mg.total[peak])}), 차환 발행 수요가 몰리는 시기`);
+    if (!sup) maturity.push(`만기도래가 가장 많은 달은 ${Number(mg.months[peak].slice(5, 7))}월(${eokW(mg.total[peak])}), 차환 발행 수요가 몰리는 시기`);
     const g = d.company.rating_group;
     const gr = mg.rows.find((x) => (g === 'BBB' || g === 'BB' || g === 'B' ? x.grade === 'BBB 이하' : x.grade === g));
-    if (gr) maturity.push(`${gr.grade}등급 만기도래 ${eokW(gr.total)}`);
+    if (gr) {
+      const gp = gr.values.indexOf(Math.max(...gr.values));
+      maturity.push(`**${gr.grade}등급** 만기도래 ${eokW(gr.total)}${sup && gr.values[gp] ? `, 가장 많은 달은 ${Number(mg.months[gp].slice(5, 7))}월(${eokW(gr.values[gp])})` : ''}`);
+    }
     const h1 = mg.total.slice(0, 6).reduce((a, b) => a + b, 0);
     const h2 = mg.total.slice(6).reduce((a, b) => a + b, 0);
-    maturity.push(`앞 6개월 ${eokW(h1)}, 뒤 6개월 ${eokW(h2)}으로 ${h1 >= h2 ? '앞쪽' : '뒤쪽'}에 만기가 몰려 있어 ${h1 >= h2 ? '단기적으로 차환 발행이 집중될 것으로 판단' : '해당 기간 차환 발행 증가에 대비한 일정 선점 필요'}`);
+    if (!sup) maturity.push(`앞 6개월 ${eokW(h1)}, 뒤 6개월 ${eokW(h2)}으로 ${h1 >= h2 ? '앞쪽' : '뒤쪽'}에 만기가 몰려 있어 ${h1 >= h2 ? '단기적으로 차환 발행이 집중될 것으로 판단' : '해당 기간 차환 발행 증가에 대비한 일정 선점 필요'}`);
   }
 
   // Sales 전략: 투자자 구분별 참여(회사·같은 등급)
@@ -776,12 +779,18 @@ export function pathText(row: { cells: { period: string; value: number | null; a
 }
 
 // 주요 이슈 고르기: 양식은 고정, 내용은 시점별로 바뀐다. 기준일 60일 이내·유효기간 안에서 중요도 → 최신 순으로 상위 k개
-export function pickIssues(d: DeckData, k = 4) {
+// 시장 수급(만기 집중·정책 자금) 이슈는 DM 처럼 주요 이슈가 아니라 '만기도래 및 수급' 장표에 쓴다(supplyIssues)
+const liveIssues = (d: DeckData) => {
   const from = addDays(d.asof, -60);
   return (d.issues ?? [])
     .filter((x) => x.as_of >= from && x.as_of <= d.asof && x.valid_until >= d.asof)
-    .sort((a, b) => b.priority - a.priority || b.as_of.localeCompare(a.as_of))
-    .slice(0, k);
+    .sort((a, b) => b.priority - a.priority || b.as_of.localeCompare(a.as_of));
+};
+export function pickIssues(d: DeckData, k = 4) {
+  return liveIssues(d).filter((x) => x.section !== 'supply').slice(0, k);
+}
+export function supplyIssues(d: DeckData, k = 2) {
+  return liveIssues(d).filter((x) => x.section === 'supply').slice(0, k);
 }
 
 // 납입월 시장 만기 집중: 향후 12개월 공모 회사채 만기 중 납입월이 상위 2개 달이고 월평균의 1.5배 이상이면 일정 문구로 알린다

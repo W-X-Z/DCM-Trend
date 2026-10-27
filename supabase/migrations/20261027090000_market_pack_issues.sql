@@ -38,7 +38,8 @@ create table if not exists ref.market_issues (
   points       jsonb not null,                -- 본문 글머리 ["...", "..."]
   chart_series text,                          -- market_daily 키 또는 'maturity' (시장 만기도래), null 이면 차트 없음
   chart_title  text,
-  sources      jsonb not null default '[]'    -- [{title, url, date}]
+  sources      jsonb not null default '[]',   -- [{title, url, date}]
+  section      text not null default 'issue' check (section in ('issue', 'supply')) -- supply = 시장 수급(만기 집중·정책 자금): 만기도래 및 수급 장표에
 );
 comment on table ref.market_issues is '제안서 주요 이슈 장표 내용. 양식은 고정, 이슈는 중요도·기준일로 매번 고른다';
 
@@ -47,7 +48,7 @@ select d.series_key, s.label_ko, s.unit, s.source as source_label, s.cycle, d.dt
 from raw.market_daily d join ref.market_series s using (series_key);
 
 create or replace view mart.v_market_issues as
-select issue_id, topic, as_of, valid_until, priority, impact, points, chart_series, chart_title, sources
+select issue_id, topic, as_of, valid_until, priority, impact, points, chart_series, chart_title, sources, section
 from ref.market_issues;
 
 grant select on mart.v_market_daily, mart.v_market_issues to anon, authenticated;
@@ -114,6 +115,9 @@ insert into ref.market_issues (topic, as_of, valid_until, priority, impact, poin
    "모험자본 공급 의무 비율(''26년 10%→''28년 25%)에 따라 A등급 이하 채권 수요 기대"]',
  null, null,
  '[{"title":"NH투자증권, IMA 사업자 지정 (스마트투데이)","url":"https://www.smarttoday.co.kr/ko-kr/articles/105226","date":"2026-03-18"},{"title":"발행어음 사업자 9곳으로 확대 (CEO스코어데일리)","url":"https://ceoscoredaily.com/page/view/2026101515253950179","date":"2026-10-16"}]');
+
+-- 시장 수급(만기 집중·정책 자금)은 주요 이슈가 아니라 만기도래 및 수급 장표에 (DM Ⅱ 시장 수급 전망)
+update ref.market_issues set section = 'supply' where topic in ('연초 만기 집중 · 크레딧 수급', 'IMA · 발행어음');
 
 -- NH 리서치 기준금리 경로 (10/22 공개 코멘트: 11월 3.25%, '27.2월 3.50% 후 동결 / 美 10월 동결·12월 1회 인상 후 동결)
 -- 1~3Q26 은 실적(기말). 국고채는 분기 전망치가 공개되지 않아 넣지 않는다(장표는 일별 금리로 실적만 붙인다).

@@ -60,7 +60,7 @@ const pad = (b: Box, k = 2): Box => ({ x: b.x - k, y: b.y - k, w: b.w + k * 2, h
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 // 검수(qa) 항목의 표시 종류
-const QA_KIND: Partial<Record<ItemId, MarkKind>> = { bok: 'stale', fomc: 'stale', views: 'stale', usviews: 'stale', forecast: 'stale', issues: 'stale', schedule: 'input', cover: 'input' };
+const QA_KIND: Partial<Record<ItemId, MarkKind>> = { bok: 'stale', fomc: 'stale', views: 'stale', usviews: 'stale', forecast: 'stale', issues: 'stale', maturity: 'stale', schedule: 'input', cover: 'input' };
 
 export function reviewMarks(slides: Slide[], d: DeckData, inp: DeckInput, tx: DeckText, qa: Qa[]): Mark[] {
   const out: Mark[] = [];

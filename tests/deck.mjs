@@ -86,25 +86,31 @@ const check = (name, cond, detail = '') => {
   check('근거: 탭 구분 표 붙여넣기', JSON.stringify(m.parseTsv('a\tb\n1\t2\t3\n\n')) === JSON.stringify([['a', 'b', ''], ['1', '2', '3']]));
 }
 
-// 3. 목차(기본형, CJ프레시웨이 2026-03 구성): 켜고 끄면 번호가 다시 매겨진다
+// 3. 목차(기본형): Ⅰ 발행 제안(회사별 생성) / Ⅱ 회사채 시장 동향(DM 판 그대로) / Appendix. 번호는 부마다, 켜고 끄면 다시 매겨진다
 {
   const on = m.defaultItems();
   const p = m.planOf(on);
-  check('목차: 기본 구성 5장 + Appendix', p.sections.map((x) => `${x.no ?? ''}${x.label}`).join('|') === '1발행 제안|2금리 동향|3금리 전망|4회사채 수요예측 결과|5회사채 수요예측 예정 내역|Appendix', p.sections.map((x) => `${x.no}${x.label}`).join('|'));
-  check('목차: 발행 제안 ①~④', p.sections[0].items.map((x) => x.title).join(',') === '1. 발행 제안_① 제안 Term-sheet,1. 발행 제안_② 트랜치 검토,1. 발행 제안_③ 발행일정(안),1. 발행 제안_④ Sales 전략', p.sections[0].items.map((x) => x.title).join(','));
+  const sec = (x) => `${x.part ?? ''}${x.no ?? ''}${x.label}`;
+  check('목차: Ⅰ 4장 + Ⅱ 3장 + Appendix', p.sections.map(sec).join('|') === 'Ⅰ1발행 조건 제안|Ⅰ2발행 일정(안)|Ⅰ3Sales 전략|Ⅰ4회사채 수요예측 예정 내역|Ⅱ1금리 동향|Ⅱ2금리 전망|Ⅱ3발행시장 동향|Appendix', p.sections.map(sec).join('|'));
+  check('목차: 부 묶음 + 간지 기본 켬', p.parts.map((x) => `${x.key}.${x.label}:${x.sections.length}`).join('|') === 'Ⅰ.발행 제안:4|Ⅱ.회사채 시장 동향:3' && p.folders && !p.front.includes('folders'), JSON.stringify(p.parts.map((x) => x.key)));
+  check('목차: 발행 조건 제안 ①②', p.sections[0].items.map((x) => x.title).join(',') === '1. 발행 조건 제안_① 제안 Term-sheet,1. 발행 조건 제안_② 트랜치 검토', p.sections[0].items.map((x) => x.title).join(','));
   check('목차: 상세 장표(미매각·NH 강점)는 기본 꺼짐, Sales 전략은 기본 켬', on.sales && !on.compare && !on.corp && !on.nh_core && !on.league && !on.strength && !on.datareport);
-  check('목차: 장표 하나인 장은 소제목 없음', p.sections[4].items[0].title === '5. 회사채 수요예측 예정 내역' && p.sections[3].items[0].title === '4. 회사채 수요예측 결과_같은 등급 수요예측 결과', `${p.sections[4].items[0].title} / ${p.sections[3].items[0].title}`);
-  check('목차: Appendix 번호', p.sections[5].items.map((x) => x.title).join(',') === 'Appendix 1. 공모사채 만기도래 현황,Appendix 2. 주요 이벤트');
+  check('목차: 장표 하나인 장은 소제목 없음', p.sections[1].items[0].title === '2. 발행 일정(안)' && p.sections[3].items[0].title === '4. 회사채 수요예측 예정 내역', `${p.sections[1].items[0].title} / ${p.sections[3].items[0].title}`);
+  check('목차: Ⅱ부는 1부터 다시', p.sections[4].items.map((x) => x.title).join(',') === '1. 금리 동향_① 금리 동향,1. 금리 동향_② 금통위,1. 금리 동향_③ FOMC,1. 금리 동향_④ 주요 이슈' && p.sections[6].items.map((x) => x.title).join(',') === '3. 발행시장 동향_① 같은 등급 수요예측 결과,3. 발행시장 동향_② 공모사채 만기도래 및 수급', p.sections.slice(4).map((x) => x.items.map((i) => i.title).join(',')).join(' / '));
+  check('목차: 장표 이름에 부 표시', p.sections[0].items[1].label === 'Ⅰ-1-② 트랜치 검토' && p.sections[1].items[0].label === 'Ⅰ-2. 발행 일정(안)' && p.sections[4].items[2].label === 'Ⅱ-1-③ FOMC', p.sections.flatMap((x) => x.items.map((i) => i.label)).join('|'));
+  check('목차: Appendix 번호', p.sections[7].items.map((x) => x.title).join(',') === 'Appendix 1. 주요 이벤트');
   const p1 = m.planOf(on, (id) => id !== 'credit_fc');
-  check('목차: 내부 데이터 없는 회사채 금리는 빠지고 번호 당김', p1.sections[2].items.map((x) => x.sub).join(',') === '① 기준금리 및 국고채 금리,② 증권사별 국내 기준금리 전망,③ 증권사별 미국 기준금리 전망', p1.sections[2].items.map((x) => x.sub).join(','));
+  check('목차: 내부 데이터 없는 회사채 금리는 빠지고 번호 당김', p1.sections[5].items.map((x) => x.sub).join(',') === '① 기준금리 및 국고채 금리,② 증권사별 국내 기준금리 전망,③ 증권사별 미국 기준금리 전망', p1.sections[5].items.map((x) => x.sub).join(','));
   const p2 = m.planOf({ ...on, bok: false, pipeline: false });
-  check('목차: 금통위를 끄면 FOMC 가 ②', p2.sections[1].items[1].title === '2. 금리 동향_② FOMC', p2.sections[1].items[1].title);
-  check('목차: Sales 전략은 1-④, 예정 내역을 끄면 장이 빠짐', p2.sections[0].items[3].label === '1-④ Sales 전략' && !p2.sections.some((x) => x.key === 'pipeline'), p2.sections[0].items.map((x) => x.label).join('|'));
+  check('목차: 금통위를 끄면 FOMC 가 ②', p2.sections[3].items[1].title === '1. 금리 동향_② FOMC', p2.sections[3].items[1].title);
+  check('목차: 예정 내역을 끄면 장이 빠짐', !p2.sections.some((x) => x.key === 'pipeline') && p2.sections.filter((x) => x.part === 'Ⅰ').length === 3);
   const none = Object.fromEntries(Object.keys(on).map((k) => [k, false]));
   const p3 = m.planOf({ ...none, rates: true, events: true });
-  check('목차: 앞 장이 비면 번호 당김', p3.sections[0].no === 1 && p3.sections[0].items[0].title === '1. 금리 동향' && p3.sections[1].items[0].title === 'Appendix 1. 주요 이벤트', JSON.stringify(p3.sections.map((x) => x.items.map((i) => i.title))));
+  check('목차: 앞 부가 비면 Ⅱ부만, 간지 꺼짐', p3.parts.map((x) => x.key).join() === 'Ⅱ' && p3.sections[0].no === 1 && p3.sections[0].items[0].title === '1. 금리 동향' && p3.sections[1].items[0].title === 'Appendix 1. 주요 이벤트' && !p3.folders, JSON.stringify(p3.sections.map((x) => x.items.map((i) => i.title))));
   const p4 = m.planOf(on, (id) => id !== 'fomc');
-  check('목차: 자료 없는 장표는 빠짐', !p4.sections[1].items.some((x) => x.id === 'fomc'));
+  check('목차: 자료 없는 장표는 빠짐', !p4.sections[4].items.some((x) => x.id === 'fomc'));
+  const lite = m.planOf(m.TEMPLATES.find((t) => t.key === 'lite').items());
+  check('목차: 간략 템플릿은 간지 없음', !lite.folders && lite.parts.length === 2, JSON.stringify(lite.parts.map((x) => x.key)));
 }
 
 // 4. 장표: 실제 데이터 스냅샷(이랜드월드, 2026-10-23), 페이지 안, 숫자 출처
@@ -114,8 +120,8 @@ const check = (name, cond, detail = '') => {
   const tx = m.ruleText(d, inp);
   const slides = m.buildSlides(d, inp, tx);
   const ids = slides.map((s) => s.id);
-  const want = ['cover', 'contents', 'terms', 'sizing', 'schedule', 'sales', 'rates', 'bok', 'fomc', 'forecast', 'views', 'usviews', 'peers-0', 'pipeline', 'maturity', 'events', 'back'];
-  check('장표: 기본 목차 순서(간지 없음)', want.every((w, i) => ids.indexOf(w) >= 0 && (i === 0 || ids.indexOf(w) > ids.indexOf(want[i - 1]))) && ids.indexOf('sales') === ids.indexOf('schedule') + 1 && !ids.some((x) => /^folder|^compare|^corp|^nh_|^league|^strength|^credit_fc|^datareport/.test(x)), ids.join(','));
+  const want = ['cover', 'contents', 'folder-Ⅰ', 'terms', 'sizing', 'schedule', 'sales', 'pipeline', 'folder-Ⅱ', 'rates', 'bok', 'fomc', 'forecast', 'views', 'usviews', 'peers-0', 'maturity', 'events', 'back'];
+  check('장표: 기본 목차 순서(Ⅰ부·Ⅱ부 간지)', want.every((w, i) => ids.indexOf(w) >= 0 && (i === 0 || ids.indexOf(w) > ids.indexOf(want[i - 1]))) && ids.indexOf('sales') === ids.indexOf('schedule') + 1 && ids.filter((x) => x.startsWith('folder')).length === 2 && !ids.some((x) => /^compare|^corp|^nh_|^league|^strength|^credit_fc|^datareport/.test(x)), ids.join(','));
   check('장표: 발행조건 비고 근거', tx.termNotes && /수요예측 가능일/.test(tx.termNotes.demand) && tx.termNotes.tenor.length > 0, JSON.stringify(tx.termNotes));
   const fx = m.buildSlides(d, { ...inp, internal: { ...inp.internal, creditFc: '구분\t2026\nAA-\t3.10', investors: '기관\t참여\nA\t100' }, items: { ...inp.items, sales: true } }, tx);
   check('장표: 내부 데이터(등급별 전망표) 연결 → 회사채 금리 장표', fx.some((s) => s.id === 'credit_fc') && ids.indexOf('forecast') >= 0 && !ids.includes('credit_fc'));
@@ -131,8 +137,8 @@ const check = (name, cond, detail = '') => {
   }
   {
     // 시장 자료 팩(Discussion Material 데이터): 주요 이슈는 양식 고정·이슈 가변(중요도→기준일, 60일·유효기간), 이슈 둘씩 한 쪽
-    const iss = (topic, as_of, priority, chart, valid_until = '2026-12-31') => ({ topic, as_of, valid_until, priority, impact: '금리 상방', points: [`${topic} 내용`], chart, chart_title: `${topic} 차트`, sources: [{ title: `${topic} 출처`, url: 'u', date: as_of }] });
-    const issues = [iss('관세', d.asof, 2, null), iss('유가', d.asof, 5, 'brent'), iss('증시', d.asof, 4, 'kospi'), iss('오래된 이슈', '2020-01-01', 5, null), iss('만료', d.asof, 5, null, '2020-01-01'), iss('부동산', d.asof, 3, 'apt_seoul'), iss('수급', d.asof, 4, 'maturity')];
+    const iss = (topic, as_of, priority, chart, valid_until = '2026-12-31', section = 'issue') => ({ topic, as_of, valid_until, priority, impact: '금리 상방', points: [`${topic} 내용`], chart, chart_title: `${topic} 차트`, sources: [{ title: `${topic} 출처`, url: 'u', date: as_of }], section });
+    const issues = [iss('관세', d.asof, 2, null), iss('유가', d.asof, 5, 'brent'), iss('증시', d.asof, 4, 'kospi'), iss('오래된 이슈', '2020-01-01', 5, null), iss('만료', d.asof, 5, null, '2020-01-01'), iss('부동산', d.asof, 3, 'apt_seoul'), iss('수급', d.asof, 4, 'maturity', '2026-12-31', 'supply'), iss('IMA', d.asof, 2, null, '2026-12-31', 'supply')];
     const pts = (n, f) => Array.from({ length: n }, (_, i) => [new Date(Date.parse(d.asof) - (n - i) * 864e5).toISOString().slice(0, 10), f(i)]);
     const market = [
       { key: 'brent', label: '브렌트유', unit: '달러/배럴', source: 'FRED', cycle: 'D', pts: pts(300, (i) => 60 + i / 5) },
@@ -141,10 +147,16 @@ const check = (name, cond, detail = '') => {
     ];
     const dd = { ...d, issues, market };
     const picked = m.pickIssues(dd).map((x) => x.topic);
-    check('주요 이슈: 중요도·최신 순 상위 4개, 오래되거나 만료된 이슈 제외', JSON.stringify(picked) === JSON.stringify(['유가', '증시', '수급', '부동산']), picked.join(','));
-    const sl = m.buildSlides(dd, { ...inp, items: { ...inp.items, issues: true } }, tx).filter((x) => x.id.startsWith('issues'));
+    check('주요 이슈: 중요도·최신 순 상위 4개, 오래되거나 만료된 이슈·수급 이슈 제외', JSON.stringify(picked) === JSON.stringify(['유가', '증시', '부동산', '관세']), picked.join(','));
+    check('주요 이슈: 수급 이슈는 따로(만기도래 및 수급 장표)', m.supplyIssues(dd).map((x) => x.topic).join() === '수급,IMA');
+    const all = m.buildSlides(dd, { ...inp, items: { ...inp.items, issues: true } }, m.ruleText(dd, inp));
+    const sl = all.filter((x) => x.id.startsWith('issues'));
     const charts = sl.flatMap((x) => x.prims.filter((p) => p.k === 'chart'));
-    check('주요 이슈: 두 쪽, 이슈별 차트(유가·KOSPI 선, 수급 막대, 아파트값 전월비)', sl.length === 2 && charts.length === 4 && charts.some((c) => c.chart.kind === 'bar'), `${sl.length} ${charts.map((c) => c.chart.kind).join(',')}`);
+    check('주요 이슈: 두 쪽, 이슈별 차트(유가·KOSPI 선, 아파트값 전월비, 관세는 차트 없음)', sl.length === 2 && charts.length === 3 && charts.every((c) => c.chart.kind === 'line'), `${sl.length} ${charts.map((c) => c.chart.kind).join(',')}`);
+    const mat = all.find((x) => x.id === 'maturity');
+    const mt = mat.prims.filter((p) => p.k === 'text').flatMap((p) => p.paras.map((q) => q.runs.map((r) => r.t).join(''))).join('\n');
+    check('만기도래 및 수급: DM 수급 문구 그대로 + 만기도래 숫자 한 묶음', /\[수급\]/.test(mt) && /수급 내용/.test(mt) && /\[IMA\]/.test(mt) && /\[공모 회사채 만기도래\]/.test(mt) && !/앞 6개월/.test(mt) && /수급 출처/.test(mt), mt.slice(0, 300));
+    check('만기도래 및 수급: 수급 이슈 없으면 숫자 요약만', !/\[공모 회사채 만기도래\]/.test(JSON.stringify(m.buildSlides(d, inp, tx).find((x) => x.id === 'maturity').prims)) && tx.maturity.some((x) => /앞 6개월/.test(x)));
     check('주요 이슈: 데이터 없으면 장표 생략', !m.buildSlides(d, inp, tx).some((x) => x.id.startsWith('issues')));
     // 등급별 발행 결과표: 최근 두 달 시장 전체 수요예측을 등급×만기로
     const tr = (tenor, y, s, c) => ({ tenor, months: null, initial_krw: 1e11, amount_krw: 1e11, demand_krw: 5e11, in_band_krw: 5e11, ratio: c, under: false, yield_pct: y, spread_bp: s, band_type: '개별민평', band_low: -30, band_high: 30, maturity_dt: null, byType: null });
@@ -190,6 +202,23 @@ const check = (name, cond, detail = '') => {
     const hiRows = tbl.rows.filter((r) => r.some((c) => c && c.fill === 'FFF2CC'));
     check('DM: A등급 고객은 비우량채 전망이 위, 표에서 고객 등급(A+) 행 강조', ct.findIndex((x) => /A등급 이하/.test(x)) < ct.findIndex((x) => /AA등급 이상/.test(x)) && hiRows.length === 2, `${ct.join(' | ')} / ${hiRows.length}`);
   }
+  {
+    // 중복 정리: 같은 내용은 한 장표에서만
+    const textOf = (sl) => sl.prims.filter((p) => p.k === 'text').flatMap((p) => p.paras.map((q) => q.runs.map((r) => r.t).join(''))).join('\n');
+    const plain = (x) => x.replace(/\*\*|\^\^|!!/g, '');
+    const tOn = textOf(slides.find((x) => x.id === 'terms'));
+    const tOff = textOf(m.buildSlides(d, { ...inp, items: { ...inp.items, sizing: false } }, tx).find((x) => x.id === 'terms'));
+    check('중복: Term-sheet 상단은 제안 문장 + 밴드(직전 회차 근거는 트랜치 검토에)', tOn.includes(plain(tx.structure[0])) && (!tx.structure[1] || (!tOn.includes(plain(tx.structure[1])) && tOff.includes(plain(tx.structure[1])))), tOn.slice(0, 200));
+    const pt = textOf(slides.find((x) => x.id === 'peers-0'));
+    check('중복: 같은 등급 수요예측 결과(Ⅱ부)에는 회사 직전 회차·발행 일정 헤드라인 없음', !/직전 회차/.test(pt) && !/흥행을 위해/.test(pt) && !tx.peers.some((x) => /직전 회차/.test(x)), pt.slice(0, 200));
+    const fomc = d.policy.fomc;
+    const usv = d.usViews.length ? d.usViews : [{ house: 'NH투자증권', analysts: null, published_dt: d.asof, title: 't', url: 'u', next_move: '12월 인상', terminal: 4.25, end2026: 4.25, end2027: null, summary: 's' }];
+    const df = { ...d, usViews: usv, policy: { ...d.policy, fomc: { ...fomc, points: [...fomc.points, { label: '10월 회의 전망', text: '동결 후 12월 인상 시사 전망' }] } } };
+    const fOn = textOf(m.buildSlides(df, inp, m.ruleText(df, inp)).find((x) => x.id === 'fomc'));
+    const fOff = textOf(m.buildSlides(df, { ...inp, items: { ...inp.items, usviews: false } }, m.ruleText(df, inp)).find((x) => x.id === 'fomc'));
+    check('중복: FOMC 의 다음 회의 전망은 증권사별 미국 전망이 켜져 있으면 빠짐', !/10월 회의 전망/.test(fOn) && /10월 회의 전망/.test(fOff) && /결정/.test(fOn));
+    check('중복: 증권사별 미국 전망 요약에 NH 줄 없음(표 첫 줄·금리 전망에 있음)', !m.ruleText(df, inp).usviews.some((x) => x.startsWith('NH투자증권(')));
+  }
   const typed = m.typedIssues(d.own, 4);
   check('장표: 투자자 구분은 수집된 회차만 집계·회차 표기', typed.list.length >= 1 && typed.list.every((p) => p.tranches.some((t) => t.byType?.length)) && tx.sales.some((x) => x.includes(typed.label)), `${typed.label} | ${tx.sales[0]}`);
   {
@@ -212,14 +241,17 @@ const check = (name, cond, detail = '') => {
     check('노하우: 등급 거르기', m.forGrade(list, 'AA').map((k) => k.id).join(',') === '1,3,4,5');
   }
   check('장표: %p 차이 -0.0 없음', m.pp(-0.03) === '0.0' && m.pp(0.26) === '+0.3' && m.pp(-8.24) === '-8.2');
-  check('장표: 레이아웃(표지·목차·본문·뒷표지)', slides[0].layout === 'cover' && slides[1].layout === 'contents' && slides[2].layout === 'body' && slides.at(-1).layout === 'back');
-  const toc = slides[1].prims[1].paras.map((x) => x.runs.map((r) => r.t).join(''));
-  check('장표: 목차는 장 번호 + Appendix 장표', toc.join('|') === '1. 발행 제안|2. 금리 동향|3. 금리 전망|4. 회사채 수요예측 결과|5. 회사채 수요예측 예정 내역|Appendix 1. 공모사채 만기도래 현황|Appendix 2. 주요 이벤트', toc.join('|'));
+  check('장표: 레이아웃(표지·목차·간지·본문·뒷표지)', slides[0].layout === 'cover' && slides[1].layout === 'contents' && slides[2].layout === 'folder' && slides[3].layout === 'body' && slides.at(-1).layout === 'back');
+  const toc = slides[1].prims.slice(1).map((x) => x.paras[0].runs.map((r) => r.t).join(''));
+  check('장표: 목차는 부 + 장 번호 + Appendix 장표', toc.join('|') === 'Ⅰ. 발행 제안|1. 발행 조건 제안|2. 발행 일정(안)|3. Sales 전략|4. 회사채 수요예측 예정 내역|Ⅱ. 회사채 시장 동향|1. 금리 동향|2. 금리 전망|3. 발행시장 동향|Appendix 1. 주요 이벤트', toc.join('|'));
+  const fII = slides.find((x) => x.id === 'folder-Ⅱ');
+  const fTxt = fII.prims.map((x) => x.paras.map((q) => q.runs.map((r) => r.t).join('')).join('/')).join(' | ');
+  check('장표: Ⅱ부 간지 = 부 이름 + 장 목록', fTxt === 'Ⅱ. 회사채 시장 동향 | 1.  금리 동향/2.  금리 전망/3.  발행시장 동향', fTxt);
   check('장표: 표지 제목에 다음 회차', slides[0].prims.some((p) => p.k === 'text' && p.paras.some((x) => x.runs.some((r) => /제112회 공모사채 발행 검토 및 제안/.test(r.t)))));
   const core = m.buildSlides(d, { ...inp, items: { ...inp.items, nh_core: true } }, tx).find((s) => s.id === 'nh_core-0');
-  check('장표: 템플릿 고정 장표는 원본 XML·번호 바꿈', core.static?.file === 'ppt/slides/slide27.xml' && core.static.renumber === '6.', JSON.stringify(core.static));
+  check('장표: 템플릿 고정 장표는 원본 XML·번호 바꿈', core.static?.file === 'ppt/slides/slide27.xml' && core.static.renumber === '5.', JSON.stringify(core.static));
   const terms = slides.find((s) => s.id === 'terms');
-  check('장표: 쪽 제목 번호', terms.prims.some((p) => p.k === 'text' && p.paras[0].runs.map((r) => r.t).join('') === '1. 발행 제안_① 제안 Term-sheet'));
+  check('장표: 쪽 제목 번호', terms.prims.some((p) => p.k === 'text' && p.paras[0].runs.map((r) => r.t).join('') === '1. 발행 조건 제안_① 제안 Term-sheet'));
   check('장표: 쪽번호는 장표 순서', terms.chrome.some((p) => p.k === 'text' && p.paras[0].runs[0].t === String(ids.indexOf('terms') + 1)));
   let out = [];
   for (const s of slides) {
@@ -288,7 +320,7 @@ const check = (name, cond, detail = '') => {
     check('데이터: 내부 데이터를 붙이면 연결로 바뀜', !rep2.intMissing.some((x) => /개별·등급민평|등급별 회사채/.test(x.label)) && !rep2.omitted.filter((o) => o.id !== 'issues').length && rep2.intUsed.length >= 2, JSON.stringify(rep2.intUsed));
     const withRep = m.buildSlides(d, { ...inp, items: { ...inp.items, datareport: true } }, tx);
     const dr = withRep.filter((s) => s.id.startsWith('datareport'));
-    check('장표: Appendix 데이터 사용 현황(켰을 때만)', dr.length >= 1 && !ids.some((x) => x.startsWith('datareport')) && dr[0].title === 'Appendix 3. 데이터 사용 현황', `${dr.length} ${dr[0]?.title}`);
+    check('장표: Appendix 데이터 사용 현황(켰을 때만)', dr.length >= 1 && !ids.some((x) => x.startsWith('datareport')) && dr[0].title === 'Appendix 2. 데이터 사용 현황', `${dr.length} ${dr[0]?.title}`);
   }
 
   // 4-3. 검수: 샘플 덱에서 난 오류 유형

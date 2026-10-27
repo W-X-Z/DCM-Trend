@@ -1,4 +1,4 @@
-// 장표 레이아웃: 데이터·입력·문안 → 슬라이드 표시 목록 (NH 서식, 공모 회사채 기본형 = CJ프레시웨이 공모사채 제안 2026-03 구성)
+// 장표 레이아웃: 데이터·입력·문안 → 슬라이드 표시 목록 (NH 서식, 공모 회사채 기본형 = Ⅰ 발행 제안 + Ⅱ 회사채 시장 동향(DM 판))
 // 목차(catalog.ts)에서 켜진 항목만 순서대로 만든다. chrome 은 NH 레이아웃이 그리는 부분(PPTX 에서는 템플릿이 그림).
 import type { Subs } from './assemble';
 import { ALL_ITEMS, planOf, type ItemId, type Numbered, type Plan } from './catalog';
@@ -8,7 +8,7 @@ import {
 import {
   BULLET_INDENT, P, cellBoxes, rich, textHeight, type Cell, type Para, type Prim, type Slide, type SlideLayout, type Table,
 } from './model';
-import { forecastStale, fullUnder, horizonOf, peerPool, pickIssues, pipelineOf, proposedYears, recentWindow, scheduleOf, tenorText, totalEok, verdictOf } from './rules';
+import { forecastStale, fullUnder, horizonOf, peerPool, pickIssues, pipelineOf, supplyIssues, proposedYears, recentWindow, scheduleOf, tenorText, totalEok, verdictOf } from './rules';
 import { TYPE_LABEL, TYPE_ORDER, maturityBuckets, mixOf, pp, quarterOf, spreadVsKtb, tenorMix, typedIssues } from './analytics';
 import { dataReport, STATUS_LABEL } from './sources';
 import { parseTsv } from './tsv';
@@ -114,19 +114,40 @@ function cover(inp: DeckInput): Slide {
   };
 }
 
-// 목차: 장(1. 발행 제안 …)과 Appendix 장표를 한 줄씩. 줄이 많으면 글자를 줄인다.
+// 목차: 부(Ⅰ 발행 제안 / Ⅱ 회사채 시장 동향)와 그 아래 장, 마지막에 Appendix 장표. 줄이 많으면 글자를 줄인다.
 function contents(plan: Plan): Slide {
-  const items = [
-    ...plan.sections.filter((s) => !s.appendix).map((s) => `${s.no}. ${s.label}`),
-    ...plan.sections.filter((s) => s.appendix).flatMap((s) => s.items.map((i) => i.head)),
-  ];
-  const size = items.length > 9 ? 13 : items.length > 7 ? 15 : items.length > 5 ? 17 : 20;
+  const lines: { t: string; lvl: 0 | 1 }[] = [];
+  for (const p of plan.parts) {
+    lines.push({ t: `${p.key}. ${p.label}`, lvl: 0 });
+    for (const s of p.sections) lines.push({ t: `${s.no}. ${s.label}`, lvl: 1 });
+  }
+  for (const s of plan.sections.filter((x) => x.appendix)) for (const i of s.items) lines.push({ t: i.head, lvl: 0 });
+  const prims: Prim[] = [{ k: 'text', x: 54.2, y: 120.3, w: 200, h: 38.8, paras: [P('Contents')], size: 32, color: '333333', bold: true, pad: 0, valign: 'm' }];
+  const hOf = (k: number) => lines.reduce((t, l, i) => t + (l.lvl ? 13 : 17) * k * 1.55 + (i && !l.lvl ? 8 * k : 0), 0);
+  let k = 1.15;
+  while (k > 0.6 && hOf(k) > 330) k -= 0.05;
+  let y = 176;
+  lines.forEach((l, i) => {
+    const size = Math.round((l.lvl ? 13 : 17) * k * 2) / 2;
+    if (i && !l.lvl) y += 8 * k;
+    const h = size * 1.55;
+    prims.push({ k: 'text', x: l.lvl ? 112 : 89.5, y, w: 560, h, paras: [P(l.t)], size, color: l.lvl ? '555555' : '333333', bold: !l.lvl, pad: 0, valign: 'm' });
+    y += h;
+  });
+  return { id: 'contents', title: 'Contents', layout: 'contents', chrome: [layoutBg('contents')], prims };
+}
+
+// 간지(부 표지): 부 이름 + 담긴 장 목록 (현업 덱의 폴더커버)
+function folder(p: Plan['parts'][number]): Slide {
+  const title = `${p.key}. ${p.label}`;
+  const items = p.sections.map((s) => `${s.no}.  ${s.label}`);
+  const size = items.length > 5 ? 14 : 16;
   return {
-    id: 'contents', title: 'Contents', layout: 'contents',
-    chrome: [layoutBg('contents')],
+    id: `folder-${p.key}`, title, layout: 'folder', bg: C.navy,
+    chrome: [layoutBg('folder')],
     prims: [
-      { k: 'text', x: 54.2, y: 120.3, w: 200, h: 38.8, paras: [P('Contents')], size: 32, color: '333333', bold: true, pad: 0, valign: 'm' },
-      { k: 'text', x: 89.5, y: 173.6, w: 600, h: 340, paras: items.map((t, i) => ({ runs: [{ t }], gap: i ? Math.round(size * 0.3) : 0 })), size, color: '333333', bold: true, pad: 0, line: 1.9 },
+      { k: 'text', x: 39, y: 212, w: 290, h: 51, paras: [P(title)], size: 20, color: C.white, bold: true, valign: 'm', pad: 0 },
+      { k: 'text', x: 100, y: 308, w: 640, h: 180, size, color: C.white, pad: 0, line: 1.6, valign: 'm', paras: items.map((t) => P(t)) },
     ],
   };
 }
@@ -186,9 +207,10 @@ function pastedTable(x: number, y: number, w: number, maxH: number, grid: string
 }
 
 // I-1. 발행조건 제안(案)
-function terms({ d, inp, tx }: Ctx, n: Numbered): Body {
+function terms({ d, inp, tx, plan }: Ctx, n: Numbered): Body {
   const sch = scheduleOf(d, inp);
-  const c = callout(78, [tx.lead, ...tx.structure.slice(0, 2)], undefined, 80);
+  // 직전 같은 구조 회차 근거는 트랜치 검토(최근 4회 경쟁률·증액)에 있으니, 트랜치 검토가 켜져 있으면 제안 문장 + 밴드만
+  const c = callout(78, [tx.lead, ...tx.structure.slice(0, onPlan(plan, 'sizing') ? 1 : 2)], undefined, 80);
   const top = c.bottom + 10;
   const prims: Prim[] = [titleBox(n.head, n.sub), ...c.prims, ...goldTitle(top, '주요 발행 조건 제안(案)')];
   const tr = inp.tranches.filter((t) => t.tenor);
@@ -661,7 +683,7 @@ function panelPrims(p: MeetingPanel, x: number, y: number, w: number, h: number)
 }
 
 // II-1 ②③ 금통위·FOMC 핵심 포인트 + 전망 표·점도표
-function meeting({ d, tx }: Ctx, n: Numbered, kind: 'bok' | 'fomc'): Body {
+function meeting({ d, tx, plan }: Ctx, n: Numbered, kind: 'bok' | 'fomc'): Body {
   const m = kind === 'bok' ? d.policy.bok : d.policy.fomc;
   const lines = kind === 'bok' ? tx.bok : tx.fomc;
   const c = callout(78, lines, undefined, 80);
@@ -676,7 +698,10 @@ function meeting({ d, tx }: Ctx, n: Numbered, kind: 'bok' | 'fomc'): Body {
   const panels = m.panels.slice(0, 2);
   const y = top + 20;
   const boxBottom = panels.length ? y + Math.max(120, (BOTTOM - y) * 0.5) : BOTTOM;
-  const ps: Para[] = m.points.flatMap((p, i) => [
+  // 다음 회의 전망(예: '10월 회의 전망')은 증권사별 전망 장표(국내 views·미국 usviews)가 켜져 있으면 거기서 다룬다
+  const views = onPlan(plan, kind === 'bok' ? 'views' : 'usviews');
+  const points = m.points.filter((p) => !(views && /회의\s*전망/.test(p.label)));
+  const ps: Para[] = points.flatMap((p, i) => [
     { runs: [{ t: `✓ ${p.label}`, b: true, color: C.red }], gap: i ? 5 : 0 },
     { runs: rich(p.text), bullet: true, gap: 1 },
   ]);
@@ -1038,26 +1063,37 @@ function issueChart(d: DeckData, key: string | null, x: number, y: number, w: nu
   };
 }
 
+// DM 이슈 문구 상자: [주제]  영향 + 글머리. 높이가 maxH 를 넘으면 글자를 줄인다
+type IssueBlock = { topic: string; impact: string; points: string[] };
+function issueBox(list: IssueBlock[], y: number, maxH: number) {
+  let size = 9.5;
+  const build = (sz: number): Para[] => list.flatMap((x, i) => [
+    { runs: [{ t: `[${x.topic}]`, b: true }, ...(x.impact ? [{ t: `  ${x.impact}`, color: C.muted, size: sz - 1 }] : [])], gap: i ? Math.round(sz * 0.9) : 0 },
+    ...x.points.map((t) => ({ runs: rich(t), bullet: true, gap: 3 })),
+  ]);
+  let ps = build(size);
+  let h = textHeight(ps, CW - 20, size, false, 1.32, BULLET_INDENT(size)) + 20;
+  while (h > maxH && size > 7.5) {
+    size -= 0.5;
+    ps = build(size);
+    h = textHeight(ps, CW - 20, size, false, 1.32, BULLET_INDENT(size)) + 20;
+  }
+  return { prims: [{ k: 'rect', x: X0, y, w: CW, h, fill: C.label } as Prim, { k: 'text', x: X0, y, w: CW, h, paras: ps, size, color: C.ink, valign: 'm', pad: 10, line: 1.32 } as Prim], bottom: y + h };
+}
+const issueRefs = (list: { sources: { title: string; date: string | null }[]; as_of: string }[]) => {
+  const refs = list.map((x) => x.sources[0]).filter(Boolean).map((s) => `${s.title}${s.date ? ` ${yymmdd(s.date)}` : ''}`);
+  return refs.length ? `이슈 출처: ${refs.join('; ')} (기준일 ${list.map((x) => yymmdd(x.as_of)).join('·')})` : '';
+};
+
 function issuesSlides({ d }: Ctx, n: Numbered): Body[] {
   const list = pickIssues(d);
   const pages: (typeof list)[] = [];
   for (let i = 0; i < list.length; i += 2) pages.push(list.slice(i, i + 2));
   return pages.map((pg, pi) => {
     const prims: Prim[] = [titleBox(n.head, n.sub, pi > 0)];
-    let size = 9.5;
-    const build = (sz: number): Para[] => pg.flatMap((x, i) => [
-      { runs: [{ t: `[${x.topic}]`, b: true }, { t: `  ${x.impact}`, color: C.muted, size: sz - 1 }], gap: i ? Math.round(sz * 0.9) : 0 },
-      ...x.points.map((t) => ({ runs: rich(t), bullet: true, gap: 3 })),
-    ]);
-    let ps = build(size);
-    let h = textHeight(ps, CW - 20, size, false, 1.32, BULLET_INDENT(size)) + 20;
-    while (h > 200 && size > 7.5) {
-      size -= 0.5;
-      ps = build(size);
-      h = textHeight(ps, CW - 20, size, false, 1.32, BULLET_INDENT(size)) + 20;
-    }
-    prims.push({ k: 'rect', x: X0, y: 78, w: CW, h, fill: C.label }, { k: 'text', x: X0, y: 78, w: CW, h, paras: ps, size, color: C.ink, valign: 'm', pad: 10, line: 1.32 });
-    const top = 78 + h + 14;
+    const box = issueBox(pg, 78, 200);
+    prims.push(...box.prims);
+    const top = box.bottom + 14;
     const half = (CW - 20) / 2;
     const srcs: string[] = [];
     pg.forEach((x, i) => {
@@ -1068,8 +1104,7 @@ function issuesSlides({ d }: Ctx, n: Numbered): Body[] {
       prims.push(ch.prim);
       srcs.push(`${x.chart_title ?? x.topic}: ${ch.src}`);
     });
-    const refs = pg.map((x) => x.sources[0]).filter(Boolean).map((s) => `${s.title}${s.date ? ` ${yymmdd(s.date)}` : ''}`);
-    prims.push(...footnote([`자료: ${srcs.join(' / ')}`, refs.length ? `이슈 출처: ${refs.join('; ')} (기준일 ${pg.map((x) => yymmdd(x.as_of)).join('·')})` : ''].filter(Boolean)));
+    prims.push(...footnote([`자료: ${srcs.join(' / ')}`, issueRefs(pg)].filter(Boolean)));
     return { id: `issues-${pi}`, title: pi ? `${n.title} (계속)` : n.title, prims };
   });
 }
@@ -1119,7 +1154,8 @@ function peersSlides({ d, inp, tx }: Ctx, n: Numbered): Body[] {
   const colW = showMax ? [86, 38, 28, 46, 46, 46, 50, 36, 30, 62, 54, 52, 70, 45] : [116, 40, 30, 50, 50, 52, 38, 32, 64, 56, 54, 72, 45];
   const nc = colW.length;
   // 첫 쪽은 요약 상자가 있어 행이 적다. 쪽마다 들어가는 행 수 = (표 영역 높이) / 최소 행 높이
-  const c0 = callout(78, tx.peers, scheduleHead(d, inp), 130);
+  // Ⅱ부(시장) 장표라 발행 일정 제안 헤드라인·회사 직전 회차 줄은 쓰지 않는다(Ⅰ부에 있음)
+  const c0 = callout(78, tx.peers, undefined, 130);
   const capOf = (top: number) => Math.max(4, Math.floor((BOTTOM - (top + 18 + 36)) / 17));
   const pages: (Cell | null)[][][][] = [[]];
   let count = 0;
@@ -1154,10 +1190,6 @@ function peersSlides({ d, inp, tx }: Ctx, n: Numbered): Body[] {
   });
 }
 
-function scheduleHead(d: DeckData, inp: DeckInput) {
-  const sch = scheduleOf(d, inp);
-  return sch ? `${d.company.corp_name}의 수요예측 흥행을 위해 ${korDate(sch.pay)} 발행 일정을 제안` : undefined;
-}
 
 // II-2 미매각 사례 분석
 function compare({ d, inp, tx }: Ctx, n: Numbered): Body {
@@ -1312,8 +1344,12 @@ function strength({ d, tx }: Ctx, n: Numbered): Body {
 }
 
 // Appendix 등급별 회사채 만기도래 현황: 등급·세부 등급 × 월(분기 소계)
+// DM 시장 수급 문구(만기 집중·정책 자금)가 있으면 그대로 위에, 숫자(만기도래 합계·고객 등급)는 [공모 회사채 만기도래] 한 묶음으로
 function maturity({ d, tx }: Ctx, n: Numbered): Body {
-  const c = callout(78, tx.maturity, undefined, 78);
+  const sup = supplyIssues(d);
+  const c = sup.length
+    ? issueBox([...sup, ...(tx.maturity.length ? [{ topic: '공모 회사채 만기도래', impact: '', points: tx.maturity }] : [])], 78, 150)
+    : callout(78, tx.maturity, undefined, 78);
   const top = c.bottom + 10;
   const prims: Prim[] = [titleBox(n.head, n.sub), ...c.prims];
   const mg = d.maturityByGrade;
@@ -1334,14 +1370,22 @@ function maturity({ d, tx }: Ctx, n: Numbered): Body {
   const w1 = 30;
   const wc = (CW - w0 - w1) / cols.length;
   const rows: (Cell | null)[][] = [[TH('등급', { colspan: 2, size: 6.5 }), null, ...cols.map((x) => TH(x.label, { size: 6.5, fill: x.sub ? '0B5A8E' : C.th }))]];
+  // 고객 등급(등급군 이름 칸·세부 등급 줄)은 노란 바탕: DM 표에서 고객 쪽만 맞추는 부분
+  const g0 = d.company.rating_group;
+  const myG = g0 === 'BBB' || g0 === 'BB' || g0 === 'B' ? 'BBB 이하' : g0;
+  const myN = d.company.rating?.replace(/0$/, '') ?? null;
   for (const g of ['AAA', 'AA', 'A', 'BBB 이하', '등급 미확인']) {
     const gRows = mg.rows.filter((r) => r.grade === g);
     const head = gRows.find((r) => !r.notch);
     if (!head) continue;
     const subs = gRows.filter((r) => r.notch);
     const span = 1 + subs.length;
-    rows.push([LB(g, { rowspan: span, size: 7 }), LB(subs.length ? '계' : '', { size: 6.5 }), ...cols.map((x) => TD(eokS(sumIdx(head.values, x.idx)), { size: 6.5, bold: true, fill: x.sub ? 'EEF3F9' : undefined }))]);
-    for (const r of subs) rows.push([null, LB(r.notch ?? '', { size: 6.5, fill: 'FAFAFA' }), ...cols.map((x) => TD(eokS(sumIdx(r.values, x.idx)), { size: 6.5, color: C.sub, fill: x.sub ? 'F5F8FC' : undefined }))]);
+    const mine = g === myG;
+    rows.push([LB(g, { rowspan: span, size: 7, fill: mine ? 'FFF2CC' : undefined }), LB(subs.length ? '계' : '', { size: 6.5 }), ...cols.map((x) => TD(eokS(sumIdx(head.values, x.idx)), { size: 6.5, bold: true, fill: x.sub ? 'EEF3F9' : undefined }))]);
+    for (const r of subs) {
+      const me = mine && !!myN && (r.notch ?? '').replace(/0$/, '') === myN;
+      rows.push([null, LB(r.notch ?? '', { size: 6.5, fill: me ? 'FFF2CC' : 'FAFAFA' }), ...cols.map((x) => TD(eokS(sumIdx(r.values, x.idx)), { size: 6.5, color: me ? C.ink : C.sub, bold: me, fill: me ? 'FFF2CC' : x.sub ? 'F5F8FC' : undefined }))]);
+    }
   }
   rows.push([LB('합계', { colspan: 2, fill: 'E7EEF6', size: 7 }), null, ...cols.map((x) => TD(eokS(sumIdx(mg.total, x.idx)), { bold: true, fill: 'E7EEF6', size: 6.5 }))]);
   const tTop = top + 20;
@@ -1358,7 +1402,7 @@ function maturity({ d, tx }: Ctx, n: Numbered): Body {
       chart: { kind: 'bar', cats: mg.months.map((m) => `${Number(m.slice(5, 7))}월`), values: gr.values.map((v) => Math.round(v / 1e8)), labels: gr.values.map((v) => (v ? Math.round(v / 1e8).toLocaleString('ko-KR') : '')), highlight: [], color: C.th, hiColor: C.yellow },
     });
   }
-  prims.push(...footnote(['주) 일반 공모 회사채(신종·금융채·일괄신고 제외) 만기 기준. 등급은 발행 당시 등급(세부 등급 0 은 무부호).', '자료: 금융감독원 DART']));
+  prims.push(...footnote(['주) 일반 공모 회사채(신종·금융채·일괄신고 제외) 만기 기준. 등급은 발행 당시 등급(세부 등급 0 은 무부호).', `자료: 금융감독원 DART${sup.length ? `. ${issueRefs(sup)}` : ''}`]));
   return { id: 'maturity', title: n.title, prims };
 }
 
@@ -1504,7 +1548,13 @@ export function buildSlides(d: DeckData, inp: DeckInput, tx: DeckText): Slide[] 
     if (id === 'ceo') out.push(...staticSlides('ceo', null, nextPage));
     if (id === 'contents') out.push(contents(plan));
   }
+  let part: string | null = null;
   for (const sec of plan.sections) {
+    if (plan.folders && sec.part && sec.part !== part) {
+      const p = plan.parts.find((x) => x.key === sec.part);
+      if (p) out.push(folder(p));
+    }
+    part = sec.part;
     {
       for (const n of sec.items) {
         const k = ALL_ITEMS.find((i) => i.id === n.id)!.kind;

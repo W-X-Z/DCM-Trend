@@ -132,7 +132,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
     selectAll<{ series_key: string; label_ko: string; unit: string; source_label: string; cycle: 'D' | 'M'; dt: string; value: number }>('v_market_daily', {
       dt: `gte.${shiftMonths(today, -22)}`, order: 'dt.asc',
     }).catch(() => []),
-    select<{ topic: string; as_of: string; valid_until: string; priority: number; impact: string; points: string[]; chart_series: string | null; chart_title: string | null; sources: { title: string; url: string; date: string | null }[] }>(
+    select<{ topic: string; as_of: string; valid_until: string; priority: number; impact: string; points: string[]; chart_series: string | null; chart_title: string | null; sources: { title: string; url: string; date: string | null }[]; section: string | null }>(
       'v_market_issues', { valid_until: `gte.${today}`, as_of: `gte.${shiftMonths(today, -3)}`, order: 'priority.desc,as_of.desc', limit: 20 },
     ).catch(() => []),
     select<BondIssue>('v_bond_issues', { demand_dt: `gte.${shiftMonths(today, -2)}`, order: 'demand_dt.desc', limit: 200 }).catch(() => [] as BondIssue[]),
@@ -313,7 +313,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
     }),
     issues: !issueRows.length && dm ? dm.issues : issueRows.map((x) => ({
       topic: x.topic, as_of: x.as_of, valid_until: x.valid_until, priority: x.priority, impact: x.impact, points: x.points ?? [],
-      chart: x.chart_series, chart_title: x.chart_title, sources: x.sources ?? [],
+      chart: x.chart_series, chart_title: x.chart_title, sources: x.sources ?? [], section: x.section === 'supply' ? 'supply' as const : 'issue' as const,
     })),
     recentIssues: recentRows.filter((p) => p.demand_dt && p.demand_dt <= today).map(toPeer),
     usViews: us.map((v) => ({

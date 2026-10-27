@@ -158,4 +158,5 @@ export type MarketSeries = { key: string; label: string; unit: string; source: s
 export type MarketIssue = {
   topic: string; as_of: string; valid_until: string; priority: number; impact: string; points: string[];
   chart: string | null; chart_title: string | null; sources: { title: string; url: string; date: string | null }[];
+  section?: 'issue' | 'supply'; // supply = 시장 수급(만기 집중·정책 자금): 주요 이슈가 아니라 만기도래 및 수급 장표에
 };
