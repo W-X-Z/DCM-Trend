@@ -1,4 +1,4 @@
-// 제안서 목차: 공모 회사채 기본형. Ⅰ부 = 회사별로 만드는 발행 제안, Ⅱ부 = 이번 달 Discussion Material(DM) 판을 그대로 붙이는 시장 동향.
+// 제안서 목차: 공모 회사채 기본형. Ⅰ부 = 회사별로 만드는 발행 제안, Ⅱ부 = 이번 달 Discussion Material(DM, 예: A급 회사채 시장동향) 판을 그 순서·양식 그대로 붙이는 시장 동향.
 // 현업 덱 구성(한화에어로스페이스 2025-08, 현대엘리베이터 2026-02, HD건설기계 2026: Ⅰ 발행 조건 제안 / Ⅱ 시장 동향)과
 // CJ프레시웨이 2026-03(1 발행 제안 / 2~4 금리 동향·전망·수요예측 = DM / 5 예정 내역)을 합쳐, DM 이 들어가는 자리를 한 덩어리로 모았다.
 // 번호는 부마다 1부터, 한 장에 장표가 둘 이상이면 ①②… 소제목(예: '1. 발행 조건 제안_② 트랜치 검토'). 간지는 부마다 한 장(선택).
@@ -10,7 +10,7 @@ export type ItemId =
   | 'terms' | 'sizing' | 'schedule' | 'sales' | 'ir'
   | 'rates' | 'bok' | 'fomc' | 'issues'
   | 'forecast' | 'credit_fc' | 'views' | 'usviews'
-  | 'peers' | 'compare' | 'corp'
+  | 'issuance' | 'liquidity' | 'peers' | 'compare' | 'corp'
   | 'pipeline'
   | 'nh_company' | 'nh_core' | 'nh_scope' | 'league' | 'strength' | 'nh_org'
   | 'maturity' | 'events' | 'datareport'
@@ -48,7 +48,6 @@ export const SECTIONS: Section[] = [
     key: 'sales', label: 'Sales 전략', part: 'Ⅰ',
     items: [{ id: 'sales', title: 'Sales 전략', kind: 'gen', on: true, note: '수요예측 참여 데이터 기반, 문안은 AI(기관별 내역은 내부 데이터)' }],
   },
-  { key: 'pipeline', label: '회사채 수요예측 예정 내역', part: 'Ⅰ', items: [{ id: 'pipeline', title: '회사채 수요예측 예정 내역', kind: 'gen', on: true }] },
   {
     key: 'nh', label: 'NH투자증권 강점', part: 'Ⅰ',
     items: [
@@ -60,21 +59,21 @@ export const SECTIONS: Section[] = [
       { id: 'nh_org', title: '조직단위별 업무 분장', kind: 'static', on: false },
     ],
   },
-  // Ⅱ. 회사채 시장 동향: DM 판 그대로(DM Ⅰ 시장 동향·Ⅱ 금리 및 시장 전망을 제안서 순서로)
+  // Ⅱ. 회사채 시장 동향: DM(A급 회사채 시장동향) 판 순서·양식 그대로. 1 금리 동향 / 2 금리 전망 / 3 발행시장 동향 / 4 수요예측 예정 내역 / Appendix
   {
     key: 'rates', label: '금리 동향', part: 'Ⅱ',
     items: [
-      { id: 'rates', title: '금리 동향', kind: 'gen', on: true, note: 'DM 금리 동향 문구 그대로, 차트는 고객 등급 신용스프레드' },
-      { id: 'bok', title: '금통위', kind: 'gen', on: true, note: 'DM Appendix 금통위 개요' },
-      { id: 'fomc', title: 'FOMC', kind: 'gen', on: true, note: '회의 결과만(다음 회의 전망은 증권사별 미국 전망 장표에)' },
-      { id: 'issues', title: '주요 이슈', kind: 'gen', on: true, note: 'DM 주요 이슈: 중요도·기준일로 상위 4개, 2장(수급 이슈는 만기도래 및 수급 장표로)' },
+      { id: 'rates', title: '금리 동향', kind: 'gen', on: true, note: 'DM 문구·차트 그대로(국고채·韓美 기준금리, AA- 스프레드). BBB 고객은 BBB- 스프레드' },
+      { id: 'bok', title: '금통위', kind: 'gen', on: true, note: 'DM 회의 장표: 결정 요약 + 핵심 포인트 + 경제전망·점도표·금리 차트' },
+      { id: 'fomc', title: 'FOMC', kind: 'gen', on: true, note: 'DM 회의 장표: 결정 요약 + 핵심 포인트 + SEP·점도표·금리 차트' },
+      { id: 'issues', title: '주요 이슈', kind: 'gen', on: false, note: 'DM 주요 이슈 2쪽(유가·주택, 주가·환율)' },
     ],
   },
   {
     key: 'outlook', label: '금리 전망', part: 'Ⅱ',
     items: [
-      { id: 'forecast', title: '기준금리 및 국고채 금리', kind: 'gen', on: true, note: 'DM 금리 전망① 문구 + NH 리서치 경로(내부 전망표 있으면 표)' },
-      { id: 'credit_fc', title: '회사채 금리', kind: 'gen', on: true, note: 'DM 금리 전망② 우량·비우량 단락(고객 등급 쪽 먼저) + 등급별 발행 결과' },
+      { id: 'forecast', title: '기준금리 및 국고채 금리', kind: 'gen', on: true, note: 'DM 금리 전망① 문구 + 기준금리 경로·한미 국고채 표(내부 전망표 있으면 그 표)' },
+      { id: 'credit_fc', title: '회사채 금리', kind: 'gen', on: true, note: 'DM 금리 전망② 우량·비우량 단락(고객 등급 쪽 먼저) + 등급별 발행 결과(고객 등급 강조)' },
       { id: 'views', title: '증권사별 국내 기준금리 전망', kind: 'gen', on: true },
       { id: 'usviews', title: '증권사별 미국 기준금리 전망', kind: 'gen', on: true },
     ],
@@ -82,16 +81,19 @@ export const SECTIONS: Section[] = [
   {
     key: 'market', label: '발행시장 동향', part: 'Ⅱ',
     items: [
-      { id: 'peers', title: '같은 등급 수요예측 결과', kind: 'gen', on: true, note: 'DM 수요예측 결과를 고객 등급으로 거른 표' },
+      { id: 'issuance', title: '공모사채 발행 규모', kind: 'gen', on: true, note: 'DM 등급별·월별 발행 규모 표(고객 등급 줄 강조)' },
+      { id: 'liquidity', title: '시장 유동성', kind: 'gen', on: false, note: 'DM IMA·발행어음·국민성장펀드·WGBI·연말연초 수급' },
+      { id: 'peers', title: '회사채 수요예측 결과', kind: 'gen', on: true, note: 'DM 수요예측 결과 표를 고객 등급으로' },
       { id: 'compare', title: '미매각 사례 분석', kind: 'gen', on: false },
       { id: 'corp', title: '최근 발행금리', kind: 'gen', on: false },
-      { id: 'maturity', title: '공모사채 만기도래 및 수급', kind: 'gen', on: true, note: 'DM 시장 수급 문구 + 등급별 만기도래 표' },
     ],
   },
+  { key: 'pipeline', label: '회사채 수요예측 예정 내역', part: 'Ⅱ', items: [{ id: 'pipeline', title: '회사채 수요예측 예정 내역', kind: 'gen', on: true }] },
   {
     key: 'A', label: 'Appendix', appendix: true,
     items: [
-      { id: 'events', title: '주요 이벤트', kind: 'gen', on: true },
+      { id: 'maturity', title: '공모사채 만기도래 현황', kind: 'gen', on: true, note: 'DM Appendix: 등급별 만기도래 차트·표(고객 등급 강조)' },
+      { id: 'events', title: '주요 일정', kind: 'gen', on: true },
       { id: 'datareport', title: '데이터 사용 현황', kind: 'gen', on: false, note: '장표별로 쓴 외부 데이터와 부족한 내부 데이터' },
     ],
   },

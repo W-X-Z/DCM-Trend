@@ -2,7 +2,8 @@
 
 // 슬라이드 미리보기 (HTML). 780x540pt 판을 화면 폭에 맞춰 줄인다.
 import type { CSSProperties, ReactNode } from 'react';
-import { BULLET_INDENT, cellBoxes, type BarChart, type Chart, type LineChart, type Para, type Prim, type Slide, type Table, type TextBox } from '@/lib/deck/model';
+import { BULLET_INDENT, cellBoxes, type BarChart, type Chart, type Para, type Prim, type Slide, type Table, type TextBox } from '@/lib/deck/model';
+import { colsGeom, lineGeom, type Geom } from '@/lib/deck/chart';
 import { C, LINE, PAGE } from '@/lib/deck/theme';
 
 const hex = (c?: string) => (c ? `#${c}` : undefined);
@@ -115,35 +116,22 @@ function BarEl({ c, x, y, w, h }: { c: BarChart; x: number; y: number; w: number
   );
 }
 
-function LineEl({ c, x, y, w, h }: { c: LineChart; x: number; y: number; w: number; h: number }) {
-  const left = 28;
-  const bottom = h - 34;
-  const pw = w - left - 6;
-  const sx = (i: number) => left + (c.cats.length <= 1 ? 0 : (i / (c.cats.length - 1)) * pw);
-  const sy = (v: number) => 6 + (1 - (v - c.min) / (c.max - c.min || 1)) * (bottom - 6);
-  const ticks: number[] = [];
-  for (let v = c.min; v <= c.max + 1e-9; v += c.step) ticks.push(Math.round(v * 100) / 100);
+function GeomEl({ g, x, y, w, h }: { g: Geom; x: number; y: number; w: number; h: number }) {
   return (
     <svg style={{ position: 'absolute', left: x, top: y, overflow: 'visible' }} width={w} height={h}>
-      {ticks.map((t) => (
-        <g key={t}>
-          <line x1={left} x2={left + pw} y1={sy(t)} y2={sy(t)} stroke={hex(C.grid)} strokeWidth={0.5} />
-          <text x={left - 4} y={sy(t) + 3} textAnchor="end" fontSize={7} fill={hex(C.sub)}>{t.toFixed(c.step >= 1 ? 0 : c.step < 0.5 ? 2 : 1)}</text>
-        </g>
+      {g.grid.map((l, i) => <line key={`g${i}`} x1={l.x1} x2={l.x2} y1={l.y} y2={l.y} stroke={hex(C.grid)} strokeWidth={0.5} />)}
+      {g.base && <line x1={g.base.x1} x2={g.base.x2} y1={g.base.y} y2={g.base.y} stroke={hex(C.sub)} strokeWidth={0.6} />}
+      {g.rects.map((r, i) => <rect key={`r${i}`} x={r.x} y={r.y} width={r.w} height={r.h} fill={hex(r.color)} />)}
+      {g.paths.map((p, i) => (
+        <path key={`p${i}`} d={p.pts.map((q, k) => `${k ? 'L' : 'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join('')} fill="none" stroke={hex(p.color)} strokeWidth={1.4} strokeLinejoin="round" />
       ))}
-      {c.cats.map((k, i) => (i % c.labelEvery === 0 ? <text key={i} x={sx(i)} y={bottom + 11} textAnchor="middle" fontSize={7} fill={hex(C.sub)}>{k}</text> : null))}
-      {c.series.map((s) => {
-        let d = '';
-        s.values.forEach((v, i) => {
-          if (v == null) return;
-          d += `${d ? 'L' : 'M'}${sx(i).toFixed(1)},${sy(v).toFixed(1)}`;
-        });
-        return <path key={s.name} d={d} fill="none" stroke={hex(s.color)} strokeWidth={1.8} strokeLinejoin="round" />;
-      })}
-      {c.series.map((s, i) => (
-        <g key={`lg-${s.name}`} transform={`translate(${left + i * Math.min(110, (w - left) / c.series.length)}, ${h - 10})`}>
-          <line x1={0} x2={14} y1={-3} y2={-3} stroke={hex(s.color)} strokeWidth={2} />
-          <text x={18} y={0} fontSize={7.5} fill={hex(C.ink)}>{s.name}</text>
+      {g.texts.map((t, i) => (
+        <text key={`t${i}`} x={t.x} y={t.y} textAnchor={t.anchor} fontSize={t.size} fontWeight={t.bold ? 700 : 400} fill={hex(t.color)}>{t.t}</text>
+      ))}
+      {g.legend.map((l, i) => (
+        <g key={`l${i}`} transform={`translate(${l.x}, ${l.y})`}>
+          {l.kind === 'line' ? <line x1={0} x2={12} y1={-2.5} y2={-2.5} stroke={hex(l.color)} strokeWidth={2} /> : <rect x={2} y={-6.5} width={8} height={7} fill={hex(l.color)} />}
+          <text x={16} y={0} fontSize={7.5} fill={hex(C.ink)}>{l.name}</text>
         </g>
       ))}
     </svg>
@@ -151,9 +139,10 @@ function LineEl({ c, x, y, w, h }: { c: LineChart; x: number; y: number; w: numb
 }
 
 function ChartEl({ ch }: { ch: Chart }) {
-  return ch.chart.kind === 'bar'
-    ? <BarEl c={ch.chart} x={ch.x} y={ch.y} w={ch.w} h={ch.h} />
-    : <LineEl c={ch.chart} x={ch.x} y={ch.y} w={ch.w} h={ch.h} />;
+  const c = ch.chart;
+  if (c.kind === 'bar') return <BarEl c={c} x={ch.x} y={ch.y} w={ch.w} h={ch.h} />;
+  const g = c.kind === 'line' ? lineGeom(c, ch.w, ch.h) : colsGeom(c, ch.w, ch.h);
+  return <GeomEl g={g} x={ch.x} y={ch.y} w={ch.w} h={ch.h} />;
 }
 
 function PrimEl({ p }: { p: Prim }) {

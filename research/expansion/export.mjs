@@ -26,7 +26,13 @@ const headers = { apikey: key, 'Accept-Profile': 'mart' };
 if (!key.startsWith('sb_')) headers.Authorization = `Bearer ${key}`;
 
 async function fromWebJson() {
-  const res = await fetch(`${fromWeb}/api/expansion/data`, { signal: AbortSignal.timeout(120_000) });
+  // 웹 함수가 막 깨어날 때(콜드 스타트) 첫 호출이 500 으로 끝나는 일이 있어 세 번까지 다시 부른다
+  let res;
+  for (let i = 0; i < 3; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 5000 * i));
+    res = await fetch(`${fromWeb}/api/expansion/data`, { signal: AbortSignal.timeout(120_000) });
+    if (res.ok || res.status < 500) break;
+  }
   if (!res.ok) throw new Error(`${fromWeb}/api/expansion/data ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const body = await res.json();
   if (!Array.isArray(body.companies) || !Array.isArray(body.events)) throw new Error('응답 형식이 다릅니다');

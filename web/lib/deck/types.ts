@@ -69,7 +69,7 @@ export type DeckData = {
   usViews: UsView[];
   // 시장 자료 팩(Discussion Material 데이터): 시장 지표 시계열, 주요 이슈, 최근 2개월 시장 전체 수요예측
   market?: MarketSeries[];
-  dm?: { edition: string; title: string; by: string; pages: import('./dm').DmEdition['pages'] } | null;
+  dm?: import('./dm').DmView | null;
   issues?: MarketIssue[];
   recentIssues?: PeerIssue[];
 };

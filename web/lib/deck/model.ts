@@ -33,8 +33,27 @@ export type BarChart = {
 export type LineChart = {
   kind: 'line'; cats: string[]; series: { name: string; color: string; values: (number | null)[] }[];
   min: number; max: number; step: number; unit: string; labelEvery: number;
+  ticks?: number[]; // 축 이름을 붙일 칸(없으면 labelEvery 간격)
+  legend?: boolean; // 범례 (기본 표시)
+  digits?: number; // 축 값 소수 자리 (없으면 간격으로 정함)
 };
-export type Chart = { k: 'chart'; x: number; y: number; w: number; h: number; chart: BarChart | LineChart };
+// 묶은 세로 막대(여러 계열, 쌓기 가능): DM 의 경제전망·점도표·월별 만기 차트
+export type ColsChart = {
+  kind: 'cols'; cats: string[]; series: { name: string; color: string; values: (number | null)[] }[];
+  min: number; max: number; step: number; digits?: number; labels?: boolean; legend?: boolean; stacked?: boolean;
+};
+export type Chart = { k: 'chart'; x: number; y: number; w: number; h: number; chart: BarChart | LineChart | ColsChart };
+
+// 축·값 표기: 1,000 이상은 천 단위 쉼표, 소수 자리는 digits(없으면 간격으로)
+export function numLabel(v: number, digits: number) {
+  return Math.abs(v) >= 1000 ? v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : v.toFixed(digits);
+}
+export const axisDigits = (step: number, digits?: number) => digits ?? (step >= 1 ? 0 : step < 0.5 ? 2 : 1);
+export const ticksOf = (min: number, max: number, step: number) => {
+  const out: number[] = [];
+  for (let v = min; v <= max + 1e-9; v += step) out.push(Math.round(v * 1e6) / 1e6);
+  return out;
+};
 
 export type Prim = TextBox | Rect | Line | Img | Table | Chart;
 // layout: NH 템플릿 레이아웃. chrome 은 레이아웃이 그리는 부분(머리띠·로고·쪽번호 등)이라 PPTX 에서는 그리지 않고,

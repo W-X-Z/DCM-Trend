@@ -4,7 +4,7 @@
 // 화면의 '데이터' 탭과 Appendix '데이터 사용 현황' 장표가 같은 결과를 쓴다.
 import { itemOf, planOf, type ItemId, type Plan } from './catalog';
 import { maturityBuckets, tenorMix } from './analytics';
-import { forecastStale, horizonOf, peerPool, pickIssues, pipelineOf, scheduleOf, supplyIssues } from './rules';
+import { forecastStale, horizonOf, peerPool, pickIssues, pipelineOf, scheduleOf } from './rules';
 import { hasTable } from './tsv';
 import type { DeckData, DeckInput } from './types';
 
@@ -48,7 +48,19 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
   const int = (label: string, source: string, ok: boolean, note: string): Src => ({ kind: 'int', label, source, status: ok ? 'used' : 'missing', note: ok ? undefined : note });
   const daily = d.daily.some((s) => s.key === 'ktb3y' && s.pts.length >= 120);
   const rateDt = latest(d.rates.map((r) => r.dt));
+  // DM 판(공개 자료로 만든 시장 자료)을 그대로 쓴 장표: 판 이름·기준일
+  const dmUsed = (what: string, ok: boolean): Src[] => (d.dm && ok ? [ext(`${d.dm.title} ${what}`, `DM 판(${d.dm.by}, 공개 자료)`, true, d.dm.edition)] : []);
   switch (id) {
+    case 'issuance':
+      return [
+        ...dmUsed('등급별·월별 공모 회사채 발행 규모', !!d.dm?.issuance),
+        int('공모 회사채 발행 통계(무보증 공모사채)', 'Bondweb', false, 'DART 증권신고서·발행실적 집계로 대체(범위가 달라 금액이 다를 수 있음)'),
+      ];
+    case 'liquidity':
+      return [
+        ...dmUsed('시장 유동성(IMA·발행어음·국민성장펀드·WGBI·연말연초 수급)', !!d.dm?.liquidity),
+        int('NH Discussion Material 시장 유동성', 'IB·리서치', false, '공개 자료(금융위·금투협·언론)로 대체'),
+      ];
     case 'terms':
       return [
         ext('신용등급·직전 회차 조건', 'DART 증권신고서', !!(d.own.length || d.company.rating), d.own[0]?.deal_dt),
@@ -79,6 +91,7 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
       ];
     case 'rates':
       return [
+        ...dmUsed('금리 동향 문구·차트', !!d.dm?.charts?.rates?.length),
         { kind: 'ext', label: '기준금리·국고채·회사채 AA-/BBB- 금리', source: '한국은행 ECOS', status: daily ? 'used' : d.rates.length ? 'alt' : 'missing', asof: rateDt, note: daily ? undefined : d.rates.length ? '일별 값이 부족해 월말 값으로 그림' : '금리 데이터 없음' },
         ext('韓·美 정책금리 변경 이력', '한국은행·미 연준', d.policyHistory.kr.length > 0 || d.policyHistory.us.length > 0),
         int('발행사 등급 민평·신용스프레드 시계열', '민평 4사·본드웹', false, '스프레드 차트는 AA-·BBB- 3년으로 대체'),
@@ -88,6 +101,7 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
       const m = id === 'bok' ? d.policy.bok : d.policy.fomc;
       const who = id === 'bok' ? '한국은행' : '미 연준';
       return [
+        ...dmUsed(`${id === 'bok' ? '금통위' : 'FOMC'} 장표(핵심 포인트·차트)`, !!d.dm?.meetings?.[id]),
         ext(`${id === 'bok' ? '금통위' : 'FOMC'} 결정·표결·핵심 포인트`, m?.sources.length ? m.sources.map((s) => s.title).slice(0, 2).join('; ') : who, !!m, m?.meeting_dt),
         int('NH 리서치 회의 리뷰(Discussion Material)', 'NH 리서치', false, '한국은행·미 연준 발표 기준으로만 요약'),
       ];
@@ -95,6 +109,7 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
     case 'forecast': {
       const fc = d.forecast;
       const pasted = hasTable(inp.internal?.rateFc);
+      if (!pasted && d.dm?.forecastTable) return [...dmUsed('기준금리 경로·한미 국고채 표', true), ext('리서치 주제별 의견', fc ? fc.house : 'NH 리서치', !!fc?.notes.length, latest(fc?.notes.map((x) => x.date) ?? [])), int('NH 분기별 금리 전망표(기준금리·국고·미국채)', 'NH 리서치', false, '공개 코멘트의 기준금리 경로와 국고채 실적으로 대체')];
       return [
         ...(pasted ? [] : [{ kind: 'ext', label: '리서치 공개 금리 전망표', source: fc ? `${fc.house} ${fc.title}` : 'NH 리서치 공개 자료', status: fc && !forecastStale(d) ? 'alt' : 'missing', asof: fc?.published_dt ?? null, note: !fc ? '공개 전망표 없음' : forecastStale(d) ? '발표 이후 금통위·FOMC가 있어 표 생략(의견만 사용)' : '분기 전망표 대신 공개 요약표' } as Src]),
         ext('리서치 주제별 의견', fc ? fc.house : 'NH 리서치', !!fc?.notes.length, latest(fc?.notes.map((x) => x.date) ?? [])),
@@ -109,6 +124,7 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
       ];
     case 'issues': {
       const xs = pickIssues(d);
+      if (d.dm?.issuePages?.length) return [...dmUsed('주요 이슈 문구·차트(유가·주택·주가·환율)', true), int('NH Discussion Material 주요 이슈', 'IB·리서치', false, '공개 자료로 만든 DM 판으로 대체')];
       return [
         ext('주요 이슈(시장 자료 팩)', xs.map((x) => x.topic).join('·') || '시장 자료 팩', xs.length > 0, latest(xs.map((x) => x.as_of)), '중요도·기준일로 선택(수급 이슈는 만기도래 및 수급 장표)'),
         ext('시장 지표(환율·KOSPI·유가·아파트값)', '한국은행 ECOS·FRED', (d.market ?? []).length > 0, latest((d.market ?? []).map((m) => m.pts[m.pts.length - 1]?.[0] ?? ''))),
@@ -139,13 +155,8 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
     case 'league':
     case 'strength':
       return [ext('대표주관·인수 실적', 'DART 증권신고서', d.leagueYearly.length > 0 || d.league.rows.length > 0)];
-    case 'maturity': {
-      const xs = supplyIssues(d);
-      return [
-        ext('등급별 월별 만기도래', 'DART 발행 내역', true, d.maturityByGrade.asof),
-        ...(xs.length ? [ext('시장 수급(만기 집중·정책 자금)', xs.map((x) => x.topic).join('·'), true, latest(xs.map((x) => x.as_of)), 'Discussion Material 시장 수급 문구')] : []),
-      ];
-    }
+    case 'maturity':
+      return [ext('등급별 월별 만기도래', 'DART 발행 내역', true, d.maturityByGrade.asof)];
     case 'events':
       return [ext('금통위·FOMC·정기보고서 일정', '한국은행·미 연준·금융감독원', d.events.length > 0)];
     case 'ir': case 'nh_company': case 'nh_core': case 'nh_scope': case 'nh_org': case 'ceo':
