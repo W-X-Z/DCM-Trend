@@ -508,7 +508,14 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     fee: inp.feeNote,
   };
 
-  return { lead, peers, compare, schedule, structure, structureRows, strengths, rates, corp, views, sizing, pipeline, bok, fomc, usviews, forecast, league, maturity, sales, termNotes };
+  // 시장 장표는 Discussion Material 판 문구를 그대로 쓴다(현업 방식). 판이 없으면 위의 규칙 문구
+  const dmp = d.dm?.pages;
+  const use = (x: string[] | undefined, fb: string[]) => (x?.length ? [...x] : fb);
+  return {
+    lead, peers, compare, schedule, structure, structureRows, strengths,
+    rates: use(dmp?.rates, rates), corp, views: use(dmp?.views, views), sizing, pipeline, bok: use(dmp?.bok, bok), fomc, usviews,
+    forecast: use(dmp?.forecast, forecast), league, maturity, sales, termNotes,
+  };
 }
 
 // 다음 조정 경로 문구에서 '인상' 시점(월) 목록: '10월 동결·12월 인상' → [12], '11월·내년 2월 인상' → [11, 2]

@@ -1,4 +1,5 @@
 // 제안서 데이터 조립 (서버). 공개 공시·시장 데이터만 담는다. 회사별 제안 조건(금액·일정 등)은 받지 않는다.
+import { dmFor } from './dm';
 import 'server-only';
 import { select, selectAll } from '../db';
 import { kstToday } from '../filings';
@@ -159,6 +160,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
   const recent6 = peerRows.filter((p) => (p.deal_dt ?? '') >= shiftMonths(today, -6) && (p.sub_type ?? '일반회사채') === '일반회사채');
 
   // 전망표: 가장 최근 발표 하나
+  const dm = dmFor(today);
   const fcHouse = fc[0];
   const fcRows = fcHouse ? fc.filter((r) => r.house === fcHouse.house && r.published_dt === fcHouse.published_dt) : [];
   const keys = [...new Set(fcRows.map((r) => r.series_key))];
@@ -304,11 +306,12 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
       kr: polHist.filter((x) => x.country === 'KR').map((x) => ({ dt: x.effective_dt, rate: Number(x.rate_high ?? x.rate_low) })),
       us: polHist.filter((x) => x.country === 'US').map((x) => ({ dt: x.effective_dt, low: Number(x.rate_low), high: Number(x.rate_high) })),
     },
-    market: [...new Set(mktRows.map((r) => r.series_key))].map((k) => {
+    dm: dm ? { edition: dm.edition, title: dm.title, by: dm.by, pages: dm.pages } : null,
+    market: !mktRows.length && dm ? dm.market : [...new Set(mktRows.map((r) => r.series_key))].map((k) => {
       const rs = mktRows.filter((r) => r.series_key === k);
       return { key: k, label: rs[0].label_ko, unit: rs[0].unit, source: rs[0].source_label, cycle: rs[0].cycle, pts: rs.map((r) => [r.dt, Number(r.value)] as [string, number]) };
     }),
-    issues: issueRows.map((x) => ({
+    issues: !issueRows.length && dm ? dm.issues : issueRows.map((x) => ({
       topic: x.topic, as_of: x.as_of, valid_until: x.valid_until, priority: x.priority, impact: x.impact, points: x.points ?? [],
       chart: x.chart_series, chart_title: x.chart_title, sources: x.sources ?? [],
     })),

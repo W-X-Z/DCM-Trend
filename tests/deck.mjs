@@ -163,6 +163,33 @@ const check = (name, cond, detail = '') => {
     const crowd = m.marketCrowd({ ...d, maturityByGrade: mg }, '2027-02-10');
     check('일정: 납입월 시장 만기 집중이면 분산 검토 문구', !!crowd && /최대/.test(crowd) && /연초/.test(crowd) && !m.marketCrowd({ ...d, maturityByGrade: mg }, '2027-03-10'), crowd);
   }
+  {
+    // 현업 방식: 시장 장표는 DM 판 문구를 그대로, 고객 등급 쪽만 맞춤
+    const dm = { edition: d.asof, title: '회사채 Discussion Material', by: 'IB Agent', pages: {
+      rates: ['DM 국고채 문단', 'DM 회사채 문단', 'DM 스프레드 문단'], bok: ['DM 금통위 요약'], views: ['DM 증권사 요약'],
+      forecast: ['■ 한국 기준금리 전망', 'DM 기준금리 문단'],
+      credit_fc: { high: { title: 'AA등급 이상(우량채) 회사채 시장 전망', lines: ['우량 문단'] }, low: { title: 'A등급 이하(비우량채) 회사채 시장 전망', lines: ['비우량 문단'] } },
+    } };
+    const dd = { ...d, dm };
+    const t2 = m.ruleText(dd, inp);
+    check('DM: 시장 장표 문구는 판 그대로(금리 동향·금통위·증권사 전망·금리 전망)', t2.rates.join() === dm.pages.rates.join() && t2.bok[0] === 'DM 금통위 요약' && t2.views[0] === 'DM 증권사 요약' && t2.forecast[0].startsWith('■') && t2.sizing.join() === tx.sizing.join());
+    const rs = m.buildSlides(dd, { ...inp, items: { ...inp.items, credit_fc: true } }, t2);
+    const rate = rs.find((x) => x.id === 'rates');
+    check('DM: 금리 동향은 문구 + 차트 두 개(금리 표 없음), 각주에 판 표기', !rate.prims.some((p) => p.k === 'table') && rate.prims.filter((p) => p.k === 'chart').length === 2 && JSON.stringify(rate.prims).includes('판, IB Agent'));
+    const txtOf = (sl) => sl.prims.filter((p) => p.k === 'text').flatMap((p) => p.paras.map((q) => q.runs.map((r) => r.t).join('')));
+    const fcs = rs.find((x) => x.id === 'forecast');
+    const head = fcs.prims.filter((p) => p.k === 'text').flatMap((p) => p.paras).find((q) => q.runs.map((r) => r.t).join('').startsWith('■'));
+    check('DM: 금리 전망 상자 ■ 소제목은 글머리 없이', !!head && !head.bullet);
+    const lowCo = { ...dd, company: { ...dd.company, rating: 'A+', rating_group: 'A' }, recentIssues: [
+      { key: 'x1', corp_code: 'x', corp_name: 'x', sub_type: '일반회사채', series: '1', rating: 'A+', rating_group: 'A', demand_dt: '2026-09-02', pricing_dt: null, deal_dt: null, tenor_combo: '', initial_krw: 1, amount_krw: 1, demand_krw: 1, in_band_krw: 1, ratio: 3, under: false, increased: false, band_type: '개별민평', band_low: -30, band_high: 30, fee_bp: 1, lead: null, nh_lead: false, amount_max_krw: null, tranches: [{ tenor: '2년', months: 24, initial_krw: 1, amount_krw: 1, demand_krw: 1, in_band_krw: 1, ratio: 3, under: false, yield_pct: 4.8, spread_bp: 1, band_type: '개별민평', band_low: -30, band_high: 30, maturity_dt: null, byType: null }, { tenor: '3년', months: 36, initial_krw: 1, amount_krw: 1, demand_krw: 1, in_band_krw: 1, ratio: 3, under: false, yield_pct: 4.9, spread_bp: 1, band_type: '개별민평', band_low: -30, band_high: 30, maturity_dt: null, byType: null }] },
+      { key: 'x2', corp_code: 'y', corp_name: 'y', sub_type: '일반회사채', series: '1', rating: 'AA-', rating_group: 'AA', demand_dt: '2026-10-02', pricing_dt: null, deal_dt: null, tenor_combo: '', initial_krw: 1, amount_krw: 1, demand_krw: 1, in_band_krw: 1, ratio: 3, under: false, increased: false, band_type: '개별민평', band_low: -30, band_high: 30, fee_bp: 1, lead: null, nh_lead: false, amount_max_krw: null, tranches: [{ tenor: '2년', months: 24, initial_krw: 1, amount_krw: 1, demand_krw: 1, in_band_krw: 1, ratio: 3, under: false, yield_pct: 4.5, spread_bp: 1, band_type: '개별민평', band_low: -30, band_high: 30, maturity_dt: null, byType: null }, { tenor: '3년', months: 36, initial_krw: 1, amount_krw: 1, demand_krw: 1, in_band_krw: 1, ratio: 3, under: false, yield_pct: 4.6, spread_bp: 1, band_type: '개별민평', band_low: -30, band_high: 30, maturity_dt: null, byType: null }] },
+    ] };
+    const cs = m.buildSlides(lowCo, { ...inp, items: { ...inp.items, credit_fc: true } }, m.ruleText(lowCo, inp)).find((x) => x.id === 'credit_fc');
+    const ct = txtOf(cs);
+    const tbl = cs.prims.find((p) => p.k === 'table');
+    const hiRows = tbl.rows.filter((r) => r.some((c) => c && c.fill === 'FFF2CC'));
+    check('DM: A등급 고객은 비우량채 전망이 위, 표에서 고객 등급(A+) 행 강조', ct.findIndex((x) => /A등급 이하/.test(x)) < ct.findIndex((x) => /AA등급 이상/.test(x)) && hiRows.length === 2, `${ct.join(' | ')} / ${hiRows.length}`);
+  }
   const typed = m.typedIssues(d.own, 4);
   check('장표: 투자자 구분은 수집된 회차만 집계·회차 표기', typed.list.length >= 1 && typed.list.every((p) => p.tranches.some((t) => t.byType?.length)) && tx.sales.some((x) => x.includes(typed.label)), `${typed.label} | ${tx.sales[0]}`);
   {

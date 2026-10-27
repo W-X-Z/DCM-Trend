@@ -119,6 +119,11 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   }
   // 3. 등급별 회사채 전망표(내부 데이터) 점검
   if (on('credit_fc')) for (const s of creditGridIssues(parseTsv(inp.internal?.creditFc ?? ''))) out.push({ level: 'warn', item: 'credit_fc', text: `회사채 전망표: ${s}` });
+  // 3-0. 시장 자료(DM) 판 이후 금통위·FOMC 가 있었으면 시장 장표 문구가 이전 시점 기준임을 알린다
+  if (d.dm && (on('rates') || on('forecast') || on('credit_fc'))) {
+    const after = d.events.filter((e) => (e.kind === '금통위' || e.kind === 'FOMC') && (e.end_dt ?? e.event_dt) > d.dm!.edition && (e.end_dt ?? e.event_dt) < d.asof).map((e) => `${e.kind}(${yymmdd(e.end_dt ?? e.event_dt)})`);
+    if (after.length) out.push({ level: 'warn', item: 'rates', text: `시장 장표 문구는 ${d.dm.title} ${yymmdd(d.dm.edition)} 판입니다. 이후 ${after.join('·')}가 있어 판 갱신이 필요합니다.` });
+  }
   // 3-1. 주요 이슈는 시점에 따라 중요도가 바뀐다: 이슈 기준일 뒤에 금통위·FOMC 가 있었거나 30일이 지났으면 갱신 확인
   if (on('issues')) {
     const meets = d.events.filter((e) => (e.kind === '금통위' || e.kind === 'FOMC') && (e.end_dt ?? e.event_dt) < d.asof).map((e) => e.end_dt ?? e.event_dt);
