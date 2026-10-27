@@ -1,32 +1,44 @@
 'use client';
 
-// 제안서 작성: 조건 입력 → 일정·사례 선택 → 문안(규칙, 또는 현업 노하우를 반영한 AI 문안) → 미리보기 → PPTX·PDF 내려받기.
-// 장표마다 쓴 외부 데이터와 아직 연결되지 않은 내부 데이터를 '데이터·검수' 탭에서 보여 준다.
+// 제안서 초안: 회사를 고르면 바로 장표 초안이 보인다. 목차는 템플릿 칩·개별 선택으로 바꾸고,
+// '관련 데이터' 탭에서 공시·금리 데이터와 장표별 사용 데이터(외부·내부)를, '검토' 탭·장표 위 표시로 사람이 확인할 곳을 보여 준다.
+// 조건·일정·사례·문안을 고친 뒤 PPTX·PDF 로 내려받는다.
 // 입력값·문안은 이 브라우저(localStorage)에만 저장한다. 서버에는 공개 데이터·노하우 조회와 AI 문안 요청만 보낸다.
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Info } from '@/components/Ui';
 import { bandRange, eok, mdw, ratioX, rate3, yy } from '@/lib/deck/fmt';
-import { BACK, FRONT, SECTIONS, defaultItems, planOf, type Item, type ItemId } from '@/lib/deck/catalog';
+import { BACK, FRONT, SECTIONS, TEMPLATES, planOf, templateOf, type Item, type ItemId } from '@/lib/deck/catalog';
 import { KIND_LABEL, forGrade, type Knowledge, type KnowledgeSlide } from '@/lib/deck/knowledge';
 import { available, buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
 import { defaultInput, factsFor, peerPool, ruleText, scheduleOf, totalEok } from '@/lib/deck/rules';
 import { dataReport, STATUS_LABEL, type DataReport } from '@/lib/deck/sources';
 import { qaChecks, type Qa } from '@/lib/deck/qa';
+import { MARK_LABEL, reviewMarks, type Mark } from '@/lib/deck/review';
+import type { Draft } from '@/lib/proposal';
 import { PAGE } from '@/lib/deck/theme';
 import type { Slide } from '@/lib/deck/model';
 import type { DeckData, DeckInput, DeckText } from '@/lib/deck/types';
-import { SlideView } from './SlideView';
+import { SlideView, type ViewMark } from './SlideView';
 
 type Mode = 'rule' | 'ai' | 'edited';
 // 고칠 항목 탭: 평소에는 접어 두고 장표만 크게 보인다
-type Tab = 'terms' | 'schedule' | 'peers' | 'toc' | 'text' | 'data' | 'internal' | 'cover';
+type Tab = 'review' | 'data' | 'toc' | 'terms' | 'schedule' | 'peers' | 'text' | 'internal' | 'cover';
 const TABS: [Tab, string][] = [
-  ['terms', '발행 조건'], ['schedule', '일정'], ['peers', '수요예측 사례'], ['toc', '목차'], ['text', '문안'], ['data', '데이터·검수'], ['internal', '내부 데이터'], ['cover', '표지'],
+  ['data', '관련 데이터'], ['review', '검토'], ['toc', '목차'], ['terms', '발행 조건'], ['schedule', '일정'], ['peers', '수요예측 사례'], ['text', '문안'], ['internal', '내부 데이터'], ['cover', '표지'],
 ];
 // v3: 기본형 목차(2026-10-27). 이전 버전에 저장된 목차 선택은 버리고 새 기본값을 쓴다.
 type Saved = { v: 2 | 3; input: DeckInput; text: DeckText | null; mode: Mode; factsKey: string | null; at: string };
 const KEY = (corp: string) => `deck:v2:${corp}`;
+// 검토 표시에서 '확인'한 항목(내용이 바뀌면 키가 바뀌어 다시 보인다)
+const RKEY = (corp: string) => `deck:review:${corp}`;
+function loadSet(k: string) {
+  try {
+    return new Set<string>(JSON.parse(localStorage.getItem(k) ?? '[]'));
+  } catch {
+    return new Set<string>();
+  }
+}
 
 function load(corp: string): Saved | null {
   try {
@@ -98,8 +110,42 @@ export function DeckStudio({ corp }: { corp: string }) {
   const [note, setNote] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [tips, setTips] = useState<Knowledge[]>([]);
-  const [tab, setTab] = useState<Tab | null>(null);
+  // 처음에는 장표 초안과 관련 데이터를 함께 보여 준다
+  const [tab, setTab] = useState<Tab | null>('data');
   const [cur, setCur] = useState(0);
+  // 검토 표시: 장표 위 강조(켜고 끄기), 표시 밖 흐리게, 검토할 장표만 넘기기, 확인한 항목 숨기기
+  const [showMarks, setShowMarks] = useState(true);
+  const [focus, setFocus] = useState(false);
+  const [onlyReview, setOnlyReview] = useState(false);
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const [activeMark, setActiveMark] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null | 'error'>(null);
+
+  useEffect(() => {
+    setDone(loadSet(RKEY(corp)));
+    // 관련 데이터(공시·금리 요약): 제안서 초안 화면 오른쪽 '관련 데이터' 탭
+    let alive = true;
+    setDraft(null);
+    fetch(`/api/proposal?corp=${encodeURIComponent(corp)}&type=bond&format=json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j) => alive && setDraft(j as Draft))
+      .catch(() => alive && setDraft('error'));
+    return () => {
+      alive = false;
+    };
+  }, [corp]);
+  const confirm = useCallback((keys: string[], v = true) => {
+    setDone((x) => {
+      const n = new Set(x);
+      for (const k of keys) (v ? n.add(k) : n.delete(k));
+      try {
+        localStorage.setItem(RKEY(corp), JSON.stringify([...n]));
+      } catch {
+        /* 무시 */
+      }
+      return n;
+    });
+  }, [corp]);
 
   // 현업 노하우(장표별): 문안 칸 아래에 보여 주고, AI 문안에 넣는다
   useEffect(() => {
@@ -158,6 +204,8 @@ export function DeckStudio({ corp }: { corp: string }) {
     const shown = new Set(plan.sections.flatMap((s) => s.items.map((i) => i.id)));
     return qaChecks(data, input, shownText, { on: (id) => shown.has(id), edited: mode === 'edited', extraAllowed: [tips.map((k) => k.body)] });
   }, [data, input, shownText, mode, tips]);
+  const marks = useMemo(() => (data && input && shownText ? reviewMarks(slides, data, input, shownText, qa) : []), [slides, data, input, shownText, qa]);
+  const openMarks = useMemo(() => marks.filter((m) => !done.has(m.key)), [marks, done]);
 
   // 저장 (입력이 바뀌면 0.6초 뒤)
   useEffect(() => {
@@ -234,7 +282,7 @@ export function DeckStudio({ corp }: { corp: string }) {
     setNote('기본값으로 되돌렸습니다.');
   }
 
-  if (err) return <p className="empty">{err} <Link href="/proposal/deck">다른 회사 고르기</Link></p>;
+  if (err) return <p className="empty">{err} <Link href="/proposal">다른 회사 고르기</Link></p>;
   if (!data || !input || !shownText) return <Loading />;
 
   const sch = scheduleOf(data, input);
@@ -245,6 +293,17 @@ export function DeckStudio({ corp }: { corp: string }) {
   const curItem = slides[at] ? slides[at].id.replace(/-\d+$/, '') : '';
   const curSrcs = report?.items.find((x) => x.id === curItem)?.srcs ?? [];
   const curQa = qa.filter((x) => x.item === curItem && x.level === 'warn').length;
+  // 장표별 남은 검토 수, '검토할 장표만' 이면 그 장표만 넘긴다
+  const perSlide = new Map<number, number>();
+  for (const m of openMarks) perSlide.set(m.slide, (perSlide.get(m.slide) ?? 0) + 1);
+  const order = onlyReview && perSlide.size ? slides.map((_, i) => i).filter((i) => perSlide.has(i)) : slides.map((_, i) => i);
+  const curMarks = openMarks.filter((m) => m.slide === at);
+  const viewMarks: ViewMark[] = showMarks ? curMarks.map((m, i) => ({ ...m, n: i + 1 })) : [];
+  const tpl = templateOf(input.items);
+  const go = (i: number) => {
+    setCur(i);
+    setActiveMark(null);
+  };
 
   // 탭 버튼: 같은 탭을 다시 누르면 닫는다
   const toggle = (t: Tab) => setTab((x) => (x === t ? null : t));
@@ -404,7 +463,13 @@ export function DeckStudio({ corp }: { corp: string }) {
         )}
       </>
     ),
-    data: report ? <DataPanel report={report} qa={qa} goTo={(id) => { const i = slides.findIndex((s) => s.id.replace(/-\d+$/, '') === id); if (i >= 0) setCur(i); }} /> : null,
+    data: report ? <DataPanel report={report} draft={draft} goTo={(id) => { const i = slides.findIndex((s) => s.id.replace(/-\d+$/, '') === id); if (i >= 0) go(i); }} /> : null,
+    review: (
+      <ReviewPanel marks={marks} done={done} slides={slides} cur={at}
+        goTo={(m) => { go(m.slide); setActiveMark(m.key); setShowMarks(true); }}
+        fix={(m) => { const t = markTarget(m); open(t.tab, t.anchor); }}
+        confirm={confirm} />
+    ),
     internal: (
       <>
         <p className="small muted dk-panel-note">
@@ -434,7 +499,8 @@ export function DeckStudio({ corp }: { corp: string }) {
     peers: `${input.peerKeys.length}건`,
     toc: `${slides.length}장`,
     text: mode === 'rule' ? '' : mode === 'ai' ? 'AI' : '수정',
-    data: qa.filter((x) => x.level === 'warn').length ? `경고 ${qa.filter((x) => x.level === 'warn').length}` : report?.intMissing.length ? `미연결 ${report.intMissing.length}` : '',
+    review: openMarks.length ? `${openMarks.length}` : '완료',
+    data: report?.intMissing.length ? `내부 미연결 ${report.intMissing.length}` : '',
   };
 
   return (
@@ -458,6 +524,27 @@ export function DeckStudio({ corp }: { corp: string }) {
         </div>
       </div>
 
+      <div className="dk-tplbar">
+        <div className="dk-tpl" role="group" aria-label="목차 템플릿">
+          <span className="dk-tpl-k small">목차</span>
+          {TEMPLATES.map((t) => (
+            <button key={t.key} type="button" className="dk-chip" aria-pressed={tpl === t.key} title={t.hint} onClick={() => { set('items', t.items()); go(0); }}>
+              {t.label}
+            </button>
+          ))}
+          {!tpl && <span className="dk-chip is-custom" aria-current="true">직접 선택</span>}
+          <button type="button" className="linklike small" onClick={() => open('toc')}>장표 고르기 ({slides.length}장)</button>
+        </div>
+        <div className="dk-rv" role="group" aria-label="검토 표시">
+          <button type="button" className={`dk-rv-count${openMarks.length ? '' : ' is-done'}`} onClick={() => open('review')}>
+            {openMarks.length ? <>검토 필요 <strong className="tnum">{openMarks.length}</strong></> : '검토 완료'}
+          </button>
+          <label className="dk-switch small"><input type="checkbox" checked={showMarks} onChange={(e) => setShowMarks(e.target.checked)} />강조 표시</label>
+          <label className="dk-switch small"><input type="checkbox" checked={focus} disabled={!showMarks} onChange={(e) => setFocus(e.target.checked)} />검토할 곳만 보기</label>
+          <label className="dk-switch small"><input type="checkbox" checked={onlyReview} onChange={(e) => { setOnlyReview(e.target.checked); if (e.target.checked && !perSlide.has(at)) { const n = [...perSlide.keys()].sort((a, b) => a - b)[0]; if (n != null) go(n); } }} />검토할 장표만</label>
+        </div>
+      </div>
+
       <div className="dk-tabbar">
         <nav className="dk-tabs" aria-label="고칠 항목">
           {TABS.map(([t, label]) => (
@@ -474,8 +561,12 @@ export function DeckStudio({ corp }: { corp: string }) {
       </div>
 
       <div className={`dk-work${tab ? ' has-panel' : ''}`}>
-        <Rail slides={slides} cur={at} setCur={setCur} />
-        <Stage slides={slides} cur={at} setCur={setCur} busy={busy === 'ai'}
+        <Rail slides={slides} cur={at} setCur={go} order={order} counts={showMarks ? perSlide : new Map()} />
+        <Stage slides={slides} cur={at} setCur={go} busy={busy === 'ai'} order={order}
+          marks={viewMarks} focus={showMarks && focus} active={activeMark} onPick={(k) => setActiveMark((x) => (x === k ? null : k))}
+          review={showMarks ? curMarks : []}
+          onFix={(m) => { const t = markTarget(m); open(t.tab, t.anchor); }}
+          onDone={(keys) => { confirm(keys); setActiveMark(null); }}
           edit={targets.map((x) => ({ label: x.label, go: () => open(x.tab, x.anchor) }))}
           srcs={curSrcs.length ? { ext: curSrcs.filter((s) => s.kind === 'ext' && s.status !== 'missing').length, miss: curSrcs.filter((s) => s.kind === 'int' && s.status === 'missing').length, alt: curSrcs.filter((s) => s.status === 'alt').length, warn: curQa, go: () => open('data', `dk-d-${curItem}`) } : null} />
         {tab && (
@@ -562,6 +653,7 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
   const labels = new Map(plan.sections.flatMap((s) => s.items.map((i) => [i.id, i.label] as const)));
   const count = [...FRONT, ...SECTIONS.flatMap((x) => x.items), BACK].filter((i) => on[i.id] && avail(i.id)).length;
   const toggle = (id: ItemId, v: boolean) => set('items', { ...on, [id]: v });
+  const tpl = templateOf(on);
   const row = (i: Item) => {
     const ok = avail(i.id);
     return (
@@ -579,7 +671,13 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
   const staticOn = (['ir', 'nh_org'] as ItemId[]).some((id) => on[id]);
   return (
     <>
-      <p className="small muted dk-count">{count}개 항목</p>
+      <div className="dk-tpl dk-tpl-panel" role="group" aria-label="목차 템플릿">
+        {TEMPLATES.map((t) => (
+          <button key={t.key} type="button" className="dk-chip" aria-pressed={tpl === t.key} onClick={() => set('items', t.items())}>{t.label}</button>
+        ))}
+        {!tpl && <span className="dk-chip is-custom" aria-current="true">직접 선택</span>}
+      </div>
+      <p className="small muted dk-count">{TEMPLATES.find((t) => t.key === tpl)?.hint ?? '템플릿에서 장표를 더하거나 뺐습니다.'} · {count}개 항목</p>
       <ul className="dk-toc">{FRONT.map((i) => row(i))}</ul>
       {SECTIONS.map((sec) => (
         <fieldset key={sec.key} className="dk-toc-sec">
@@ -593,31 +691,57 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
           <input value={input.coverDept} onChange={(e) => set('coverDept', e.target.value)} />
         </Field>
       )}
-      <p className="small"><button type="button" className="linklike" onClick={() => set('items', defaultItems())}>기본 목차로</button></p>
     </>
   );
 }
 
-// 데이터·검수: 검수 경고, 연결하면 채워질 내부 데이터, 장표별 사용 데이터
-function DataPanel({ report, qa, goTo }: { report: DataReport; qa: Qa[]; goTo: (id: string) => void }) {
+// 관련 데이터: 공시·금리 요약(제안서 초안 데이터) + 장표별 사용 데이터(외부·내부) + 연결하면 채워질 내부 데이터
+const DRAFT_ST: Record<string, string> = { filled: '채움', partial: '일부', needed: '추가 필요' };
+function DataPanel({ report, draft, goTo }: { report: DataReport; draft: Draft | null | 'error'; goTo: (id: string) => void }) {
   return (
     <>
       <p className="small dk-panel-note">
         외부 데이터 <strong>{report.extSources.length}</strong>개 출처 사용 · 내부 데이터 미연결 <strong>{report.intMissing.length}</strong>건{report.omitted.length ? <> · 생략 <strong>{report.omitted.length}</strong>장</> : null}
         <Info>외부 데이터는 사외에서 누구나 접근 가능한 공개 자료(DART·ECOS·한국은행·미 연준·증권사 공개 리포트), 내부 데이터는 NH 자체 자료와 구독 데이터(민평 4사·FnGuide 등)입니다. 내부 데이터는 사내 시스템에서 연계하면 채워지고, 프로토타입에서는 '내부 데이터' 탭에 붙여넣어 시험할 수 있습니다. Appendix '데이터 사용 현황'을 켜면 같은 내용이 덱에 들어갑니다.</Info>
       </p>
-      {!!qa.length && (
-        <section className="dk-dsec">
-          <h4 className="dk-sub">검수 {qa.length}</h4>
-          <ul className="dk-qa">
-            {qa.map((x, i) => (
-              <li key={`qa-${i}`} className={`q-${x.level}`}>
-                {x.item ? <button type="button" className="linklike" onClick={() => goTo(x.item!)}>{x.text}</button> : x.text}
-              </li>
+      <section className="dk-dsec">
+        <h4 className="dk-sub">회사·시장 데이터</h4>
+        {draft === null && <p className="small muted">공시·금리 요약을 불러오는 중…</p>}
+        {draft === 'error' && <p className="small muted">공시·금리 요약을 불러오지 못했습니다. 장표는 그대로 쓸 수 있습니다.</p>}
+        {draft && draft !== 'error' && (
+          <div className="dk-draft">
+            {draft.sections.map((x, i) => (
+              <details key={x.key} className={`dk-dr st-${x.status}`} open={i < 2}>
+                <summary>
+                  <span className="dk-dr-t">{x.title}</span>
+                  <span className="dk-dr-st">{DRAFT_ST[x.status]}</span>
+                </summary>
+                {x.lines.map((l) => <p key={l} className="small">{l}</p>)}
+                {x.table && (
+                  <div className="dk-dr-tbl">
+                    <table className="data compact">
+                      <thead><tr>{x.table.head.map((h, j) => <th key={`${h}-${j}`} className={x.table!.num?.includes(j) ? 'num' : undefined}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {x.table.rows.slice(0, 12).map((r, k) => (
+                          <tr key={k}>{r.map((v, j) => <td key={j} className={x.table!.num?.includes(j) ? 'num' : undefined}>{v}</td>)}</tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {x.table.rows.length > 12 && <p className="small muted">외 {x.table.rows.length - 12}행</p>}
+                  </div>
+                )}
+                {!!x.needs?.length && (
+                  <ul className="dk-dr-need small">
+                    {x.needs.map((n) => <li key={n.data}><span className="dk-src-tag">내부</span>{n.data} <span className="muted">· {n.from}</span></li>)}
+                  </ul>
+                )}
+                {x.basis && <p className="small muted">출처: {x.basis}</p>}
+              </details>
             ))}
-          </ul>
-        </section>
-      )}
+            <p className="small muted">기준일 {draft.asof}. 숫자는 공시 값 그대로입니다.</p>
+          </div>
+        )}
+      </section>
       {!!report.intMissing.length && (
         <section className="dk-dsec">
           <h4 className="dk-sub">연결하면 채워질 내부 데이터</h4>
@@ -629,7 +753,7 @@ function DataPanel({ report, qa, goTo }: { report: DataReport; qa: Qa[]; goTo: (
         </section>
       )}
       <section className="dk-dsec">
-        <h4 className="dk-sub">장표별 데이터</h4>
+        <h4 className="dk-sub">장표별 사용 데이터</h4>
         <ul className="dk-srcs">
           {report.items.map((x) => (
             <li key={x.id} id={`dk-d-${x.id}`}>
@@ -656,6 +780,66 @@ function DataPanel({ report, qa, goTo }: { report: DataReport; qa: Qa[]; goTo: (
   );
 }
 
+// 검토: 사람이 정하거나 확인할 곳(장표 순). 확인하면 숨기고, 내용이 바뀌면 다시 보인다.
+function ReviewPanel({ marks, done, slides, cur, goTo, fix, confirm }: {
+  marks: Mark[]; done: Set<string>; slides: Slide[]; cur: number;
+  goTo: (m: Mark) => void; fix: (m: Mark) => void; confirm: (keys: string[], v?: boolean) => void;
+}) {
+  const open = marks.filter((m) => !done.has(m.key));
+  const closed = marks.filter((m) => done.has(m.key));
+  const by = new Map<number, Mark[]>();
+  for (const m of open) by.set(m.slide, [...(by.get(m.slide) ?? []), m]);
+  const kinds = (['input', 'judge', 'data', 'stale'] as const).map((k) => [k, open.filter((m) => m.kind === k).length] as const).filter(([, n]) => n);
+  return (
+    <>
+      <p className="small dk-panel-note">
+        남은 검토 <strong>{open.length}</strong> · 확인 {closed.length}
+        <Info>기본값 그대로인 조건(입력 확인), 제안 판단 문장(판단 확인), 대체·이상 데이터(데이터 확인), 오래된 자료(갱신 필요)를 장표 위에 표시합니다. 표시는 화면에만 보이고 PPTX·PDF 에는 들어가지 않습니다. 확인한 항목은 숨기고, 그 내용이 바뀌면 다시 보입니다.</Info>
+      </p>
+      {!!kinds.length && (
+        <p className="dk-rv-kinds small">
+          {kinds.map(([k, n]) => <span key={k} className={`mk-${k}`}>{MARK_LABEL[k]} {n}</span>)}
+        </p>
+      )}
+      {!open.length && <p className="small muted">검토할 곳이 없습니다. 내려받기 전에 숫자만 한 번 더 확인하세요.</p>}
+      <ol className="dk-rv-all-list">
+        {[...by.entries()].sort((a, b) => a[0] - b[0]).map(([i, ms]) => (
+          <li key={i} className={i === cur ? 'is-cur' : undefined}>
+            <button type="button" className="linklike dk-srcs-h" onClick={() => goTo(ms[0])}><span className="muted tnum">{i + 1}쪽</span> {slides[i]?.title}</button>
+            <ul>
+              {ms.map((m) => (
+                <li key={m.key} className={`mk-${m.kind}`}>
+                  <span className="dk-rv-kind">{MARK_LABEL[m.kind]}</span>
+                  <button type="button" className="linklike dk-rv-text" onClick={() => goTo(m)}>{m.text}</button>
+                  <span className="dk-rv-act">
+                    <button type="button" className="linklike" onClick={() => fix(m)}>고치기</button>
+                    <button type="button" className="dk-rv-ok" onClick={() => confirm([m.key])}>확인</button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+      {open.length > 1 && <p className="small"><button type="button" className="linklike" onClick={() => confirm(open.map((m) => m.key))}>모두 확인</button></p>}
+      {!!closed.length && <p className="small"><button type="button" className="linklike" onClick={() => confirm(closed.map((m) => m.key), false)}>확인한 {closed.length}개 다시 보기</button></p>}
+    </>
+  );
+}
+
+// 검토 항목 → 고칠 탭
+function markTarget(m: Mark): { tab: Tab; anchor?: string } {
+  const what = m.key.split(':')[1] ?? '';
+  if (['rating', 'tenor', 'amount', 'band', 'fee'].includes(what)) return { tab: 'terms' };
+  if (what === 'pay' || what === 'cal' || m.item === 'schedule') return { tab: 'schedule' };
+  if (what === 'contacts') return { tab: 'cover', anchor: 'dk-a-back' };
+  if (what === 'month' || m.item === 'cover') return { tab: 'cover' };
+  if (what === 'minpyeong' || m.item === 'credit_fc' || (m.item === 'forecast' && m.kind === 'stale')) return { tab: 'internal' };
+  if (m.item === 'peers' && m.kind === 'data') return { tab: 'peers' };
+  if (m.kind === 'judge' || m.kind === 'stale') return { tab: 'text', anchor: `dk-t-${TEXT_OF[m.item] ?? m.item}` };
+  return { tab: 'data', anchor: `dk-d-${m.item}` };
+}
+
 function NumIn({ v, on, step }: { v: number | null; on: (v: number | null) => void; step?: string }) {
   return <input type="number" inputMode="decimal" step={step ?? '1'} value={v ?? ''} onChange={(e) => on(e.target.value === '' ? null : Number(e.target.value))} />;
 }
@@ -675,7 +859,7 @@ function editTargets(id: string): { tab: Tab; anchor?: string; label: string }[]
   if (base === 'schedule') out.push({ tab: 'schedule', label: '일정 고치기' });
   if (base === 'peers' || base === 'compare') out.push({ tab: 'peers', label: '사례 고르기' });
   if (base === 'sales' || base === 'forecast' || base === 'credit_fc' || base === 'sizing' || base === 'terms') out.push({ tab: 'internal', label: '내부 데이터' });
-  if (base === 'datareport') out.push({ tab: 'data', label: '데이터·검수 보기' });
+  if (base === 'datareport') out.push({ tab: 'data', label: '관련 데이터 보기' });
   if (TEXT_OF[base]) out.push({ tab: 'text', anchor: `dk-t-${TEXT_OF[base]}`, label: '문안 고치기' });
   return out;
 }
@@ -689,28 +873,39 @@ function Loading() {
 }
 
 // 왼쪽 장표 목록(썸네일)
-function Rail({ slides, cur, setCur }: { slides: Slide[]; cur: number; setCur: (i: number) => void }) {
+function Rail({ slides, cur, setCur, order, counts }: { slides: Slide[]; cur: number; setCur: (i: number) => void; order: number[]; counts: Map<number, number> }) {
   const ref = useRef<HTMLOListElement>(null);
   useEffect(() => {
     ref.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [cur]);
   return (
     <ol className="dk-rail" ref={ref} aria-label="장표 목록">
-      {slides.map((s, i) => (
-        <li key={`${s.id}-${i}`}>
-          <button type="button" aria-current={i === cur} aria-label={`${i + 1}. ${s.title}`} onClick={() => setCur(i)}>
-            <span className="dk-rail-no tnum" aria-hidden>{i + 1}</span>
-            <SlideView slide={s} width={128} />
-          </button>
-        </li>
-      ))}
+      {order.map((i) => {
+        const s = slides[i];
+        const n = counts.get(i) ?? 0;
+        return (
+          <li key={`${s.id}-${i}`}>
+            <button type="button" aria-current={i === cur} aria-label={`${i + 1}. ${s.title}${n ? `, 검토 ${n}` : ''}`} onClick={() => setCur(i)}>
+              <span className="dk-rail-no tnum" aria-hidden>{i + 1}</span>
+              <span className="dk-rail-thumb">
+                <SlideView slide={s} width={128} />
+                {n > 0 && <span className="dk-rail-badge tnum" aria-hidden>{n}</span>}
+              </span>
+            </button>
+          </li>
+        );
+      })}
     </ol>
   );
 }
 
 // 가운데 큰 장표: 화면 높이에 맞춰 키우고, ←·→ 로 넘긴다
 type SrcBadge = { ext: number; miss: number; alt: number; warn: number; go: () => void } | null;
-function Stage({ slides, cur, setCur, edit, busy, srcs }: { slides: Slide[]; cur: number; setCur: (i: number) => void; edit: { label: string; go: () => void }[]; busy: boolean; srcs: SrcBadge }) {
+type StageProps = {
+  slides: Slide[]; cur: number; setCur: (i: number) => void; edit: { label: string; go: () => void }[]; busy: boolean; srcs: SrcBadge; order: number[];
+  marks: ViewMark[]; focus: boolean; active: string | null; onPick: (key: string) => void; review: Mark[]; onFix: (m: Mark) => void; onDone: (keys: string[]) => void;
+};
+function Stage({ slides, cur, setCur, edit, busy, srcs, order, marks, focus, active, onPick, review, onFix, onDone }: StageProps) {
   const ref = useRef<HTMLElement>(null);
   const [w, setW] = useState(720);
   useEffect(() => {
@@ -732,32 +927,52 @@ function Stage({ slides, cur, setCur, edit, busy, srcs }: { slides: Slide[]; cur
       window.removeEventListener('resize', fit);
     };
   }, []);
-  const n = slides.length;
+  // 넘기기는 order(검토할 장표만이면 그 장표들) 안에서
+  const n = order.length;
+  const pos = Math.max(0, order.indexOf(cur));
+  const prev = pos > 0 ? order[pos - 1] : null;
+  const next = pos < n - 1 ? order[pos + 1] : null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.closest('input, textarea, select, [contenteditable="true"]') || e.altKey || e.metaKey || e.ctrlKey)) return;
-      if (e.key === 'ArrowRight' || e.key === 'PageDown') setCur(Math.min(n - 1, cur + 1));
-      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') setCur(Math.max(0, cur - 1));
-      else if (e.key === 'Home') setCur(0);
-      else if (e.key === 'End') setCur(n - 1);
+      if ((e.key === 'ArrowRight' || e.key === 'PageDown') && next != null) setCur(next);
+      else if ((e.key === 'ArrowLeft' || e.key === 'PageUp') && prev != null) setCur(prev);
+      else if (e.key === 'Home' && n) setCur(order[0]);
+      else if (e.key === 'End' && n) setCur(order[n - 1]);
       else return;
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cur, n, setCur]);
+  }, [order, n, prev, next, setCur]);
   const s = slides[cur];
   return (
     <section className="dk-stage" ref={ref} aria-label="장표 보기">
       <div className={`dk-stage-frame${busy ? ' is-busy' : ''}`} style={{ width: w }}>
-        {s && <SlideView slide={s} width={w} />}
+        {s && <SlideView slide={s} width={w} marks={marks} focus={focus} active={active} onPick={onPick} />}
       </div>
+      {review.length > 0 && (
+        <ol className="dk-rv-list" style={{ width: w }} aria-label="이 장표에서 확인할 곳">
+          {review.map((m, i) => (
+            <li key={m.key} className={`mk-${m.kind}${active === m.key ? ' is-active' : ''}`}>
+              <button type="button" className="dk-rv-pin tnum" onClick={() => onPick(m.key)} aria-label={`${i + 1}번 위치 강조`}>{i + 1}</button>
+              <span className="dk-rv-kind">{MARK_LABEL[m.kind]}</span>
+              <span className="dk-rv-text">{m.text}</span>
+              <span className="dk-rv-act">
+                <button type="button" className="linklike" onClick={() => onFix(m)}>고치기</button>
+                <button type="button" className="dk-rv-ok" onClick={() => onDone([m.key])}>확인</button>
+              </span>
+            </li>
+          ))}
+          {review.length > 1 && <li className="dk-rv-all"><button type="button" className="linklike small" onClick={() => onDone(review.map((m) => m.key))}>이 장표 모두 확인</button></li>}
+        </ol>
+      )}
       <div className="dk-stage-foot" style={{ width: w }}>
         <div className="dk-nav">
-          <button type="button" aria-label="이전 장표" disabled={cur <= 0} onClick={() => setCur(cur - 1)}>‹</button>
-          <span className="tnum" aria-live="polite">{n ? cur + 1 : 0} / {n}</span>
-          <button type="button" aria-label="다음 장표" disabled={cur >= n - 1} onClick={() => setCur(cur + 1)}>›</button>
+          <button type="button" aria-label="이전 장표" disabled={prev == null} onClick={() => prev != null && setCur(prev)}>‹</button>
+          <span className="tnum" aria-live="polite">{slides.length ? cur + 1 : 0} / {slides.length}{n < slides.length ? ` (검토 ${pos + 1}/${n})` : ''}</span>
+          <button type="button" aria-label="다음 장표" disabled={next == null} onClick={() => next != null && setCur(next)}>›</button>
           <span className="dk-stage-title">{s?.title}</span>
         </div>
         {(!!edit.length || srcs) && (

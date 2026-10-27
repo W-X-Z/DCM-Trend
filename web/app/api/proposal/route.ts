@@ -1,6 +1,6 @@
 import { buildDraft, toMarkdown, type DraftType } from '@/lib/proposal';
 
-// 제안서 초안 내려받기 (마크다운). 화면과 같은 내용.
+// 제안서 초안 내려받기 (마크다운). 화면과 같은 내용. format=json 이면 제안서 초안 화면의 '관련 데이터'용 JSON.
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
@@ -11,6 +11,7 @@ export async function GET(req: Request) {
   try {
     const d = await buildDraft(corp, type as DraftType | undefined);
     if (!d) return new Response('not found', { status: 404 });
+    if (sp.get('format') === 'json') return Response.json(d, { headers: { 'cache-control': 'private, max-age=60' } });
     const name = `proposal_${corp}_${d.type}_${d.asof}.md`;
     return new Response(`${toMarkdown(d)}\n`, {
       headers: {

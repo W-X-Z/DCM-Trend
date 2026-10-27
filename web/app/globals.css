@@ -5575,3 +5575,389 @@ table.data th.col-cta {
 .dk-srcs-omit {
   color: var(--muted);
 }
+
+/* 제안서 초안: 목차 템플릿 칩 · 검토 표시 ------------------------------------------- */
+.dk {
+  --mk-input: #1d5fd1;
+  --mk-judge: #7a3fc4;
+  --mk-data: #b45309;
+  --mk-stale: #c0262d;
+}
+
+.dk-tplbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 18px;
+  padding: 4px 0 10px;
+}
+
+.dk-tpl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dk-tpl-k {
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-right: 2px;
+}
+
+.dk-chip {
+  font: inherit;
+  font-size: var(--s-1);
+  line-height: 1.2;
+  padding: 5px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dk-chip:hover {
+  border-color: var(--ink-2);
+  color: var(--ink);
+}
+
+.dk-chip[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.dk-chip.is-custom {
+  cursor: default;
+  border-style: dashed;
+  color: var(--ink);
+}
+
+.dk-tpl-panel {
+  margin-bottom: 6px;
+}
+
+.dk-rv {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.dk-rv-count {
+  font: inherit;
+  font-size: var(--s-1);
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--mk-data) 40%, transparent);
+  background: color-mix(in srgb, var(--mk-data) 9%, var(--surface));
+  color: var(--mk-data);
+  cursor: pointer;
+}
+
+.dk-rv-count.is-done {
+  border-color: var(--rule);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.dk-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dk-switch input {
+  accent-color: var(--accent);
+}
+
+.dk-switch:has(input:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 장표 위 표시 (좌표는 장표 pt, 함께 축소된다) */
+.dk-mark {
+  --mk: var(--mk-data);
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  border: 1.6px solid var(--mk);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--mk) 7%, transparent);
+  cursor: pointer;
+  z-index: 2;
+}
+
+.dk-mark:hover,
+.dk-mark.is-active {
+  background: color-mix(in srgb, var(--mk) 15%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mk) 22%, transparent);
+}
+
+.dk-mark-pin {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: var(--mk);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 19px;
+  text-align: center;
+  font-family: system-ui, sans-serif;
+}
+
+.mk-input { --mk: var(--mk-input); }
+.mk-judge { --mk: var(--mk-judge); }
+.mk-data { --mk: var(--mk-data); }
+.mk-stale { --mk: var(--mk-stale); }
+
+.dk-mark:focus-visible {
+  outline: 2px solid var(--mk);
+  outline-offset: 2px;
+}
+
+/* 장표 아래: 이 장표에서 확인할 곳 */
+.dk-rv-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.dk-rv-list > li:not(.dk-rv-all),
+.dk-rv-all-list ul > li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--mk);
+  border-radius: 0 5px 5px 0;
+  background: var(--surface);
+  font-size: var(--s-1);
+  line-height: 1.45;
+}
+
+.dk-rv-list > li.is-active {
+  background: color-mix(in srgb, var(--mk) 8%, var(--surface));
+}
+
+.dk-rv-pin {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--mk);
+  color: #fff;
+  cursor: pointer;
+}
+
+.dk-rv-kind {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mk);
+  white-space: nowrap;
+}
+
+.dk-rv-text {
+  color: var(--ink);
+  text-align: left;
+}
+
+.dk-rv-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.dk-rv-ok {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.dk-rv-ok:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.dk-rv-all {
+  text-align: right;
+}
+
+.dk-rv-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.dk-rv-kinds span {
+  padding: 1px 8px;
+  border-radius: 3px;
+  color: var(--mk);
+  background: color-mix(in srgb, var(--mk) 10%, transparent);
+}
+
+.dk-rv-all-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.dk-rv-all-list ul {
+  list-style: none;
+  margin: 5px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.dk-rv-all-list ul > li {
+  grid-template-columns: auto minmax(0, 1fr);
+  background: var(--paper);
+}
+
+.dk-rv-all-list ul > li .dk-rv-act {
+  grid-column: 2;
+  justify-self: end;
+}
+
+.dk-rv-all-list > li.is-cur > .dk-srcs-h {
+  color: var(--accent-ink);
+}
+
+/* 썸네일 검토 수 */
+.dk-rail-thumb {
+  position: relative;
+  display: block;
+}
+
+.dk-rail-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--mk-data);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* 관련 데이터: 공시·금리 요약 */
+.dk-draft {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.dk-dr {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 0 10px;
+}
+
+.dk-dr > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  cursor: pointer;
+  font-size: var(--s-1);
+  font-weight: 600;
+  list-style: none;
+}
+
+.dk-dr > summary::-webkit-details-marker {
+  display: none;
+}
+
+.dk-dr > summary::before {
+  content: '▸';
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.dk-dr[open] > summary::before {
+  content: '▾';
+}
+
+.dk-dr-t {
+  flex: 1;
+}
+
+.dk-dr-st {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.dk-dr.st-needed .dk-dr-st {
+  color: var(--src-int);
+}
+
+.dk-dr p {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.dk-dr-tbl {
+  overflow-x: auto;
+  margin: 4px 0 8px;
+}
+
+.dk-dr-tbl table {
+  font-size: 11.5px;
+}
+
+.dk-dr-need {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+@media (max-width: 900px) {
+  .dk-rv-list > li:not(.dk-rv-all) {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .dk-rv-list .dk-rv-kind {
+    display: none;
+  }
+  .dk-rv-list .dk-rv-act {
+    grid-column: 2;
+    justify-self: end;
+  }
+}

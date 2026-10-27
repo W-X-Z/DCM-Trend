@@ -1,12 +1,13 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { CompanySearch } from '@/components/CompanySearch';
 import { MaturityTable, groupByCorp } from '@/components/MaturityTable';
 import { PageHead, SectionHead } from '@/components/Ui';
-import { DRAFT_TYPES, STATUS_LABEL, buildDraft, needsOf, type DraftType, type Section, type Status } from '@/lib/proposal';
+import { DRAFT_TYPES, STATUS_LABEL, buildDraft, defaultType, needsOf, type DraftType, type Section, type Status } from '@/lib/proposal';
 import { kstToday } from '@/lib/filings';
 import { date, num, won } from '@/lib/format';
-import { getMaturities } from '@/lib/queries';
+import { getCompany, getMaturities } from '@/lib/queries';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: '제안서 초안' };
@@ -105,7 +106,7 @@ async function Start({ sp }: { sp: SP }) {
         <SectionHead
           id="pk-mat"
           title="만기도래 회사에서 고르기"
-          info="공모 회사채는 트랜치별 만기일, 메자닌은 사채 만기일과 조기상환청구(풋) 시작일 기준입니다. 금융사 금융채는 뺐습니다. 오른쪽 '초안 만들기'를 누르면 해당 딜 유형의 초안이 열립니다."
+          info="공모 회사채는 트랜치별 만기일, 메자닌은 사채 만기일과 조기상환청구(풋) 시작일 기준입니다. 금융사 금융채는 뺐습니다. 오른쪽 '초안 만들기'를 누르면 공모 회사채는 제안서 초안(장표)이, 메자닌은 데이터 점검 화면이 열립니다."
           right={
             <div className="controls">
               <span className="seg" aria-label="종류">
@@ -155,6 +156,12 @@ export default async function ProposalPage({ searchParams }: { searchParams: SP 
       </main>
     );
   }
+  // 공모 회사채: 데이터 점검 화면을 거치지 않고 바로 제안서 초안(장표 + 관련 데이터)으로
+  if (type === 'bond') redirect(`/proposal/deck?corp=${corp}`);
+  if (!type) {
+    const c0 = await getCompany(corp).catch(() => null);
+    if (c0 && defaultType(c0) === 'bond') redirect(`/proposal/deck?corp=${corp}`);
+  }
   const d = await buildDraft(corp, type).catch(() => null);
   if (!d) {
     return (
@@ -183,7 +190,7 @@ export default async function ProposalPage({ searchParams }: { searchParams: SP 
         </div>
         <nav className="seg" aria-label="딜 유형">
           {DRAFT_TYPES.map((t) => (
-            <Link key={t.key} href={`/proposal?corp=${c.corp_code}&type=${t.key}`} aria-current={t.key === d.type ? 'true' : undefined} scroll={false}>
+            <Link key={t.key} href={t.key === 'bond' ? `/proposal/deck?corp=${c.corp_code}` : `/proposal?corp=${c.corp_code}&type=${t.key}`} aria-current={t.key === d.type ? 'true' : undefined} scroll={false}>
               {t.label}
             </Link>
           ))}

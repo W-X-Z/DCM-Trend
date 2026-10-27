@@ -72,7 +72,7 @@ export function MaturityTable({ groups, kind, ctaLabel = '제안서 초안' }: {
               </td>
               <td className="col-cta">
                 <Link
-                  href={`/proposal?corp=${g.corp_code}&type=${kind}`}
+                  href={kind === 'bond' ? `/proposal/deck?corp=${g.corp_code}` : `/proposal?corp=${g.corp_code}&type=${kind}`}
                   className="cta-sm"
                   aria-label={`${g.corp_name} ${ctaLabel}`}
                 >

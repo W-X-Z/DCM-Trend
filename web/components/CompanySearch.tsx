@@ -7,7 +7,7 @@ type Hit = { corp_code: string; corp_name: string; market: string | null; deal_c
 
 // 회사 검색: 글자를 넣으면 회사 후보를 바로 보여 준다.
 // mode 'company'(머리글): 고른 회사 화면으로, 고른 게 없으면 검색 화면으로. '/' 키로 열기.
-// mode 'proposal'(제안서 초안): 고른 회사의 초안 화면으로. 'deck': 제안서 만들기 화면으로.
+// mode 'proposal'(제안서 초안): 고른 회사의 초안으로(공모 회사채 발행사는 제안서 초안 화면, 메자닌은 점검 화면). 'deck': 제안서 초안 화면으로.
 export function CompanySearch({ mode = 'company', placeholder = '회사 이름으로 찾기' }: { mode?: 'company' | 'proposal' | 'deck'; placeholder?: string }) {
   const isHeader = mode === 'company';
   const router = useRouter();
