@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Info } from '@/components/Ui';
 import { forGrade, knowledgeForPrompt, type Knowledge } from '@/lib/deck/knowledge';
 import { buildSlides } from '@/lib/deck/layout';
-import { defaultInput, factsFor, ruleText } from '@/lib/deck/rules';
+import { defaultInput, factsFor, ruleText, salesFacts } from '@/lib/deck/rules';
 import type { DeckData, DeckText } from '@/lib/deck/types';
 import { KIND_LABEL, type Kind } from './Chain';
 
@@ -108,18 +108,17 @@ export function DeckTrace({ initialCorp }: { initialCorp?: string }) {
         const j = await r.json();
         return (j.items ?? []) as Knowledge[];
       });
-      const slidesOn = Object.entries(inp.items).filter(([, v]) => v).map(([k]) => k);
       const mine = forGrade(g.value, d.company.rating_group);
-      const tips = knowledgeForPrompt(g.value, d.company.rating_group, slidesOn);
+      const tips = knowledgeForPrompt(g.value, d.company.rating_group, ['sales']);
       add({
         id: 'tips', name: '노하우 고르기', kind: 'human', from: g.from,
-        meta: [['API', 'GET /api/deck/knowledge'], ['전체', `${g.value.length}개`], [`${d.company.rating_group ?? '–'}등급에 맞는 것`, `${mine.length}개`], ['AI에 넣는 것(켠 장표)', `${Object.values(tips).reduce((n, x) => n + x.length, 0)}개`]],
+        meta: [['API', 'GET /api/deck/knowledge'], ['전체', `${g.value.length}개`], [`${d.company.rating_group ?? '–'}등급에 맞는 것`, `${mine.length}개`], ['AI에 넣는 것(Sales 전략)', `${Object.values(tips).reduce((n, x) => n + x.length, 0)}개`]],
         output: tips,
       });
 
       // 6. 프롬프트 조립
       const h = await step(async () => {
-        const r = await fetch('/api/deck/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts, rule, grade: d.company.rating_group, slides: slidesOn }) });
+        const r = await fetch('/api/deck/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts: salesFacts(d, inp), rule, grade: d.company.rating_group }) });
         if (!r.ok) throw new Error('프롬프트를 만들지 못했습니다');
         return r.json() as Promise<{ model: string; version: number; system: string; schema: { properties: Record<string, unknown> }; user: string; applied: number }>;
       });
@@ -134,24 +133,23 @@ export function DeckTrace({ initialCorp }: { initialCorp?: string }) {
       if (withAi) {
         // 7. AI 호출 + 8. 검증·병합
         const k = await step(async () => {
-          const r = await fetch('/api/deck/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts, rule, grade: d.company.rating_group, slides: slidesOn }) });
+          const r = await fetch('/api/deck/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts: salesFacts(d, inp), rule, grade: d.company.rating_group }) });
           const j = await r.json();
           if (!r.ok) throw new Error(j.error ?? 'AI 문안을 만들지 못했습니다');
-          return j as { text: DeckText; dropped: number; droppedLines: { field: string; line: string; why: string }[]; applied: number; model: string };
+          return j as { sales: string[]; usedRule: boolean; dropped: number; droppedLines: { line: string; why: string }[]; applied: number; model: string };
         });
         const ai = k.value;
         add({
-          id: 'llm', name: 'AI 호출', kind: 'ai', from: k.from,
+          id: 'llm', name: 'AI 호출 (Sales 전략)', kind: 'ai', from: k.from,
           meta: [['API', 'POST /api/deck/draft'], ['모델', ai.model], ['노하우 반영', `${ai.applied}개`]],
-          output: ai.text,
+          output: ai.sales,
         });
-        const changed = (Object.keys(rule) as (keyof DeckText)[]).filter((x) => JSON.stringify(rule[x]) !== JSON.stringify(ai.text[x]));
         add({
-          id: 'check', name: '줄 검증·병합', kind: 'check', from: performance.now(),
-          meta: [['버린 줄', `${ai.dropped}줄`], ['AI 문장으로 바뀐 필드', `${changed.length}개`], ['규칙', '숫자는 사실 안에서만 · 출처 없는 시장 전망 금지 · 단정 표현 금지 · 길이']],
-          output: { 바뀐필드: changed, 버린줄: ai.droppedLines },
+          id: 'check', name: '줄 검증', kind: 'check', from: performance.now(),
+          meta: [['버린 줄', `${ai.dropped}줄`], ['결과', ai.usedRule ? '통과한 줄이 없어 규칙 문안 사용' : `AI 문안 ${ai.sales.length}줄`], ['규칙', '숫자는 사실 안에서만 · 출처 없는 시장 전망 금지 · 단정 표현 금지 · 길이']],
+          output: { 버린줄: ai.droppedLines },
         });
-        text = ai.text;
+        text = { ...rule, sales: ai.sales };
       }
 
       // 9. 장표

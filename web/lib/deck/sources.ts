@@ -102,7 +102,10 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
       ];
     }
     case 'credit_fc':
-      return [int('NH 등급별 회사채 금리 전망표', 'NH 리서치', hasTable(inp.internal?.creditFc), '장표 생략')];
+      return [
+        ext('크레딧 시장 의견(시장 자료 팩)', [...new Set((d.marketNotes ?? []).map((x) => x.house))].join('·') || '증권사·언론', (d.marketNotes ?? []).length > 0, latest((d.marketNotes ?? []).map((x) => x.date))),
+        int('NH 등급별 회사채 금리 전망표', 'NH 리서치', hasTable(inp.internal?.creditFc), '시장 의견과 신용스프레드 추이로 대체'),
+      ];
     case 'views':
     case 'usviews': {
       const vs = id === 'views' ? d.views : d.usViews;

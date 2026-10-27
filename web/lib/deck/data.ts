@@ -16,7 +16,30 @@ const shiftMonths = (base: string, n: number) => {
 };
 const n = (v: unknown) => (v == null || v === '' ? null : Number(v));
 
-const NOTE_ORDER = ['미국 기준금리', '한국 기준금리', '국고채', '우량 회사채', '비우량 회사채'];
+const MARKET_TOPICS = ['크레딧 시장', '우량 회사채', '비우량 회사채', '국고채'];
+const NOTE_ORDER = ['미국 기준금리', '한국 기준금리', '국고채', '크레딧 시장', '우량 회사채', '비우량 회사채'];
+
+// 등급 순서(높을수록 작은 수). 2노치 이상 차이 판단용
+const NOTCHES = ['AAA', 'AA+', 'AA0', 'AA-', 'A+', 'A0', 'A-', 'BBB+', 'BBB0', 'BBB-', 'BB+', 'BB0', 'BB-'];
+const notchIdx = (r: string | null) => {
+  const m = String(r ?? '').replace(/\s/g, '').match(/^(AAA|AA|A|BBB|BB)([+0-])?/);
+  if (!m) return null;
+  const k = m[1] === 'AAA' ? 'AAA' : `${m[1]}${m[2] ?? '0'}`;
+  const i = NOTCHES.indexOf(k);
+  return i < 0 ? null : i;
+};
+const PUBLIC = /(공사|공단|발전|한국전력|한국수자원|한국지역난방)$|^한국.*(공사|공단)$/;
+// 하우스별 가장 최근 의견만, 가장 최근 의견에서 30일 안의 것만(오래된 의견이 표에 섞이지 않게)
+function latestPerHouse<T extends { house: string; published_dt: string }>(xs: T[]) {
+  const m = new Map<string, T>();
+  for (const x of xs) if (!m.has(x.house) || m.get(x.house)!.published_dt < x.published_dt) m.set(x.house, x);
+  const ys = [...m.values()].sort((a, b) => b.published_dt.localeCompare(a.published_dt));
+  const top = ys[0]?.published_dt;
+  if (!top) return ys;
+  const lim = new Date(`${top}T00:00:00Z`);
+  lim.setUTCDate(lim.getUTCDate() - 30);
+  return ys.filter((x) => x.published_dt >= lim.toISOString().slice(0, 10));
+}
 
 export const ratingGroupOf = (r: string | null | undefined) => {
   const m = String(r ?? '').match(/^(AAA|AA|A|BBB|BB|B)/);
@@ -83,7 +106,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
       'v_research_forecasts', { order: 'published_dt.desc,series_key.asc,period_order.asc', limit: 200 },
     ).catch(() => []),
     select<{ house: string; analysts: string | null; published_dt: string; source_kind: string; source_title: string; source_url: string; stance: string | null; next_move: string | null; terminal_rate_pct: number | null; summary: string; region?: string | null; end_2026_pct?: number | null; end_2027_pct?: number | null }>(
-      'v_research_views', { limit: 40 },
+      'v_research_views', { order: 'published_dt.desc', limit: 80 },
     ).catch(() => []),
     select<MarketEvent>('v_market_events', { event_dt: `gte.${shiftMonths(today, -12)}`, order: 'event_dt.asc', limit: 200 }).catch(() => []),
     select<Holiday>('v_kr_holidays', { order: 'dt.asc', limit: 400 }).catch(() => []),
@@ -106,7 +129,25 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
     select<{ house: string; topic: string; text: string; published_dt: string; source_title: string; source_url: string }>('v_research_notes', { order: 'published_dt.desc', limit: 40 }).catch(() => []),
   ]);
 
-  const peers = peerRows.map(toPeer);
+  // 비교군 정제: 같은 회사의 최근 5년 공모채 등급보다 크게 높은 회차(AA0 이하 → AAA, 또는 3노치 이상)는 보증·담보부로 보고 빼고, 공기업도 뺀다
+  const corps = [...new Set(peerRows.map((p) => p.corp_code))];
+  const hist = corps.length
+    ? await select<{ corp_code: string; rating: string | null }>('v_bond_issues', {
+      select: 'corp_code,rating', corp_code: `in.(${corps.join(',')})`, deal_dt: `gte.${shiftMonths(today, -60)}`, limit: 3000,
+    }).catch(() => [] as { corp_code: string; rating: string | null }[])
+    : [];
+  const lowest = new Map<string, number>();
+  for (const h of hist) {
+    const i = notchIdx(h.rating);
+    if (i != null && i > (lowest.get(h.corp_code) ?? -1)) lowest.set(h.corp_code, i);
+  }
+  const peers = peerRows.map((r) => {
+    const p = toPeer(r);
+    const i = notchIdx(p.rating);
+    const lo = lowest.get(p.corp_code);
+    p.flag = i != null && lo != null && ((i === 0 && lo >= 2) || lo - i >= 3) ? '보증·담보부 추정' : PUBLIC.test(p.corp_name.replace(/\s|\(주\)|㈜/g, '')) ? '공기업' : null;
+    return p;
+  });
   const recent6 = peerRows.filter((p) => (p.deal_dt ?? '') >= shiftMonths(today, -6) && (p.sub_type ?? '일반회사채') === '일반회사채');
 
   // 전망표: 가장 최근 발표 하나
@@ -161,8 +202,8 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
   const dailyBy = new Map<string, [string, number][]>();
   for (const r of dailyRows) dailyBy.set(r.series_key, [...(dailyBy.get(r.series_key) ?? []), [r.dt, Number(r.value)]]);
 
-  const kr = vw.filter((v) => ((v as { region?: string | null }).region ?? 'KR') !== 'US');
-  const us = vw.filter((v) => (v as { region?: string | null }).region === 'US') as unknown as (typeof vw[number] & { end_2026_pct?: number | null; end_2027_pct?: number | null })[];
+  const kr = latestPerHouse(vw.filter((v) => ((v as { region?: string | null }).region ?? 'KR') !== 'US'));
+  const us = latestPerHouse(vw.filter((v) => (v as { region?: string | null }).region === 'US')) as unknown as (typeof vw[number] & { end_2026_pct?: number | null; end_2027_pct?: number | null })[];
 
   const label: Record<string, string> = Object.fromEntries(latest.map((r) => [r.series_key, r.label_ko]));
   const bySeries = new Map<string, { dt: string; value: number }[]>();
@@ -207,6 +248,12 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
       house: v.house, analysts: v.analysts, published_dt: v.published_dt, kind: v.source_kind, title: v.source_title, url: v.source_url,
       stance: v.stance, next_move: v.next_move, terminal: n(v.terminal_rate_pct), summary: v.summary,
     })),
+    marketNotes: [...new Map(notes
+      .filter((x) => MARKET_TOPICS.includes(x.topic) && x.published_dt >= shiftMonths(today, -2))
+      .map((x) => [`${x.house}|${x.topic}`, x] as const).reverse()).values()]
+      .sort((a, b) => MARKET_TOPICS.indexOf(a.topic) - MARKET_TOPICS.indexOf(b.topic) || b.published_dt.localeCompare(a.published_dt))
+      .slice(0, 5)
+      .map((x) => ({ house: x.house, topic: x.topic, text: x.text, date: x.published_dt, title: x.source_title, url: x.source_url })),
     events: ev,
     holidays: hol,
     fee: { last_bp: n(last?.fee_bp), group_median_bp: median(recent6.map((p) => n(p.fee_bp))) },

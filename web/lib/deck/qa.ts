@@ -4,7 +4,7 @@ import { type ItemId } from './catalog';
 import { mdw, rate3, yymmdd } from './fmt';
 import { allowedNumbers } from './validate';
 import { parseTsv } from './tsv';
-import { factsFor, forecastStale, ruleText, scheduleOf } from './rules';
+import { excludedPeers, factsFor, forecastStale, ruleText, scheduleOf } from './rules';
 import type { DeckData, DeckInput, DeckText, PeerIssue } from './types';
 
 export type Qa = { level: 'warn' | 'info'; item: ItemId | null; text: string };
@@ -123,6 +123,8 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   if (on('peers')) {
     const sel = inp.peerKeys.map((k) => d.peers.find((p) => p.key === k)).filter(Boolean) as PeerIssue[];
     if (!sel.length) out.push({ level: 'warn', item: 'peers', text: '수요예측 결과 표에 넣은 사례가 없습니다.' });
+    const ex = excludedPeers(d);
+    if (ex.length) out.push({ level: 'info', item: 'peers', text: `비교군에서 뺀 사례 ${[...new Set(ex.map((p) => `${p.corp_name}(${p.flag})`))].join(', ')}. 같은 등급이라도 회사 신용과 다르게 매겨진 등급이라 제외했습니다. 필요하면 사례 탭에서 확인하세요.` });
     const odd = sel.filter((p) => p.tranches.some((t) => t.in_band_krw != null && t.demand_krw != null && t.in_band_krw > t.demand_krw));
     if (odd.length) out.push({ level: 'warn', item: 'peers', text: `수요예측 결과 표: ${odd.map((p) => p.corp_name).join('·')}의 밴드 내 금액이 총참여보다 커서 총참여만 표시했습니다(원자료 확인).` });
     for (const s of repeatedYields(sel)) out.push({ level: 'warn', item: 'peers', text: `수요예측 결과 표: 같은 발행금리 ${s}(원자료 확인).` });
