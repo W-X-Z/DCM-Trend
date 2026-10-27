@@ -30,12 +30,12 @@ export type KnowledgeLog = {
   is_deleted: boolean;
 };
 
-// 장표 순서 = 제안서 목차 순서(이름은 기본형 목차 표기)
+// 장표 순서 = 제안서 목차 순서(이름은 기본형 목차 표기: Ⅰ 발행 제안 → Ⅱ 시장 동향)
 export const SLIDES: [KnowledgeSlide, string][] = [
   ['all', '모든 장표'],
   ['terms', '제안 Term-sheet'],
   ['sizing', '트랜치 검토'],
-  ['schedule', '발행일정(안)'],
+  ['schedule', '발행 일정(안)'],
   ['sales', 'Sales 전략'],
   ['pipeline', '수요예측 예정 내역'],
   ['rates', '금리 동향'],
@@ -49,7 +49,7 @@ export const SLIDES: [KnowledgeSlide, string][] = [
   ['corp', '최근 발행금리'],
   ['league', 'League Table'],
   ['strength', '같은 등급 대표주관 실적'],
-  ['maturity', '공모사채 만기도래'],
+  ['maturity', '공모사채 만기도래 및 수급'],
 ];
 export const SLIDE_LABEL = Object.fromEntries(SLIDES) as Record<KnowledgeSlide, string>;
 

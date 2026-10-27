@@ -159,7 +159,7 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
         if (prev) page.drawLine({ start: { x: prev[0], y: Y(prev[1]) }, end: { x: pt[0], y: Y(pt[1]) }, thickness: 1.8, color: col(s.color) });
         prev = pt;
       });
-      const lx = x0 + left + si * 110;
+      const lx = x0 + left + si * Math.min(110, (w - left) / c.series.length);
       const ly = y0 + h - 10;
       page.drawLine({ start: { x: lx, y: Y(ly - 3) }, end: { x: lx + 14, y: Y(ly - 3) }, thickness: 2, color: col(s.color) });
       page.drawText(clean(s.name), { x: lx + 18, y: Y(ly), size: 7.5, font: fR, color: col(C.ink) });

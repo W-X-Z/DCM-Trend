@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Info } from '@/components/Ui';
 import { bandRange, eok, mdw, ratioX, rate3, yy } from '@/lib/deck/fmt';
-import { BACK, FRONT, SECTIONS, TEMPLATES, planOf, templateOf, type Item, type ItemId } from '@/lib/deck/catalog';
+import { BACK, FRONT, PARTS, SECTIONS, TEMPLATES, planOf, templateOf, type Item, type ItemId } from '@/lib/deck/catalog';
 import { KIND_LABEL, forGrade, type Knowledge, type KnowledgeSlide } from '@/lib/deck/knowledge';
 import { available, buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
 import { defaultInput, factsFor, peerPool, ruleText, salesFacts, scheduleOf, totalEok } from '@/lib/deck/rules';
@@ -28,7 +28,7 @@ type Tab = 'review' | 'data' | 'toc' | 'terms' | 'schedule' | 'peers' | 'text' |
 const TABS: [Tab, string][] = [
   ['data', '관련 데이터'], ['review', '검토'], ['toc', '목차'], ['terms', '발행 조건'], ['schedule', '일정'], ['peers', '수요예측 사례'], ['text', '문안'], ['internal', '내부 데이터'], ['cover', '표지'],
 ];
-// v3: 기본형 목차(2026-10-27). 이전 버전에 저장된 목차 선택은 버리고 새 기본값을 쓴다.
+// v3: 기본형 목차(2026-10-27). 이전 버전에 저장된 목차 선택은 버리고 새 기본값을 쓴다. 새로 생긴 항목(간지 등)은 기본값으로 채운다.
 type Saved = { v: 2 | 3 | 4; input: DeckInput; text: DeckText | null; mode: Mode | 'ai'; factsKey: string | null; at: string; salesAi?: string[] | null; salesKey?: string | null };
 const KEY = (corp: string) => `deck:v2:${corp}`;
 // 검토 표시에서 '확인'한 항목(내용이 바뀌면 키가 바뀌어 다시 보인다)
@@ -72,7 +72,7 @@ function download(blob: Blob, name: string) {
 const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
   { key: 'structure', item: 'terms', label: '제안 Term-sheet' },
   { key: 'sizing', item: 'sizing', label: '트랜치 검토' },
-  { key: 'schedule', item: 'schedule', label: '발행일정(안)' },
+  { key: 'schedule', item: 'schedule', label: '발행 일정(안)' },
   { key: 'sales', item: 'sales', label: 'Sales 전략' },
   { key: 'pipeline', item: 'pipeline', label: '수요예측 예정 내역' },
   { key: 'rates', item: 'rates', label: '금리 동향' },
@@ -85,7 +85,7 @@ const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
   { key: 'compare', item: 'compare', label: '미매각 사례 분석' },
   { key: 'corp', item: 'corp', label: '최근 발행금리' },
   { key: 'league', item: 'league', label: '연간 League Table' },
-  { key: 'maturity', item: 'maturity', label: '공모사채 만기도래 현황' },
+  { key: 'maturity', item: 'maturity', label: '공모사채 만기도래 및 수급(만기도래 숫자, 수급 문구는 DM 그대로)' },
 ];
 
 const TERM_NOTES: [keyof DeckText['termNotes'], string][] = [
@@ -663,8 +663,8 @@ function Tranches({ input, set }: { input: DeckInput; set: Setter }) {
   );
 }
 
-// 목차: 공모 회사채 기본형(CJ프레시웨이 2026-03 구성). 켜고 끄면 목차·쪽 제목 번호가 다시 매겨진다.
-// 대한항공형 상세 장표(Sales 전략·미매각 사례·NH 강점 등)는 기본으로 꺼 두었다.
+// 목차: Ⅰ 발행 제안(회사별 생성) / Ⅱ 회사채 시장 동향(Discussion Material 판 그대로) / Appendix.
+// 켜고 끄면 목차·쪽 제목 번호가 다시 매겨진다. 대한항공형 상세 장표(IR·미매각 사례·NH 강점 등)는 기본으로 꺼 두었다.
 function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Setter }) {
   const avail = available(data, input);
   const on = input.items;
@@ -698,11 +698,17 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
       </div>
       <p className="small muted dk-count">{TEMPLATES.find((t) => t.key === tpl)?.hint ?? '템플릿에서 장표를 더하거나 뺐습니다.'} · {count}개 항목</p>
       <ul className="dk-toc">{FRONT.map((i) => row(i))}</ul>
-      {SECTIONS.map((sec) => (
-        <fieldset key={sec.key} className="dk-toc-sec">
-          <legend>{sec.label}</legend>
-          <ul className="dk-toc">{sec.items.map((i) => row(i))}</ul>
-        </fieldset>
+      {[...PARTS.map((p) => ({ key: p.key as string, title: `${p.key}. ${p.label}`, how: p.key === 'Ⅱ' && data.dm ? `${data.dm.title} ${data.dm.edition.slice(2).replace(/-/g, '.')} 판 그대로(고객 등급 쪽만 맞춤)` : p.how, secs: SECTIONS.filter((s) => s.part === p.key) })),
+        { key: 'A', title: 'Appendix', how: '', secs: SECTIONS.filter((s) => s.appendix) }].map((p) => (
+        <div key={p.key} className="dk-toc-part">
+          <p className="dk-toc-part-h"><strong>{p.title}</strong>{p.how && <span className="small muted"> · {p.how}</span>}</p>
+          {p.secs.map((sec) => (
+            <fieldset key={sec.key} className="dk-toc-sec">
+              {!sec.appendix && <legend>{sec.label}</legend>}
+              <ul className="dk-toc">{sec.items.map((i) => row(i))}</ul>
+            </fieldset>
+          ))}
+        </div>
       ))}
       <ul className="dk-toc">{row(BACK)}</ul>
       {staticOn && (

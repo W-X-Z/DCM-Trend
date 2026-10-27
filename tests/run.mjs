@@ -271,6 +271,8 @@ await check('노하우: anon 은 원본 테이블 직접 쓰기 불가', `update
 results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');
 if (results[results.length - 1].ok) failed--;
 await db.exec('reset role');
+await check('시장 자료 팩: 수급 이슈(만기 집중·정책 자금)는 section=supply',
+  `select string_agg(topic, ',' order by topic) from mart.v_market_issues where section = 'supply'`, 'IMA · 발행어음,연초 만기 집중 · 크레딧 수급', one);
 
 // 결과 출력 -------------------------------------------------------------
 for (const r of results) {

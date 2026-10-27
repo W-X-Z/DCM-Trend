@@ -4286,6 +4286,17 @@ table.data th.col-cta {
   padding: 0 6px 0 0;
 }
 
+.dk-toc-part {
+  margin-top: 14px;
+  padding-left: 10px;
+  border-left: 3px solid var(--rule-strong);
+}
+
+.dk-toc-part-h {
+  margin: 0;
+  line-height: 1.4;
+}
+
 .dk-tag {
   font-size: 11px;
   line-height: 1;

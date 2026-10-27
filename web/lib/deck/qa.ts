@@ -4,7 +4,7 @@ import { type ItemId } from './catalog';
 import { mdw, rate3, yymmdd } from './fmt';
 import { allowedNumbers } from './validate';
 import { parseTsv } from './tsv';
-import { excludedPeers, factsFor, forecastStale, ruleText, scheduleOf } from './rules';
+import { excludedPeers, factsFor, forecastStale, pickIssues, ruleText, scheduleOf, supplyIssues } from './rules';
 import type { DeckData, DeckInput, DeckText, PeerIssue } from './types';
 
 export type Qa = { level: 'warn' | 'info'; item: ItemId | null; text: string };
@@ -119,6 +119,26 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   }
   // 3. 등급별 회사채 전망표(내부 데이터) 점검
   if (on('credit_fc')) for (const s of creditGridIssues(parseTsv(inp.internal?.creditFc ?? ''))) out.push({ level: 'warn', item: 'credit_fc', text: `회사채 전망표: ${s}` });
+  // 3-0. 시장 자료(DM) 판 이후 금통위·FOMC 가 있었으면 시장 장표 문구가 이전 시점 기준임을 알린다
+  if (d.dm && (on('rates') || on('forecast') || on('credit_fc'))) {
+    const after = d.events.filter((e) => (e.kind === '금통위' || e.kind === 'FOMC') && (e.end_dt ?? e.event_dt) > d.dm!.edition && (e.end_dt ?? e.event_dt) < d.asof).map((e) => `${e.kind}(${yymmdd(e.end_dt ?? e.event_dt)})`);
+    if (after.length) out.push({ level: 'warn', item: 'rates', text: `시장 장표 문구는 ${d.dm.title} ${yymmdd(d.dm.edition)} 판입니다. 이후 ${after.join('·')}가 있어 판 갱신이 필요합니다.` });
+  }
+  // 3-1. 주요 이슈는 시점에 따라 중요도가 바뀐다: 이슈 기준일 뒤에 금통위·FOMC 가 있었거나 30일이 지났으면 갱신 확인
+  //      시장 수급 이슈(만기 집중·정책 자금, 만기도래 및 수급 장표)는 회의 결과로 바뀌는 내용이 아니라 30일 기준만
+  {
+    const meets = d.events.filter((e) => (e.kind === '금통위' || e.kind === 'FOMC') && (e.end_dt ?? e.event_dt) < d.asof).map((e) => e.end_dt ?? e.event_dt);
+    const list = [
+      ...(on('issues') ? pickIssues(d).map((x) => ({ x, item: 'issues' as const, what: '주요 이슈' })) : []),
+      ...(on('maturity') ? supplyIssues(d).map((x) => ({ x, item: 'maturity' as const, what: '시장 수급' })) : []),
+    ];
+    for (const { x, item, what } of list) {
+      const after = item === 'issues' ? meets.filter((m) => m > x.as_of).sort().pop() : undefined;
+      const days = (Date.parse(d.asof) - Date.parse(x.as_of)) / 864e5;
+      if (after) out.push({ level: 'warn', item, text: `${what} '${x.topic}'(${yymmdd(x.as_of)} 기준) 이후 ${yymmdd(after)} 금통위·FOMC가 있었습니다. 시장 자료 팩 갱신이 필요합니다.` });
+      else if (days > 30) out.push({ level: 'info', item, text: `${what} '${x.topic}'은 ${yymmdd(x.as_of)} 기준(${Math.round(days)}일 전)입니다. 지금도 중요한 이슈인지 확인하세요.` });
+    }
+  }
   // 4. 사례 표: 비었거나 같은 발행금리 반복
   if (on('peers')) {
     const sel = inp.peerKeys.map((k) => d.peers.find((p) => p.key === k)).filter(Boolean) as PeerIssue[];
