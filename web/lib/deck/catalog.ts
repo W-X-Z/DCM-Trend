@@ -31,7 +31,7 @@ export const SECTIONS: Section[] = [
       { id: 'terms', title: '제안 Term-sheet', kind: 'gen', on: true },
       { id: 'sizing', title: '트랜치 검토', kind: 'gen', on: true },
       { id: 'schedule', title: '발행일정(안)', kind: 'gen', on: true },
-      { id: 'sales', title: 'Sales 전략', kind: 'gen', on: false, note: '투자자 구분별 참여는 공시, 기관별 내역은 내부 데이터' },
+      { id: 'sales', title: 'Sales 전략', kind: 'gen', on: true, note: '수요예측 참여 데이터 기반, 문안은 AI(기관별 내역은 내부 데이터)' },
       { id: 'ir', title: 'IR 및 수요예측 전략', kind: 'static', on: false, note: '템플릿 도식 3장' },
     ],
   },
@@ -47,7 +47,7 @@ export const SECTIONS: Section[] = [
     key: 'outlook', label: '금리 전망',
     items: [
       { id: 'forecast', title: '기준금리 및 국고채 금리', kind: 'gen', on: true, note: 'NH 리서치 전망표(내부), 없으면 공개 전망표' },
-      { id: 'credit_fc', title: '회사채 금리', kind: 'gen', on: true, note: 'NH 등급별 회사채 전망표(내부 데이터)가 있을 때만' },
+      { id: 'credit_fc', title: '회사채 금리', kind: 'gen', on: true, note: 'NH 등급별 전망표(내부), 없으면 시장 자료 팩의 크레딧 의견·신용스프레드' },
       { id: 'views', title: '증권사별 국내 기준금리 전망', kind: 'gen', on: true },
       { id: 'usviews', title: '증권사별 미국 기준금리 전망', kind: 'gen', on: true },
     ],
@@ -129,29 +129,15 @@ export function planOf(on: Record<ItemId, boolean>, available: (id: ItemId) => b
 
 export const itemOf = (id: ItemId) => ALL_ITEMS.find((i) => i.id === id);
 
-// 목차 템플릿(칩): 한 번에 목차를 바꾸고, 그 뒤에 개별 장표를 켜고 끌 수 있다.
-// 기본형 = 위 on 값. 나머지는 켤 장표 목록(나머지는 끈다).
+// 목차 템플릿(칩): 기본·간략 두 가지만(신규 발행처럼 예외가 많은 경우는 개별 선택으로). 칩을 고른 뒤 장표를 켜고 끌 수 있다.
+// 구성은 노션 '제안서 목차 항목' DB의 템플릿 칼럼과 같다.
 export type Template = { key: string; label: string; hint: string; items: () => Record<ItemId, boolean> };
 const only = (ids: ItemId[]) => Object.fromEntries(ALL_ITEMS.map((i) => [i.id, ids.includes(i.id)])) as Record<ItemId, boolean>;
-const plus = (ids: ItemId[], minus: ItemId[] = []) => {
-  const b = defaultItems();
-  for (const id of ids) b[id] = true;
-  for (const id of minus) b[id] = false;
-  return b;
-};
 export const TEMPLATES: Template[] = [
-  { key: 'basic', label: '기본형', hint: '반복 발행사 공모사채 제안(현업 샘플 기본 구성)', items: defaultItems },
+  { key: 'basic', label: '기본', hint: '반복 발행사 공모사채 제안(현업 샘플 기본 구성 + Sales 전략)', items: defaultItems },
   {
-    key: 'lite', label: '핵심 요약', hint: '발행 조건·일정과 시장 핵심만(10장 안팎)',
+    key: 'lite', label: '간략', hint: '발행 조건·일정과 시장 핵심만(10장 안팎)',
     items: () => only(['cover', 'contents', 'terms', 'sizing', 'schedule', 'rates', 'forecast', 'peers', 'pipeline', 'back']),
-  },
-  {
-    key: 'pitch', label: '신규 피치', hint: '기본형 + Sales 전략·사례 비교·NH 강점',
-    items: () => plus(['sales', 'compare', 'corp', 'nh_company', 'nh_core', 'league', 'strength']),
-  },
-  {
-    key: 'market', label: '시장 자료', hint: '발행 제안 없이 금리·수요예측·만기 자료만',
-    items: () => plus(['corp'], ['terms', 'sizing', 'schedule', 'sales', 'ir']),
   },
 ];
 // 지금 목차가 어느 템플릿과 같은지(없으면 null = 직접 선택)

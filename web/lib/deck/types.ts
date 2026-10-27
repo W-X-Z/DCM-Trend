@@ -21,6 +21,8 @@ export type PeerIssue = {
   band_type: string | null; band_low: number | null; band_high: number | null; fee_bp: number | null;
   lead: string | null; nh_lead: boolean; tranches: PeerTranche[];
   amount_max_krw: number | null; // 증액 한도(증권신고서)
+  // 비교군 제외 사유: '보증·담보부 추정'(과거 등급보다 크게 높음), '공기업'
+  flag?: string | null;
 };
 
 export type LeagueRow = { firm: string; deals: number; credit: number; isNh: boolean };
@@ -54,6 +56,8 @@ export type DeckData = {
     house: string; analysts: string | null; published_dt: string; kind: string; title: string; url: string;
     stance: string | null; next_move: string | null; terminal: number | null; summary: string;
   }[];
+  // 시장 자료 팩: 최근 60일 크레딧·국고채 시장 의견(증권사·언론, 출처 포함). 사내에서는 NH 리서치·Discussion Material 로 대체
+  marketNotes: { house: string; topic: string; text: string; date: string; title: string; url: string }[];
   events: MarketEvent[];
   holidays: Holiday[];
   fee: { last_bp: number | null; group_median_bp: number | null };

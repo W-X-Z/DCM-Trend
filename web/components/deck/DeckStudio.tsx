@@ -11,7 +11,7 @@ import { bandRange, eok, mdw, ratioX, rate3, yy } from '@/lib/deck/fmt';
 import { BACK, FRONT, SECTIONS, TEMPLATES, planOf, templateOf, type Item, type ItemId } from '@/lib/deck/catalog';
 import { KIND_LABEL, forGrade, type Knowledge, type KnowledgeSlide } from '@/lib/deck/knowledge';
 import { available, buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
-import { defaultInput, factsFor, peerPool, ruleText, scheduleOf, totalEok } from '@/lib/deck/rules';
+import { defaultInput, factsFor, peerPool, ruleText, salesFacts, scheduleOf, totalEok } from '@/lib/deck/rules';
 import { dataReport, STATUS_LABEL, type DataReport } from '@/lib/deck/sources';
 import { qaChecks, type Qa } from '@/lib/deck/qa';
 import { MARK_LABEL, reviewMarks, type Mark } from '@/lib/deck/review';
@@ -21,14 +21,15 @@ import type { Slide } from '@/lib/deck/model';
 import type { DeckData, DeckInput, DeckText } from '@/lib/deck/types';
 import { SlideView, type ViewMark } from './SlideView';
 
-type Mode = 'rule' | 'ai' | 'edited';
+// 문안: 규칙(로직) 그대로 또는 직접 고침. AI 는 Sales 전략 문안에만 쓰고 따로 둔다(salesAi).
+type Mode = 'rule' | 'edited';
 // 고칠 항목 탭: 평소에는 접어 두고 장표만 크게 보인다
 type Tab = 'review' | 'data' | 'toc' | 'terms' | 'schedule' | 'peers' | 'text' | 'internal' | 'cover';
 const TABS: [Tab, string][] = [
   ['data', '관련 데이터'], ['review', '검토'], ['toc', '목차'], ['terms', '발행 조건'], ['schedule', '일정'], ['peers', '수요예측 사례'], ['text', '문안'], ['internal', '내부 데이터'], ['cover', '표지'],
 ];
 // v3: 기본형 목차(2026-10-27). 이전 버전에 저장된 목차 선택은 버리고 새 기본값을 쓴다.
-type Saved = { v: 2 | 3; input: DeckInput; text: DeckText | null; mode: Mode; factsKey: string | null; at: string };
+type Saved = { v: 2 | 3 | 4; input: DeckInput; text: DeckText | null; mode: Mode | 'ai'; factsKey: string | null; at: string; salesAi?: string[] | null; salesKey?: string | null };
 const KEY = (corp: string) => `deck:v2:${corp}`;
 // 검토 표시에서 '확인'한 항목(내용이 바뀌면 키가 바뀌어 다시 보인다)
 const RKEY = (corp: string) => `deck:review:${corp}`;
@@ -105,6 +106,8 @@ export function DeckStudio({ corp }: { corp: string }) {
   const [input, setInput] = useState<DeckInput | null>(null);
   const [text, setText] = useState<DeckText | null>(null);
   const [mode, setMode] = useState<Mode>('rule');
+  const [salesAi, setSalesAi] = useState<string[] | null>(null);
+  const [salesKey, setSalesKey] = useState<string | null>(null);
   const [factsKey, setFactsKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<'' | 'ai' | 'pptx' | 'pdf'>('');
   const [note, setNote] = useState<string | null>(null);
@@ -170,18 +173,22 @@ export function DeckStudio({ corp }: { corp: string }) {
         setData(d);
         const s = load(corp);
         const base = defaultInput(d);
-        if (s) {
-          const items = s.v === 3 ? { ...base.items, ...s.input.items } : base.items;
-          const peerKeys = s.v === 3 ? s.input.peerKeys : base.peerKeys;
-          setInput({ ...base, ...s.input, items, peerKeys, band: { ...base.band, ...s.input.band }, internal: { ...base.internal, ...s.input.internal } });
+        if (s && s.v === 4) {
+          setInput({ ...base, ...s.input, items: { ...base.items, ...s.input.items }, band: { ...base.band, ...s.input.band }, internal: { ...base.internal, ...s.input.internal } });
           setText(s.text);
-          setMode(s.mode);
+          setMode(s.mode === 'edited' ? 'edited' : 'rule');
           setFactsKey(s.factsKey);
+          setSalesAi(s.salesAi ?? null);
+          setSalesKey(s.salesKey ?? null);
           setSavedAt(s.at);
         } else {
-          setInput(base);
+          // v3 이전 저장값: 기본값 규칙(밴드·증액 한도·납입일·목차 등)이 바뀌어 직접 넣은 값만 살린다
+          const keep = s ? { tranches: s.input.tranches, contacts: s.input.contacts, dept: s.input.dept, coverDept: s.input.coverDept, internal: { ...base.internal, ...s.input.internal } } : {};
+          setInput({ ...base, ...keep });
           setText(null);
           setMode('rule');
+          setSalesAi(null);
+          setSalesKey(null);
         }
       })
       .catch((e: Error) => alive && setErr(e.message));
@@ -193,9 +200,12 @@ export function DeckStudio({ corp }: { corp: string }) {
   const rule = useMemo(() => (data && input ? ruleText(data, input) : null), [data, input]);
   const facts = useMemo(() => (data && input ? factsFor(data, input) : null), [data, input]);
   const curKey = useMemo(() => (facts ? JSON.stringify(facts).length + ':' + hash(JSON.stringify(facts)) : null), [facts]);
-  const shownText = mode === 'rule' || !text ? rule : text;
+  const shownText = useMemo(() => {
+    const b = mode === 'rule' || !text ? rule : text;
+    return b && salesAi ? { ...b, sales: salesAi } : b;
+  }, [mode, text, rule, salesAi]);
   const slides = useMemo(() => (data && input && shownText ? buildSlides(data, input, shownText) : []), [data, input, shownText]);
-  const stale = mode !== 'rule' && factsKey && curKey && factsKey !== curKey;
+  const stale = (mode !== 'rule' && factsKey && curKey && factsKey !== curKey) || (salesAi && salesKey && curKey && salesKey !== curKey);
   // 데이터 사용 현황·검수 (켠 장표 기준)
   const report = useMemo(() => (data && input ? dataReport(data, input, available(data, input)) : null), [data, input]);
   const qa = useMemo(() => {
@@ -212,28 +222,30 @@ export function DeckStudio({ corp }: { corp: string }) {
     if (!input) return;
     const t = setTimeout(() => {
       const at = new Date().toISOString();
-      save(corp, { v: 3, input, text: mode === 'rule' ? null : text, mode, factsKey, at });
+      save(corp, { v: 4, input, text: mode === 'rule' ? null : text, mode, factsKey, salesAi, salesKey, at });
       setSavedAt(at);
     }, 600);
     return () => clearTimeout(t);
-  }, [corp, input, text, mode, factsKey]);
+  }, [corp, input, text, mode, factsKey, salesAi, salesKey]);
 
   const set = useCallback(<K extends keyof DeckInput>(k: K, v: DeckInput[K]) => setInput((x) => (x ? { ...x, [k]: v } : x)), []);
 
+  // AI 는 Sales 전략 문안에만: 공개 수요예측 데이터(투자자 구분별 참여)로 쓴다. 내부 기관별 데이터는 보내지 않는다.
   async function runAi() {
-    if (!facts || !rule) return;
+    if (!data || !input || !rule) return;
     setBusy('ai');
     setNote(null);
     try {
-      const slides = Object.entries(input!.items).filter(([, v]) => v).map(([k]) => k);
-      const r = await fetch('/api/deck/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts, rule, grade: data?.company.rating_group ?? null, slides }) });
+      const r = await fetch('/api/deck/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts: salesFacts(data, input), rule, grade: data.company.rating_group ?? null }) });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? 'AI 문안을 만들지 못했습니다.');
-      setText(j.text);
-      setMode('ai');
-      setFactsKey(curKey);
-      const used = j.applied ? `노하우 ${j.applied}개를 반영했습니다.` : '반영할 노하우가 없어 문장만 다듬었습니다.';
-      setNote(j.dropped ? `${used} 근거 숫자가 없거나 전망 표현이 있는 ${j.dropped}줄은 규칙 문안으로 바꿨습니다.` : `${used} 내려받기 전에 숫자를 확인하세요.`);
+      setSalesAi(j.sales);
+      setSalesKey(curKey);
+      if (!input.items.sales) set('items', { ...input.items, sales: true });
+      const i = slides.findIndex((x) => x.id === 'sales');
+      if (i >= 0) setCur(i);
+      const used = j.applied ? `Sales 노하우 ${j.applied}개를 반영했습니다.` : 'Sales 문안을 만들었습니다.';
+      setNote(j.usedRule ? '근거 숫자가 맞는 줄이 없어 규칙 문안을 그대로 둡니다.' : j.dropped ? `${used} 근거 숫자가 없거나 전망 표현이 있는 ${j.dropped}줄은 뺐습니다.` : `${used} 내려받기 전에 숫자를 확인하세요.`);
     } catch (e) {
       setNote((e as Error).message);
     } finally {
@@ -262,6 +274,11 @@ export function DeckStudio({ corp }: { corp: string }) {
   }
 
   function editText(k: keyof DeckText, v: unknown) {
+    // Sales 문안을 AI 로 만든 뒤 고치면 그 문안을 고친다
+    if (k === 'sales' && salesAi) {
+      setSalesAi(v as string[]);
+      return;
+    }
     const base = mode === 'rule' || !text ? rule! : text;
     setText({ ...base, [k]: v });
     if (mode === 'rule') setFactsKey(curKey);
@@ -279,6 +296,8 @@ export function DeckStudio({ corp }: { corp: string }) {
     setText(null);
     setMode('rule');
     setFactsKey(null);
+    setSalesAi(null);
+    setSalesKey(null);
     setNote('기본값으로 되돌렸습니다.');
   }
 
@@ -422,9 +441,9 @@ export function DeckStudio({ corp }: { corp: string }) {
     text: (
       <>
         <p className="small dk-text-head">
-          <span className={`dk-mode m-${mode}`}>{mode === 'rule' ? '규칙 문안' : mode === 'ai' ? '노하우 반영 문안' : '직접 고친 문안'}</span>
+          <span className={`dk-mode m-${mode}`}>{mode === 'rule' ? '규칙 문안' : '직접 고친 문안'}{salesAi ? ' · Sales는 AI 문안' : ''}</span>
           <Info>한 줄이 글머리 하나입니다. **굵게+밑줄**, !!빨강!! 표기를 쓸 수 있습니다. 숫자는 공시·금리 데이터 값이므로 고칠 때 원문을 확인하세요.</Info>
-          {mode !== 'rule' && <button type="button" className="linklike" onClick={() => { setMode('rule'); setText(null); setFactsKey(null); }}>규칙 문안으로 되돌리기</button>}
+          {(mode !== 'rule' || salesAi) && <button type="button" className="linklike" onClick={() => { setMode('rule'); setText(null); setFactsKey(null); setSalesAi(null); setSalesKey(null); }}>규칙 문안으로 되돌리기</button>}
         </p>
         <Tips list={myTips} slide="all" />
         <div id="dk-t-lead">
@@ -498,7 +517,7 @@ export function DeckStudio({ corp }: { corp: string }) {
   const tabMeta: Partial<Record<Tab, string>> = {
     peers: `${input.peerKeys.length}건`,
     toc: `${slides.length}장`,
-    text: mode === 'rule' ? '' : mode === 'ai' ? 'AI' : '수정',
+    text: mode === 'edited' ? '수정' : salesAi ? 'Sales AI' : '',
     review: openMarks.length ? `${openMarks.length}` : '완료',
     data: report?.intMissing.length ? `내부 미연결 ${report.intMissing.length}` : '',
   };
@@ -515,9 +534,9 @@ export function DeckStudio({ corp }: { corp: string }) {
         <div className="dk-actions">
           <span className="dk-ai">
             <button type="button" className="btn dk-cta" onClick={runAi} disabled={!!busy} aria-busy={busy === 'ai'}>
-              {busy === 'ai' ? '노하우 반영 중…' : mode === 'ai' ? '노하우 다시 반영(AI)' : '노하우 반영(AI)'}
+              {busy === 'ai' ? 'Sales 문안 작성 중…' : salesAi ? 'Sales 문안 다시 쓰기(AI)' : 'Sales 문안 쓰기(AI)'}
             </button>
-            <Info>기본 문안은 공시·금리 숫자로 규칙이 만듭니다. 이 버튼은 현업 노하우(이 회사 등급·켠 장표에 맞는 것)를 더해 AI가 판단 문장을 고칩니다. 사실에 없는 숫자나 출처 없는 시장 전망이 든 줄은 규칙 문안으로 되돌립니다. 회사명·조건·숫자가 OpenAI로 전송되고, 결과는 이 브라우저에만 저장됩니다.</Info>
+            <Info>장표 문안은 모두 공시·금리 숫자와 규칙으로 만듭니다. AI는 Sales 전략 장표에만 씁니다: 회사·같은 등급의 수요예측 투자자 구분별 참여를 근거로 마케팅 대상과 방법을 씁니다. 사실에 없는 숫자나 출처 없는 시장 전망이 든 줄은 뺍니다. 회사명·조건·공개 수요예측 숫자가 OpenAI로 전송되고(내부 데이터는 보내지 않음), 결과는 이 브라우저에만 저장됩니다.</Info>
           </span>
           <button type="button" className="btn btn-ghost" onClick={() => exportAs('pptx')} disabled={!!busy}>{busy === 'pptx' ? 'PPTX 만드는 중…' : 'PPTX'}</button>
           <button type="button" className="btn btn-ghost" onClick={() => exportAs('pdf')} disabled={!!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF'}</button>

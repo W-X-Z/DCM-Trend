@@ -91,15 +91,15 @@ const check = (name, cond, detail = '') => {
   const on = m.defaultItems();
   const p = m.planOf(on);
   check('목차: 기본 구성 5장 + Appendix', p.sections.map((x) => `${x.no ?? ''}${x.label}`).join('|') === '1발행 제안|2금리 동향|3금리 전망|4회사채 수요예측 결과|5회사채 수요예측 예정 내역|Appendix', p.sections.map((x) => `${x.no}${x.label}`).join('|'));
-  check('목차: 발행 제안 ①~③', p.sections[0].items.map((x) => x.title).join(',') === '1. 발행 제안_① 제안 Term-sheet,1. 발행 제안_② 트랜치 검토,1. 발행 제안_③ 발행일정(안)', p.sections[0].items.map((x) => x.title).join(','));
-  check('목차: 상세 장표(Sales·미매각·NH 강점)는 기본 꺼짐', !on.sales && !on.compare && !on.corp && !on.nh_core && !on.league && !on.strength && !on.datareport);
+  check('목차: 발행 제안 ①~④', p.sections[0].items.map((x) => x.title).join(',') === '1. 발행 제안_① 제안 Term-sheet,1. 발행 제안_② 트랜치 검토,1. 발행 제안_③ 발행일정(안),1. 발행 제안_④ Sales 전략', p.sections[0].items.map((x) => x.title).join(','));
+  check('목차: 상세 장표(미매각·NH 강점)는 기본 꺼짐, Sales 전략은 기본 켬', on.sales && !on.compare && !on.corp && !on.nh_core && !on.league && !on.strength && !on.datareport);
   check('목차: 장표 하나인 장은 소제목 없음', p.sections[4].items[0].title === '5. 회사채 수요예측 예정 내역' && p.sections[3].items[0].title === '4. 회사채 수요예측 결과_같은 등급 수요예측 결과', `${p.sections[4].items[0].title} / ${p.sections[3].items[0].title}`);
   check('목차: Appendix 번호', p.sections[5].items.map((x) => x.title).join(',') === 'Appendix 1. 공모사채 만기도래 현황,Appendix 2. 주요 이벤트');
   const p1 = m.planOf(on, (id) => id !== 'credit_fc');
   check('목차: 내부 데이터 없는 회사채 금리는 빠지고 번호 당김', p1.sections[2].items.map((x) => x.sub).join(',') === '① 기준금리 및 국고채 금리,② 증권사별 국내 기준금리 전망,③ 증권사별 미국 기준금리 전망', p1.sections[2].items.map((x) => x.sub).join(','));
-  const p2 = m.planOf({ ...on, bok: false, sales: true, pipeline: false });
+  const p2 = m.planOf({ ...on, bok: false, pipeline: false });
   check('목차: 금통위를 끄면 FOMC 가 ②', p2.sections[1].items[1].title === '2. 금리 동향_② FOMC', p2.sections[1].items[1].title);
-  check('목차: Sales 전략을 켜면 ④, 예정 내역을 끄면 장이 빠짐', p2.sections[0].items[3].label === '1-④ Sales 전략' && !p2.sections.some((x) => x.key === 'pipeline'), p2.sections[0].items.map((x) => x.label).join('|'));
+  check('목차: Sales 전략은 1-④, 예정 내역을 끄면 장이 빠짐', p2.sections[0].items[3].label === '1-④ Sales 전략' && !p2.sections.some((x) => x.key === 'pipeline'), p2.sections[0].items.map((x) => x.label).join('|'));
   const none = Object.fromEntries(Object.keys(on).map((k) => [k, false]));
   const p3 = m.planOf({ ...none, rates: true, events: true });
   check('목차: 앞 장이 비면 번호 당김', p3.sections[0].no === 1 && p3.sections[0].items[0].title === '1. 금리 동향' && p3.sections[1].items[0].title === 'Appendix 1. 주요 이벤트', JSON.stringify(p3.sections.map((x) => x.items.map((i) => i.title))));
@@ -114,8 +114,8 @@ const check = (name, cond, detail = '') => {
   const tx = m.ruleText(d, inp);
   const slides = m.buildSlides(d, inp, tx);
   const ids = slides.map((s) => s.id);
-  const want = ['cover', 'contents', 'terms', 'sizing', 'schedule', 'rates', 'bok', 'fomc', 'forecast', 'views', 'usviews', 'peers-0', 'pipeline', 'maturity', 'events', 'back'];
-  check('장표: 기본 목차 순서(간지 없음)', want.every((w, i) => ids.indexOf(w) >= 0 && (i === 0 || ids.indexOf(w) > ids.indexOf(want[i - 1]))) && !ids.some((x) => /^folder|^sales|^compare|^corp|^nh_|^league|^strength|^credit_fc|^datareport/.test(x)), ids.join(','));
+  const want = ['cover', 'contents', 'terms', 'sizing', 'schedule', 'sales', 'rates', 'bok', 'fomc', 'forecast', 'views', 'usviews', 'peers-0', 'pipeline', 'maturity', 'events', 'back'];
+  check('장표: 기본 목차 순서(간지 없음)', want.every((w, i) => ids.indexOf(w) >= 0 && (i === 0 || ids.indexOf(w) > ids.indexOf(want[i - 1]))) && ids.indexOf('sales') === ids.indexOf('schedule') + 1 && !ids.some((x) => /^folder|^compare|^corp|^nh_|^league|^strength|^credit_fc|^datareport/.test(x)), ids.join(','));
   check('장표: 발행조건 비고 근거', tx.termNotes && /수요예측 가능일/.test(tx.termNotes.demand) && tx.termNotes.tenor.length > 0, JSON.stringify(tx.termNotes));
   const fx = m.buildSlides(d, { ...inp, internal: { ...inp.internal, creditFc: '구분\t2026\nAA-\t3.10', investors: '기관\t참여\nA\t100' }, items: { ...inp.items, sales: true } }, tx);
   check('장표: 내부 데이터(등급별 전망표) 연결 → 회사채 금리 장표', fx.some((s) => s.id === 'credit_fc') && ids.indexOf('forecast') >= 0 && !ids.includes('credit_fc'));
@@ -278,11 +278,11 @@ const check = (name, cond, detail = '') => {
 
   // 4-5. 목차 템플릿 칩
   {
-    check('템플릿: 기본 목차 = 기본형', m.templateOf(m.defaultItems()) === 'basic');
+    check('템플릿: 기본 목차 = 기본', m.templateOf(m.defaultItems()) === 'basic');
     const lite = m.TEMPLATES.find((t) => t.key === 'lite').items();
     check('템플릿: 핵심 요약', m.templateOf(lite) === 'lite' && !lite.bok && lite.terms);
-    const mk = m.TEMPLATES.find((t) => t.key === 'market').items();
-    check('템플릿: 시장 자료는 발행 제안 장 없음', !mk.terms && !mk.sizing && mk.rates && mk.peers);
+    check('템플릿: 기본·간략 두 가지만', m.TEMPLATES.map((t) => t.key).join() === 'basic,lite');
+    check('템플릿: 기본에 Sales 전략, 간략에는 없음', m.defaultItems().sales && !lite.sales);
     check('템플릿: 하나 바꾸면 직접 선택', m.templateOf({ ...m.defaultItems(), events: false }) === null);
   }
 
@@ -305,6 +305,26 @@ const check = (name, cond, detail = '') => {
     const mk2 = m.reviewMarks(sl2, d, inp2, tx2, m.qaChecks(d, inp2, tx2, { on: () => true, edited: false }));
     check('검토: 값을 정하면 표시 사라짐', !mk2.some((x) => /^terms:(band|pay):/.test(x.key)) && !mk2.some((x) => x.item === 'back'));
     check('검토: 내보내기 장표에는 표시 없음', !sl.some((x) => x.prims.some((p) => p.k === 'mark')));
+  }
+
+  // 4-7. 로직 정리(2026-10-27 생성본 점검): 조사, 판단 문장 정합, 발행 시기 규칙, 증액 한도, 비교군, Sales 사실 묶음
+  {
+    check('규칙: 인상 시점 파싱', JSON.stringify(m.hikeMonths('10월 동결·12월 인상')) === '[12]' && JSON.stringify(m.hikeMonths('11월·내년 2월 인상')) === '[11,2]' && !m.hikeMonths('연내 동결').length);
+    check('문안: 발행 시기 조사(초를)', !/초을|중순를|말를/.test(tx.lead.replace(/\*/g, '')) && /(초를|중순을|말을)/.test(tx.lead.replace(/\*/g, '')), tx.lead);
+    check('문안: 판단 문장이 제안과 모순되지 않음', !tx.sizing.some((x) => /차환 부담이 가장 적다고 판단/.test(x)));
+    const plan = m.payPlan(d);
+    check('일정: 기본 납입일은 연말(12/15~12/31)을 피함', plan.pay.slice(5) < '12-15' || plan.pay.slice(5, 7) !== '12', plan.pay);
+    const T = (tenor, init, amt) => ({ tenor, months: 36, initial_krw: init * 1e8, amount_krw: amt * 1e8 });
+    const own = [{ ...d.own[0], initial_krw: 1500e8, amount_krw: 2200e8, series: '26' }, { ...d.own[0], initial_krw: 2000e8, amount_krw: 2450e8, series: '29' }];
+    const mp = m.maxPlan({ ...d, own }, 2000);
+    check('증액 한도: 최근 최대 증액 배율 × 신고금액(100억 올림)', mp.max === 3000 && mp.from.series === '26', JSON.stringify(mp));
+    const flagged = { ...d.peers[0], key: 'flag-x', corp_code: 'X1', corp_name: '보증회사', flag: '보증·담보부 추정' };
+    const d4 = { ...d, peers: [...d.peers, flagged] };
+    check('비교군: 보증·담보부 추정·공기업 제외', !m.peerPool(d4, 'group').some((p) => p.key === 'flag-x') && m.excludedPeers(d4).some((p) => p.key === 'flag-x'));
+    const sf = m.salesFacts(d, inp);
+    check('Sales AI: 공개 수요예측 사실만(리그테이블·내부 데이터 없음)', sf.투자자구분참여 && !('리그테이블' in sf) && !JSON.stringify(sf).includes('internal'), Object.keys(sf).join(','));
+    const cc = m.comboCounts(m.peerPool(d, inp.peerScope));
+    check('구조 통계는 같은 범위(사례 풀)에서', cc.reduce((a, b) => a + b.issues, 0) === m.peerPool(d, inp.peerScope).length);
   }
 
   // 5. PPTX 조립: NH 템플릿 + 고정 장표, 번호·회사명 바꿈
