@@ -157,6 +157,59 @@ export function notchStats(pool: PeerIssue[]) {
     .sort((a, b) => b.n - a.n);
 }
 
+// 같은 등급(또는 노치) 발행의 만기별 발행금액 비중: 트렌치 검토의 '등급 관행' 근거
+// 만기는 연 단위로 묶는다(18개월 → 1.5년). 발행금액이 없으면 최초 신고금액.
+export function tenorMix(pool: PeerIssue[]) {
+  const by = new Map<number, { amount: number; n: number }>();
+  let issues = 0;
+  for (const p of pool) {
+    let used = false;
+    for (const t of p.tranches) {
+      const y = yearsOf(t.months);
+      const amt = Number(t.amount_krw ?? t.initial_krw ?? 0);
+      if (y == null || !amt) continue;
+      const e = by.get(y) ?? { amount: 0, n: 0 };
+      e.amount += amt;
+      e.n++;
+      by.set(y, e);
+      used = true;
+    }
+    if (used) issues++;
+  }
+  const total = [...by.values()].reduce((a, b) => a + b.amount, 0);
+  const rows = [...by.entries()].sort((a, b) => a[0] - b[0])
+    .map(([y, e]) => ({ k: `${y}년`, years: y, amount: e.amount, n: e.n, share: total ? (e.amount / total) * 100 : 0 }));
+  // 비중 상위 두 만기와 합(문안·사실 묶음이 같은 값을 쓴다)
+  const top2 = [...rows].sort((a, b) => b.amount - a.amount).slice(0, 2).sort((a, b) => a.years - b.years);
+  const top2Share = top2.reduce((a, b) => a + b.share, 0);
+  return { total, issues, rows, top2, top2Share };
+}
+
+// 발행사 공모채 만기분포: 올해·내년은 반기, 그 뒤는 연 단위.
+// 만기도래가 없는 해는 제안 만기 범위(내년 ~ 올해+horizon년, 자료 기간 안의 온전한 해)에서만 돌려준다.
+export function maturityBuckets(d: DeckData, horizon = 3) {
+  const rows = d.maturitiesLong?.rows ?? d.maturities;
+  const until = d.maturitiesLong?.to ?? d.maturities.at(-1)?.dt ?? d.asof;
+  const y0 = Number(d.asof.slice(0, 4));
+  const half = (dt: string) => (Number(dt.slice(5, 7)) <= 6 ? '상' : '하');
+  const keyOf = (dt: string) => {
+    const y = Number(dt.slice(0, 4));
+    return y <= y0 + 1 ? `'${String(y).slice(2)}${half(dt)}` : `'${String(y).slice(2)}`;
+  };
+  const keys: string[] = [];
+  const cur = half(d.asof) === '상' ? [`'${String(y0).slice(2)}상`, `'${String(y0).slice(2)}하`] : [`'${String(y0).slice(2)}하`];
+  keys.push(...cur, `'${String(y0 + 1).slice(2)}상`, `'${String(y0 + 1).slice(2)}하`);
+  for (let y = y0 + 2; `${y}-12-31` <= until; y++) keys.push(`'${String(y).slice(2)}`);
+  const sums = new Map(keys.map((k) => [k, 0]));
+  for (const m of rows) {
+    const k = keyOf(m.dt);
+    if (sums.has(k)) sums.set(k, sums.get(k)! + Number(m.amount_krw ?? 0));
+  }
+  const buckets = keys.map((k) => ({ label: k, amount: sums.get(k)! }));
+  const gaps = [...fullYearLoads(d).entries()].filter(([y, v]) => !v && Number(y) <= y0 + Math.max(1, Math.ceil(horizon))).map(([y]) => y);
+  return { buckets, gaps };
+}
+
 // 분기 소계 (월 배열 12개 → 이번 분기부터)
 export function quarterOf(month: string) {
   return `${month.slice(2, 4)}.${Math.floor((Number(month.slice(5, 7)) - 1) / 3) + 1}Q`;

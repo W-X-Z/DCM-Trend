@@ -5428,3 +5428,150 @@ table.data th.col-cta {
   max-height: 420px;
   background: var(--paper);
 }
+
+/* 제안서: 데이터·검수 ------------------------------------------------------------ */
+.dk {
+  --src-ext: #1f6f5c;
+  --src-ext-soft: #e4f2ee;
+  --src-int: #9a5b00;
+  --src-int-soft: #fdf1df;
+}
+
+.dk-src-badge {
+  display: inline-flex;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.dk-src-badge span {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.dk-src-badge .b-ext {
+  background: var(--src-ext-soft);
+  color: var(--src-ext);
+}
+
+.dk-src-badge .b-alt,
+.dk-src-badge .b-miss {
+  background: var(--src-int-soft);
+  color: var(--src-int);
+}
+
+.dk-src-badge .b-warn {
+  background: var(--alert-soft);
+  color: var(--alert);
+}
+
+.dk-dsec {
+  margin-top: 14px;
+}
+
+.dk-qa,
+.dk-miss,
+.dk-srcs,
+.dk-srcs ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.dk-qa li {
+  padding: 6px 9px;
+  border-radius: 5px;
+  font-size: var(--s-1);
+  line-height: 1.45;
+}
+
+.dk-qa li.q-warn {
+  background: var(--alert-soft);
+  color: var(--alert);
+}
+
+.dk-qa li.q-info {
+  background: var(--paper);
+  color: var(--ink-2);
+}
+
+.dk-qa .linklike {
+  color: inherit;
+  text-align: left;
+}
+
+.dk-miss li {
+  padding: 6px 9px;
+  border-left: 3px solid var(--src-int);
+  background: var(--src-int-soft);
+  font-size: var(--s-1);
+  line-height: 1.45;
+}
+
+.dk-srcs > li {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.dk-srcs-h {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.dk-srcs ul {
+  gap: 3px;
+  margin-top: 4px;
+  font-size: var(--s-1);
+  line-height: 1.45;
+}
+
+.dk-src-tag {
+  display: inline-block;
+  min-width: 62px;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  text-align: center;
+  background: var(--paper);
+  color: var(--ink-2);
+}
+
+.s-ext-used .dk-src-tag {
+  background: var(--src-ext-soft);
+  color: var(--src-ext);
+}
+
+.s-ext-alt .dk-src-tag,
+.s-int-missing .dk-src-tag {
+  background: var(--src-int-soft);
+  color: var(--src-int);
+}
+
+.s-int-used .dk-src-tag {
+  background: var(--src-ext-soft);
+  color: var(--src-ext);
+}
+
+.s-ext-missing .dk-src-tag {
+  background: var(--alert-soft);
+  color: var(--alert);
+}
+
+.dk-src-note {
+  display: block;
+  margin-left: 68px;
+  color: var(--muted);
+}
+
+.dk-srcs-omit {
+  color: var(--muted);
+}
