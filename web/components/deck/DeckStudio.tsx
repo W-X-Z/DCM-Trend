@@ -1,15 +1,18 @@
 'use client';
 
 // 제안서 작성: 조건 입력 → 일정·사례 선택 → 문안(규칙, 또는 현업 노하우를 반영한 AI 문안) → 미리보기 → PPTX·PDF 내려받기.
+// 장표마다 쓴 외부 데이터와 아직 연결되지 않은 내부 데이터를 '데이터·검수' 탭에서 보여 준다.
 // 입력값·문안은 이 브라우저(localStorage)에만 저장한다. 서버에는 공개 데이터·노하우 조회와 AI 문안 요청만 보낸다.
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Info } from '@/components/Ui';
 import { bandRange, eok, mdw, ratioX, rate3, yy } from '@/lib/deck/fmt';
-import { BACK, FRONT, SECTIONS, defaultItems, type Item, type ItemId } from '@/lib/deck/catalog';
+import { BACK, FRONT, SECTIONS, defaultItems, planOf, type Item, type ItemId } from '@/lib/deck/catalog';
 import { KIND_LABEL, forGrade, type Knowledge, type KnowledgeSlide } from '@/lib/deck/knowledge';
 import { available, buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
 import { defaultInput, factsFor, peerPool, ruleText, scheduleOf, totalEok } from '@/lib/deck/rules';
+import { dataReport, STATUS_LABEL, type DataReport } from '@/lib/deck/sources';
+import { qaChecks, type Qa } from '@/lib/deck/qa';
 import { PAGE } from '@/lib/deck/theme';
 import type { Slide } from '@/lib/deck/model';
 import type { DeckData, DeckInput, DeckText } from '@/lib/deck/types';
@@ -17,11 +20,12 @@ import { SlideView } from './SlideView';
 
 type Mode = 'rule' | 'ai' | 'edited';
 // 고칠 항목 탭: 평소에는 접어 두고 장표만 크게 보인다
-type Tab = 'terms' | 'schedule' | 'peers' | 'toc' | 'text' | 'internal' | 'cover';
+type Tab = 'terms' | 'schedule' | 'peers' | 'toc' | 'text' | 'data' | 'internal' | 'cover';
 const TABS: [Tab, string][] = [
-  ['terms', '발행 조건'], ['schedule', '일정'], ['peers', '비교 사례'], ['toc', '목차'], ['text', '문안'], ['internal', '내부 자료'], ['cover', '표지'],
+  ['terms', '발행 조건'], ['schedule', '일정'], ['peers', '수요예측 사례'], ['toc', '목차'], ['text', '문안'], ['data', '데이터·검수'], ['internal', '내부 데이터'], ['cover', '표지'],
 ];
-type Saved = { v: 2; input: DeckInput; text: DeckText | null; mode: Mode; factsKey: string | null; at: string };
+// v3: 기본형 목차(2026-10-27). 이전 버전에 저장된 목차 선택은 버리고 새 기본값을 쓴다.
+type Saved = { v: 2 | 3; input: DeckInput; text: DeckText | null; mode: Mode; factsKey: string | null; at: string };
 const KEY = (corp: string) => `deck:v2:${corp}`;
 
 function load(corp: string): Saved | null {
@@ -53,9 +57,9 @@ function download(blob: Blob, name: string) {
 
 // 장표별 요약 상자 문안 (목차에서 켠 장표만 보인다)
 const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
-  { key: 'structure', item: 'terms', label: '발행조건 제안(案)' },
-  { key: 'sizing', item: 'sizing', label: '적정 발행규모 및 트랜치 구성' },
-  { key: 'schedule', item: 'schedule', label: '발행 일정' },
+  { key: 'structure', item: 'terms', label: '제안 Term-sheet' },
+  { key: 'sizing', item: 'sizing', label: '트랜치 검토' },
+  { key: 'schedule', item: 'schedule', label: '발행일정(안)' },
   { key: 'sales', item: 'sales', label: 'Sales 전략' },
   { key: 'pipeline', item: 'pipeline', label: '수요예측 예정 내역' },
   { key: 'rates', item: 'rates', label: '금리 동향' },
@@ -63,23 +67,24 @@ const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
   { key: 'fomc', item: 'fomc', label: 'FOMC' },
   { key: 'views', item: 'views', label: '증권사별 국내 기준금리 전망' },
   { key: 'usviews', item: 'usviews', label: '증권사별 미국 기준금리 전망' },
-  { key: 'forecast', item: 'forecast', label: '금리 전망(NH투자증권 리서치)' },
-  { key: 'peers', item: 'peers', label: '수요예측 결과' },
+  { key: 'forecast', item: 'forecast', label: '기준금리 및 국고채 금리 전망' },
+  { key: 'peers', item: 'peers', label: '같은 등급 수요예측 결과' },
   { key: 'compare', item: 'compare', label: '미매각 사례 분석' },
-  { key: 'corp', item: 'corp', label: '회사채 금리' },
+  { key: 'corp', item: 'corp', label: '최근 발행금리' },
   { key: 'league', item: 'league', label: '연간 League Table' },
-  { key: 'maturity', item: 'maturity', label: '등급별 회사채 만기도래' },
+  { key: 'maturity', item: 'maturity', label: '공모사채 만기도래 현황' },
 ];
 
 const TERM_NOTES: [keyof DeckText['termNotes'], string][] = [
   ['rating', '신용등급'], ['tenor', '만기'], ['amount', '발행금액'], ['band', '금리 밴드'], ['coupon', '이자지급'],
   ['demand', '수요예측일'], ['pay', '발행일'], ['uw', '인수희망금액'], ['fee', '수수료'],
 ];
+// 내부 데이터 자리: 사내 시스템에서는 연계로 채우고, 프로토타입에서는 테스트용으로 붙여넣는다
 const INTERNAL: [keyof DeckInput['internal'], string, string][] = [
-  ['rateFc', '리서치 금리 전망표', '금리 전망 장표의 전망표를 대체합니다(예: NH 리서치 월간 전망표).'],
-  ['creditFc', '등급별 회사채 금리 전망표', '금리 전망 장표 2쪽(AA+~A- 2·3·5년 전망)을 만듭니다.'],
-  ['minpyeong', '개별민평·등급민평 표', '적정 발행규모 장표 오른쪽 위 금리 표를 대체합니다.'],
-  ['investors', '기관별 참여·배정 내역', 'Sales 전략 장표 아래에 들어갑니다.'],
+  ['minpyeong', '개별민평·등급민평 (민평 4사)', '트랜치 검토 오른쪽 위 금리 표를 대체합니다. 연결되지 않으면 ECOS 국고·회사채 금리를 씁니다.'],
+  ['rateFc', 'NH 분기별 금리 전망표 (NH 리서치)', '3-① 기준금리 및 국고채 금리 장표의 전망표가 됩니다. 연결되지 않으면 공개 전망표를 씁니다.'],
+  ['creditFc', 'NH 등급별 회사채 금리 전망표 (NH 리서치)', '3-② 회사채 금리 장표(AA+~A- 2·3·5년)를 만듭니다. 연결되지 않으면 장표를 생략합니다.'],
+  ['investors', '기관별 참여·배정 내역 (NH 수요예측 북)', 'Sales 전략 장표(기본 꺼짐) 아래에 들어갑니다.'],
 ];
 
 export function DeckStudio({ corp }: { corp: string }) {
@@ -120,7 +125,9 @@ export function DeckStudio({ corp }: { corp: string }) {
         const s = load(corp);
         const base = defaultInput(d);
         if (s) {
-          setInput({ ...base, ...s.input, items: { ...base.items, ...s.input.items }, band: { ...base.band, ...s.input.band }, internal: { ...base.internal, ...s.input.internal } });
+          const items = s.v === 3 ? { ...base.items, ...s.input.items } : base.items;
+          const peerKeys = s.v === 3 ? s.input.peerKeys : base.peerKeys;
+          setInput({ ...base, ...s.input, items, peerKeys, band: { ...base.band, ...s.input.band }, internal: { ...base.internal, ...s.input.internal } });
           setText(s.text);
           setMode(s.mode);
           setFactsKey(s.factsKey);
@@ -143,13 +150,21 @@ export function DeckStudio({ corp }: { corp: string }) {
   const shownText = mode === 'rule' || !text ? rule : text;
   const slides = useMemo(() => (data && input && shownText ? buildSlides(data, input, shownText) : []), [data, input, shownText]);
   const stale = mode !== 'rule' && factsKey && curKey && factsKey !== curKey;
+  // 데이터 사용 현황·검수 (켠 장표 기준)
+  const report = useMemo(() => (data && input ? dataReport(data, input, available(data, input)) : null), [data, input]);
+  const qa = useMemo(() => {
+    if (!data || !input || !shownText) return [] as Qa[];
+    const plan = planOf(input.items, available(data, input));
+    const shown = new Set(plan.sections.flatMap((s) => s.items.map((i) => i.id)));
+    return qaChecks(data, input, shownText, { on: (id) => shown.has(id), edited: mode === 'edited', extraAllowed: [tips.map((k) => k.body)] });
+  }, [data, input, shownText, mode, tips]);
 
   // 저장 (입력이 바뀌면 0.6초 뒤)
   useEffect(() => {
     if (!input) return;
     const t = setTimeout(() => {
       const at = new Date().toISOString();
-      save(corp, { v: 2, input, text: mode === 'rule' ? null : text, mode, factsKey, at });
+      save(corp, { v: 3, input, text: mode === 'rule' ? null : text, mode, factsKey, at });
       setSavedAt(at);
     }, 600);
     return () => clearTimeout(t);
@@ -227,6 +242,9 @@ export function DeckStudio({ corp }: { corp: string }) {
   const myTips = forGrade(tips, data.company.rating_group);
   const at = Math.min(cur, Math.max(slides.length - 1, 0));
   const targets = slides[at] ? editTargets(slides[at].id) : [];
+  const curItem = slides[at] ? slides[at].id.replace(/-\d+$/, '') : '';
+  const curSrcs = report?.items.find((x) => x.id === curItem)?.srcs ?? [];
+  const curQa = qa.filter((x) => x.item === curItem && x.level === 'warn').length;
 
   // 탭 버튼: 같은 탭을 다시 누르면 닫는다
   const toggle = (t: Tab) => setTab((x) => (x === t ? null : t));
@@ -386,11 +404,12 @@ export function DeckStudio({ corp }: { corp: string }) {
         )}
       </>
     ),
+    data: report ? <DataPanel report={report} qa={qa} goTo={(id) => { const i = slides.findIndex((s) => s.id.replace(/-\d+$/, '') === id); if (i >= 0) setCur(i); }} /> : null,
     internal: (
       <>
         <p className="small muted dk-panel-note">
-          엑셀 표를 붙여넣으면 장표에 그대로 들어갑니다
-          <Info>첫 줄은 머리글, 첫 열은 항목입니다. 이 브라우저에만 저장되고 AI 문안 요청에는 보내지 않습니다.</Info>
+          사내 시스템에서 연계로 채워질 자리입니다. 프로토타입에서는 엑셀 표를 붙여넣어 시험할 수 있습니다.
+          <Info>첫 줄은 머리글, 첫 열은 항목입니다. 이 브라우저에만 저장되고 AI 문안 요청에는 보내지 않습니다. 비워 두면 각 장표는 외부 데이터로 대체하거나 생략하고, 그 내용은 '데이터·검수' 탭에 남습니다.</Info>
         </p>
         {INTERNAL.map(([k, label, where]) => (
           <Field key={k} label={label} hint={where}>
@@ -412,9 +431,10 @@ export function DeckStudio({ corp }: { corp: string }) {
   };
   const tabLabel = (t: Tab) => TABS.find((x) => x[0] === t)![1];
   const tabMeta: Partial<Record<Tab, string>> = {
-    peers: `${input.compareKeys.length}/3`,
+    peers: `${input.peerKeys.length}건`,
     toc: `${slides.length}장`,
     text: mode === 'rule' ? '' : mode === 'ai' ? 'AI' : '수정',
+    data: qa.filter((x) => x.level === 'warn').length ? `경고 ${qa.filter((x) => x.level === 'warn').length}` : report?.intMissing.length ? `미연결 ${report.intMissing.length}` : '',
   };
 
   return (
@@ -456,7 +476,8 @@ export function DeckStudio({ corp }: { corp: string }) {
       <div className={`dk-work${tab ? ' has-panel' : ''}`}>
         <Rail slides={slides} cur={at} setCur={setCur} />
         <Stage slides={slides} cur={at} setCur={setCur} busy={busy === 'ai'}
-          edit={targets.map((x) => ({ label: x.label, go: () => open(x.tab, x.anchor) }))} />
+          edit={targets.map((x) => ({ label: x.label, go: () => open(x.tab, x.anchor) }))}
+          srcs={curSrcs.length ? { ext: curSrcs.filter((s) => s.kind === 'ext' && s.status !== 'missing').length, miss: curSrcs.filter((s) => s.kind === 'int' && s.status === 'missing').length, alt: curSrcs.filter((s) => s.status === 'alt').length, warn: curQa, go: () => open('data', `dk-d-${curItem}`) } : null} />
         {tab && (
           <aside className="dk-panel" id="dk-panel" aria-label={tabLabel(tab)}>
             <div className="dk-panel-h">
@@ -532,23 +553,26 @@ function Tranches({ input, set }: { input: DeckInput; set: Setter }) {
   );
 }
 
-// 목차: 대한항공 공모사채 제안서 구성. 켜고 끄면 목차·간지·쪽 제목 번호가 다시 매겨진다.
+// 목차: 공모 회사채 기본형(CJ프레시웨이 2026-03 구성). 켜고 끄면 목차·쪽 제목 번호가 다시 매겨진다.
+// 대한항공형 상세 장표(Sales 전략·미매각 사례·NH 강점 등)는 기본으로 꺼 두었다.
 function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Setter }) {
   const avail = available(data, input);
   const on = input.items;
-  const count = [...FRONT, ...SECTIONS.flatMap((x) => x.groups.flatMap((g) => g.items)), BACK].filter((i) => on[i.id] && avail(i.id)).length;
+  const plan = planOf(on, avail);
+  const labels = new Map(plan.sections.flatMap((s) => s.items.map((i) => [i.id, i.label] as const)));
+  const count = [...FRONT, ...SECTIONS.flatMap((x) => x.items), BACK].filter((i) => on[i.id] && avail(i.id)).length;
   const toggle = (id: ItemId, v: boolean) => set('items', { ...on, [id]: v });
-  const row = (i: Item, sub = false) => {
+  const row = (i: Item) => {
     const ok = avail(i.id);
     return (
-      <li key={i.id} className={sub ? 'dk-toc-sub' : undefined}>
+      <li key={i.id}>
         <label className={ok ? undefined : 'muted'}>
           <input type="checkbox" checked={!!on[i.id] && ok} disabled={!ok} onChange={(e) => toggle(i.id, e.target.checked)} />
-          <span>{i.title}</span>
-          {i.kind !== 'gen' && <span className="dk-tag">{i.kind === 'static' ? '템플릿' : '빈 표'}</span>}
-          {!ok && <span className="small">자료 없음</span>}
+          <span>{labels.get(i.id) ?? i.title}</span>
+          {i.kind === 'static' && <span className="dk-tag">템플릿</span>}
+          {!ok && <span className="small">{i.id === 'credit_fc' ? '내부 데이터 미연결' : '자료 없음'}</span>}
         </label>
-        {i.note && ok && <span className="dk-toc-note small muted">{i.note}</span>}
+        {i.note && <span className="dk-toc-note small muted">{i.note}</span>}
       </li>
     );
   };
@@ -559,17 +583,8 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
       <ul className="dk-toc">{FRONT.map((i) => row(i))}</ul>
       {SECTIONS.map((sec) => (
         <fieldset key={sec.key} className="dk-toc-sec">
-          <legend>{sec.key === 'A' ? 'Appendix' : `${sec.key}. ${sec.label}`}</legend>
-          <ul className="dk-toc">
-            {sec.groups.map((g) => (g.items.length === 1 && g.items[0].title === g.title
-              ? row(g.items[0])
-              : (
-                <li key={g.title}>
-                  <span className="dk-toc-g">{g.title}</span>
-                  <ul className="dk-toc">{g.items.map((i) => row(i, true))}</ul>
-                </li>
-              )))}
-          </ul>
+          <legend>{sec.label}</legend>
+          <ul className="dk-toc">{sec.items.map((i) => row(i))}</ul>
         </fieldset>
       ))}
       <ul className="dk-toc">{row(BACK)}</ul>
@@ -579,6 +594,64 @@ function Toc({ data, input, set }: { data: DeckData; input: DeckInput; set: Sett
         </Field>
       )}
       <p className="small"><button type="button" className="linklike" onClick={() => set('items', defaultItems())}>기본 목차로</button></p>
+    </>
+  );
+}
+
+// 데이터·검수: 검수 경고, 연결하면 채워질 내부 데이터, 장표별 사용 데이터
+function DataPanel({ report, qa, goTo }: { report: DataReport; qa: Qa[]; goTo: (id: string) => void }) {
+  return (
+    <>
+      <p className="small dk-panel-note">
+        외부 데이터 <strong>{report.extSources.length}</strong>개 출처 사용 · 내부 데이터 미연결 <strong>{report.intMissing.length}</strong>건{report.omitted.length ? <> · 생략 <strong>{report.omitted.length}</strong>장</> : null}
+        <Info>외부 데이터는 사외에서 누구나 접근 가능한 공개 자료(DART·ECOS·한국은행·미 연준·증권사 공개 리포트), 내부 데이터는 NH 자체 자료와 구독 데이터(민평 4사·FnGuide 등)입니다. 내부 데이터는 사내 시스템에서 연계하면 채워지고, 프로토타입에서는 '내부 데이터' 탭에 붙여넣어 시험할 수 있습니다. Appendix '데이터 사용 현황'을 켜면 같은 내용이 덱에 들어갑니다.</Info>
+      </p>
+      {!!qa.length && (
+        <section className="dk-dsec">
+          <h4 className="dk-sub">검수 {qa.length}</h4>
+          <ul className="dk-qa">
+            {qa.map((x, i) => (
+              <li key={`qa-${i}`} className={`q-${x.level}`}>
+                {x.item ? <button type="button" className="linklike" onClick={() => goTo(x.item!)}>{x.text}</button> : x.text}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {!!report.intMissing.length && (
+        <section className="dk-dsec">
+          <h4 className="dk-sub">연결하면 채워질 내부 데이터</h4>
+          <ul className="dk-miss">
+            {report.intMissing.map((m) => (
+              <li key={m.label}><strong>{m.label}</strong> <span className="muted">({m.source})</span><br /><span className="small">{m.items.join(', ')} — {m.note}</span></li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <section className="dk-dsec">
+        <h4 className="dk-sub">장표별 데이터</h4>
+        <ul className="dk-srcs">
+          {report.items.map((x) => (
+            <li key={x.id} id={`dk-d-${x.id}`}>
+              <button type="button" className="linklike dk-srcs-h" onClick={() => goTo(x.id)}>{x.label}</button>
+              <ul>
+                {x.srcs.map((s) => (
+                  <li key={`${s.kind}-${s.label}`} className={`s-${s.kind}-${s.status}`}>
+                    <span className="dk-src-tag">{STATUS_LABEL[s.kind][s.status]}</span>
+                    {s.label} <span className="muted">· {s.source}{s.asof ? ` · ${s.asof}` : ''}</span>
+                    {s.note && <span className="dk-src-note small">{s.note}</span>}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+          {report.omitted.map((o) => (
+            <li key={`om-${o.id}`} className="dk-srcs-omit">
+              <span className="dk-srcs-h">{o.label}</span> <span className="small muted">생략 — {o.reason}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </>
   );
 }
@@ -601,7 +674,8 @@ function editTargets(id: string): { tab: Tab; anchor?: string; label: string }[]
   if (base === 'terms') out.push({ tab: 'terms', label: '발행 조건 고치기' });
   if (base === 'schedule') out.push({ tab: 'schedule', label: '일정 고치기' });
   if (base === 'peers' || base === 'compare') out.push({ tab: 'peers', label: '사례 고르기' });
-  if (base === 'sales' || base === 'forecast' || base === 'sizing') out.push({ tab: 'internal', label: '내부 자료 붙여넣기' });
+  if (base === 'sales' || base === 'forecast' || base === 'credit_fc' || base === 'sizing' || base === 'terms') out.push({ tab: 'internal', label: '내부 데이터' });
+  if (base === 'datareport') out.push({ tab: 'data', label: '데이터·검수 보기' });
   if (TEXT_OF[base]) out.push({ tab: 'text', anchor: `dk-t-${TEXT_OF[base]}`, label: '문안 고치기' });
   return out;
 }
@@ -635,7 +709,8 @@ function Rail({ slides, cur, setCur }: { slides: Slide[]; cur: number; setCur: (
 }
 
 // 가운데 큰 장표: 화면 높이에 맞춰 키우고, ←·→ 로 넘긴다
-function Stage({ slides, cur, setCur, edit, busy }: { slides: Slide[]; cur: number; setCur: (i: number) => void; edit: { label: string; go: () => void }[]; busy: boolean }) {
+type SrcBadge = { ext: number; miss: number; alt: number; warn: number; go: () => void } | null;
+function Stage({ slides, cur, setCur, edit, busy, srcs }: { slides: Slide[]; cur: number; setCur: (i: number) => void; edit: { label: string; go: () => void }[]; busy: boolean; srcs: SrcBadge }) {
   const ref = useRef<HTMLElement>(null);
   const [w, setW] = useState(720);
   useEffect(() => {
@@ -685,8 +760,16 @@ function Stage({ slides, cur, setCur, edit, busy }: { slides: Slide[]; cur: numb
           <button type="button" aria-label="다음 장표" disabled={cur >= n - 1} onClick={() => setCur(cur + 1)}>›</button>
           <span className="dk-stage-title">{s?.title}</span>
         </div>
-        {!!edit.length && (
+        {(!!edit.length || srcs) && (
           <div className="dk-stage-edit small">
+            {srcs && (
+              <button type="button" className="dk-src-badge" onClick={srcs.go} title="이 장표에 쓴 데이터">
+                <span className="b-ext">외부 {srcs.ext}</span>
+                {!!srcs.alt && <span className="b-alt">대체 {srcs.alt}</span>}
+                {!!srcs.miss && <span className="b-miss">내부 미연결 {srcs.miss}</span>}
+                {!!srcs.warn && <span className="b-warn">경고 {srcs.warn}</span>}
+              </button>
+            )}
             {edit.map((x) => <button key={x.label} type="button" className="linklike" onClick={x.go}>{x.label}</button>)}
           </div>
         )}

@@ -2,7 +2,7 @@
 // 문안 API(/api/deck/draft)와 '작동 방식' 화면(/how)이 같은 정의를 쓴다. 비밀 값은 없다.
 import type { DeckText } from './types';
 
-export const DECK_PROMPT_VERSION = 2;
+export const DECK_PROMPT_VERSION = 3;
 
 export const SYSTEM = `너는 NH투자증권 IB(DCM) RA다. 공모 회사채 대표주관 제안서의 장표 문안을 쓴다.
 규칙
@@ -38,7 +38,7 @@ export const SCHEMA = {
     rates: { ...arr(2, 4), description: '기준금리·국고채 장표 요약, 2~4줄' },
     corp: { ...arr(2, 4), description: '회사채 금리 장표 요약, 2~4줄' },
     views: { ...arr(1, 3), description: '증권사별 국내 기준금리 전망 장표 요약, 1~3줄' },
-    sizing: { ...arr(3, 5), description: '적정 발행규모·트랜치 구성 장표: 만기별 경쟁률·참여 기관·확정 가산금리·만기도래 근거로 트랜치·금액·증액 한도 판단, 3~5줄(제안 금액·만기는 초안 그대로)' },
+    sizing: { ...arr(3, 6), description: '트랜치 검토 장표: 같은 등급 만기별 발행 비중(등급 관행)·회사 만기분포(만기도래 없는 해)·최근 회차 만기별 경쟁률과 참여금액·확정 가산금리 근거로 트랜치·금액·증액 한도 판단, 3~6줄(제안 금액·만기는 초안 그대로)' },
     pipeline: { ...arr(1, 3), description: '회사채 수요예측 예정 내역 장표 요약, 1~3줄' },
     bok: { ...arr(1, 2), description: '금통위 장표 상단 요약(결정·표결은 사실 그대로), 1~2줄' },
     fomc: { ...arr(1, 2), description: 'FOMC 장표 상단 요약(결정·표결은 사실 그대로), 1~2줄' },

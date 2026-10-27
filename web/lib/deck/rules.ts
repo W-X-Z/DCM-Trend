@@ -3,7 +3,7 @@
 import { bandText, bpS, eok, eokW, mdw, ratioX, rate2, rate3, shortFirm, tenorYears, yy, yymmdd } from './fmt';
 import { BizCal, buildSchedule, korDate, type Schedule } from './schedule';
 import { defaultItems } from './catalog';
-import { fullYearLoads, meetingVolatility, mixOf, notchStats, proposedMaturityLoad, spreadVsKtb, tenorDemand, typedIssues, yearsOf } from './analytics';
+import { fullYearLoads, maturityBuckets, meetingVolatility, mixOf, notchStats, proposedMaturityLoad, spreadVsKtb, tenorDemand, tenorMix, typedIssues, yearsOf } from './analytics';
 import type { DeckData, DeckInput, DeckText, PeerIssue, TermNotes } from './types';
 
 const median = (xs: (number | null | undefined)[]) => {
@@ -61,7 +61,10 @@ export function defaultInput(d: DeckData): DeckInput {
   const cal = calOf(d);
   const pay = cal.add(d.asof, 25);
   const pool = peerPool(d, 'group');
-  const peerKeys = pool.slice(0, 6).map((p) => p.key);
+  // 기본형: 최근 6개월 같은 등급 수요예측을 최근 것부터 16건까지 (표는 시간순으로 그린다)
+  const from6 = addMonths(d.asof, -6);
+  const recent = pool.filter((p) => pd(p) >= from6);
+  const peerKeys = (recent.length >= 4 ? recent : pool).slice(0, 16).map((p) => p.key);
   // 비교 장표 기본: 회사 직전 회차 + 최근 미매각 사례 + 같은 노치(없으면 같은 등급군)의 경쟁률 최고 사례
   const ownRecent = pool.find((p) => p.corp_code === d.company.corp_code);
   const taken = new Set([ownRecent?.key]);
@@ -277,7 +280,11 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   if (ownRat.length) sizing.push(`${name} 최근 ${ownRat.length}회 수요예측 경쟁률 ${ownRat.map((p) => `${yy(p.demand_dt ?? p.deal_dt)} ${ratioX(p.ratio)}`).join(', ')}`);
   const ownInc = d.own.slice(0, 4).filter((p) => p.increased);
   if (ownInc.length) sizing.push(`최근 4회 중 ${ownInc.length}회 증액 발행(${ownInc.map((p) => `제${p.series ?? ''}회 ${eokW(p.initial_krw)} → ${eokW(p.amount_krw)}`).join(', ')})`);
-  if (d.combos[0]) sizing.push(`최근 6개월 ${d.company.rating_group ?? ''}등급은 ${d.combos[0].combo} 구조가 가장 많음(${d.combos[0].issues}건)`);
+  // 등급 관행: 최근 1년 같은 등급 만기별 발행 비중
+  const tmix = tenorMix(peerPool(d, inp.peerScope));
+  if (tmix.total && tmix.top2.length >= 2) {
+    sizing.push(`최근 1년 ${grp}등급 공모 회사채 ${tmix.issues}건 발행 ${eokW(tmix.total)} 중 ${tmix.top2.map((x) => `${x.k}물 ${x.share.toFixed(1)}%`).join(', ')}로 두 만기가 **${tmix.top2Share.toFixed(1)}%**를 차지하는 ${grp}등급 주력 만기`);
+  } else if (d.combos[0]) sizing.push(`최근 6개월 ${d.company.rating_group ?? ''}등급은 ${d.combos[0].combo} 구조가 가장 많음(${d.combos[0].issues}건)`);
   // 만기별 수요: 경쟁률이 높아도 신고금액이 작으면 수요 규모는 작다 → 참여금액과 함께 판단
   // 판단은 제안한 만기끼리 비교하고, 제안에 없는 만기가 수요가 가장 많으면 추가 검토를 따로 적는다
   const allTenor = tenorDemand(d.own, 4);
@@ -300,12 +307,6 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     }
   }
   if (missing) sizing.push(missing);
-  const typed = typedIssues(d.own, 4);
-  const mix = mixOf(typed.trs);
-  if (mix.total) {
-    const top2 = [...mix.rows].sort((a, b) => b.q - a.q).slice(0, 2);
-    sizing.push(`${typed.label} 수요예측 참여 ${eokW(mix.total)} 중 ${top2.map((x) => `${x.label} ${x.share.toFixed(0)}%`).join(', ')}로 참여 기관 구성 확인`);
-  }
   const spreads = d.own.slice(0, 4).flatMap((p) => p.tranches.map((t) => ({ p, t, s: t.spread_bp })).filter((x) => x.s != null));
   if (spreads.length >= 2) {
     const last = spreads[0];
@@ -456,6 +457,8 @@ export function tenorOptions(inp: DeckInput) {
   if (tr.length > 1 && tr.every((t) => !/또는/.test(t))) out.push(tr.join('+'));
   return out;
 }
+// 제안 트랜치 중 가장 긴 만기(년). 만기 공백을 볼 범위로 쓴다(없으면 3년).
+export const horizonOf = (inp: DeckInput) => Math.max(0, ...inp.tranches.map((t) => Math.max(0, ...[...t.tenor.matchAll(/(\d+(?:\.\d+)?)\s*년/g)].map((m) => Number(m[1]))))) || 3;
 export const tenorText = (inp: DeckInput) => inp.tranches.map((t) => t.tenor.trim()).filter(Boolean).join(' / ');
 export const totalEok = (inp: DeckInput) => inp.tranches.reduce((a, t) => a + (t.eok ?? 0), 0);
 
@@ -502,6 +505,14 @@ export function factsFor(d: DeckData, inp: DeckInput) {
     회사직전회차: d.own.slice(0, 4).map(peerFact),
     만기도래: d.maturities.map((m) => ({ 만기일: yymmdd(m.dt), 회차: m.series, 금액: eokW(m.amount_krw), 금리: rate3(m.coupon_pct) })),
     만기도래합계: { 향후3년: eokW(d.maturities.reduce((s, m) => s + (m.amount_krw ?? 0), 0)), 건수: d.maturities.length, '1년내': eokW(d.maturities.filter((m) => m.dt <= addYears(d.asof, 1)).reduce((s, m) => s + (m.amount_krw ?? 0), 0)) },
+    같은등급만기비중: (() => {
+      const t = tenorMix(pool);
+      return t.total ? { 범위: inp.peerScope === 'notch' ? d.company.rating : `${d.company.rating_group}등급`, 기간: '최근 1년', 건수: t.issues, 합계: eokW(t.total), 만기: t.rows.map((x) => ({ 만기: x.k, 발행금액: eokW(x.amount), 비중: `${x.share.toFixed(1)}%` })), 상위2만기: t.top2.map((x) => `${x.k}물 ${x.share.toFixed(1)}%`), 상위2합계: `${t.top2Share.toFixed(1)}%` } : null;
+    })(),
+    회사만기분포: (() => {
+      const b = maturityBuckets(d, horizonOf(inp));
+      return { 구간: b.buckets.map((x) => `${x.label} ${x.amount ? eokW(x.amount) : '없음'}`), 만기도래없는해: b.gaps.map((y) => `'${y.slice(2)}년`) };
+    })(),
     만기구조통계: d.combos.map((c) => ({ 구조: c.combo, 건수: c.issues, 비중: `${Math.round(c.share ?? 0)}%`, 경쟁률중간값: ratioX(c.medComp) })),
     리그테이블: {
       등급군: d.league.rows.slice(0, 6).map((r, i) => ({ 순위: i + 1, 증권사: r.firm, 실적: eokW(r.credit), 건수: r.deals })),

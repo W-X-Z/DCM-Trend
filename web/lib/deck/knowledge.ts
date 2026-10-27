@@ -30,12 +30,12 @@ export type KnowledgeLog = {
   is_deleted: boolean;
 };
 
-// 장표 순서 = 제안서 목차 순서
+// 장표 순서 = 제안서 목차 순서(이름은 기본형 목차 표기)
 export const SLIDES: [KnowledgeSlide, string][] = [
   ['all', '모든 장표'],
-  ['terms', '발행조건 제안'],
-  ['sizing', '발행규모·트랜치'],
-  ['schedule', '발행 일정'],
+  ['terms', '제안 Term-sheet'],
+  ['sizing', '트랜치 검토'],
+  ['schedule', '발행일정(안)'],
   ['sales', 'Sales 전략'],
   ['pipeline', '수요예측 예정 내역'],
   ['rates', '금리 동향'],
@@ -43,13 +43,13 @@ export const SLIDES: [KnowledgeSlide, string][] = [
   ['fomc', 'FOMC'],
   ['views', '국내 기준금리 전망'],
   ['usviews', '미국 기준금리 전망'],
-  ['forecast', 'NH 리서치 금리 전망'],
-  ['peers', '수요예측 결과'],
+  ['forecast', '기준금리·국고채 전망(NH 리서치)'],
+  ['peers', '같은 등급 수요예측 결과'],
   ['compare', '미매각 사례 분석'],
-  ['corp', '회사채 금리'],
+  ['corp', '최근 발행금리'],
   ['league', 'League Table'],
   ['strength', '같은 등급 대표주관 실적'],
-  ['maturity', '등급별 만기도래'],
+  ['maturity', '공모사채 만기도래'],
 ];
 export const SLIDE_LABEL = Object.fromEntries(SLIDES) as Record<KnowledgeSlide, string>;
 
