@@ -128,3 +128,37 @@ export function planOf(on: Record<ItemId, boolean>, available: (id: ItemId) => b
 }
 
 export const itemOf = (id: ItemId) => ALL_ITEMS.find((i) => i.id === id);
+
+// 목차 템플릿(칩): 한 번에 목차를 바꾸고, 그 뒤에 개별 장표를 켜고 끌 수 있다.
+// 기본형 = 위 on 값. 나머지는 켤 장표 목록(나머지는 끈다).
+export type Template = { key: string; label: string; hint: string; items: () => Record<ItemId, boolean> };
+const only = (ids: ItemId[]) => Object.fromEntries(ALL_ITEMS.map((i) => [i.id, ids.includes(i.id)])) as Record<ItemId, boolean>;
+const plus = (ids: ItemId[], minus: ItemId[] = []) => {
+  const b = defaultItems();
+  for (const id of ids) b[id] = true;
+  for (const id of minus) b[id] = false;
+  return b;
+};
+export const TEMPLATES: Template[] = [
+  { key: 'basic', label: '기본형', hint: '반복 발행사 공모사채 제안(현업 샘플 기본 구성)', items: defaultItems },
+  {
+    key: 'lite', label: '핵심 요약', hint: '발행 조건·일정과 시장 핵심만(10장 안팎)',
+    items: () => only(['cover', 'contents', 'terms', 'sizing', 'schedule', 'rates', 'forecast', 'peers', 'pipeline', 'back']),
+  },
+  {
+    key: 'pitch', label: '신규 피치', hint: '기본형 + Sales 전략·사례 비교·NH 강점',
+    items: () => plus(['sales', 'compare', 'corp', 'nh_company', 'nh_core', 'league', 'strength']),
+  },
+  {
+    key: 'market', label: '시장 자료', hint: '발행 제안 없이 금리·수요예측·만기 자료만',
+    items: () => plus(['corp'], ['terms', 'sizing', 'schedule', 'sales', 'ir']),
+  },
+];
+// 지금 목차가 어느 템플릿과 같은지(없으면 null = 직접 선택)
+export function templateOf(on: Record<ItemId, boolean>): string | null {
+  for (const t of TEMPLATES) {
+    const x = t.items();
+    if (ALL_ITEMS.every((i) => !!on[i.id] === !!x[i.id])) return t.key;
+  }
+  return null;
+}

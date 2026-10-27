@@ -190,8 +190,12 @@ function PrimEl({ p }: { p: Prim }) {
   }
 }
 
-export function SlideView({ slide, width }: { slide: Slide; width: number }) {
+// 검토 표시(화면 미리보기 전용): 장표 위에 겹쳐 그린다. focus 면 표시 밖을 흐리게.
+export type ViewMark = { key: string; kind: string; x: number; y: number; w: number; h: number; text: string; n: number };
+
+export function SlideView({ slide, width, marks, focus, active, onPick }: { slide: Slide; width: number; marks?: ViewMark[]; focus?: boolean; active?: string | null; onPick?: (key: string) => void }) {
   const k = width / PAGE.w;
+  const ms = marks ?? [];
   return (
     <div className="dk-slide" style={{ width, height: PAGE.h * k }}>
       <div
@@ -202,6 +206,30 @@ export function SlideView({ slide, width }: { slide: Slide; width: number }) {
       >
         {slide.chrome.map((p, i) => <PrimEl key={`c${i}`} p={p} />)}
         {slide.prims.map((p, i) => <PrimEl key={i} p={p} />)}
+        {focus && ms.length > 0 && (
+          <svg aria-hidden width={PAGE.w} height={PAGE.h} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            <defs>
+              <mask id={`dk-mask-${slide.id}`}>
+                <rect x={0} y={0} width={PAGE.w} height={PAGE.h} fill="white" />
+                {ms.map((m) => <rect key={m.key} x={m.x} y={m.y} width={m.w} height={m.h} fill="black" />)}
+              </mask>
+            </defs>
+            <rect x={0} y={0} width={PAGE.w} height={PAGE.h} fill="rgb(248 249 251 / 0.78)" mask={`url(#dk-mask-${slide.id})`} />
+          </svg>
+        )}
+        {ms.map((m) => (
+          <button
+            key={m.key}
+            type="button"
+            className={`dk-mark mk-${m.kind}${active === m.key ? ' is-active' : ''}`}
+            style={{ left: m.x, top: m.y, width: m.w, height: m.h }}
+            aria-label={`검토 ${m.n}: ${m.text}`}
+            title={m.text}
+            onClick={() => onPick?.(m.key)}
+          >
+            <span className="dk-mark-pin" aria-hidden>{m.n}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

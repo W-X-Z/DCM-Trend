@@ -15,7 +15,8 @@ export { buildSlides, fileBase, staticSubs, available, parseTsv } from './lib/de
 export { mixOf, valueAt, meetingVolatility, notchStats, typedIssues, pp, tenorDemand, tenorMix, maturityBuckets } from './lib/deck/analytics';
 export { dataReport } from './lib/deck/sources';
 export { qaChecks, creditGridIssues } from './lib/deck/qa';
-export { planOf, defaultItems } from './lib/deck/catalog';
+export { planOf, defaultItems, TEMPLATES, templateOf } from './lib/deck/catalog';
+export { reviewMarks } from './lib/deck/review';
 export { knowledgeForPrompt, forGrade } from './lib/deck/knowledge';
 export { assemble } from './lib/deck/assemble';
 export { PAGE } from './lib/deck/theme';
@@ -235,6 +236,75 @@ const check = (name, cond, detail = '') => {
     check('검수: 금통위 요약이 최근 회의보다 오래됨', q2.some((x) => x.item === 'bok' && /갱신이 필요/.test(x.text)), JSON.stringify(q2.map((x) => x.text)));
     const q3 = m.qaChecks(d, inp, { ...tx, sizing: ['최근 4회 평균 경쟁률 9.87:1'] }, { on, edited: true });
     check('검수: 직접 고친 문안의 데이터에 없는 숫자', q3.some((x) => x.item === 'sizing' && /9\.87/.test(x.text)), JSON.stringify(q3.map((x) => x.text)));
+  }
+
+  // 4-4. 피드백 반영: 사례·예정 내역 범위, 오래된 전망표, 문안 숫자, 발행조건 기본값
+  {
+    const base = d.peers.find((p) => p.ratio != null && p.tranches.length);
+    const mk = (key, patch) => ({ ...base, key, ...patch });
+    const yesterday = new Date(new Date(`${d.asof}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+    const extra = [
+      mk('reit', { corp_name: '테스트리츠', demand_dt: yesterday }),
+      mk('noresult', { corp_name: '결과없음', demand_dt: yesterday, ratio: null, demand_krw: null, tranches: base.tranches.map((t) => ({ ...t, ratio: null, demand_krw: null })) }),
+      mk('today', { corp_name: '오늘예측', demand_dt: d.asof }),
+    ];
+    const d2 = { ...d, peers: [...d.peers, ...extra], pipeline: [...d.pipeline, { ...(d.pipeline[0] ?? { key: 'p', rating: 'AA', demand_dt: d.asof, pay_dt: d.asof, band_type: null, band_low: null, band_high: null, lead: null, nh_lead: false, tranches: [], amount_max_krw: null }), key: 'fin', corp_name: '테스트캐피탈', sub_type: '금융채' }] };
+    const keys = m.peerPool(d2, 'group').map((p) => p.key);
+    check('사례: 리츠·결과 미공시·오늘 수요예측 제외', !keys.includes('reit') && !keys.includes('noresult') && !keys.includes('today'));
+    check('예정 내역: 금융채 제외', !m.pipelineOf(d2).some((p) => p.key === 'fin') && d2.pipeline.some((p) => p.key === 'fin'));
+    const def = m.defaultInput(d);
+    check('발행조건 기본값: 밴드 개별민평 ±30bp, 등급 비고 확인 필요', def.band.type === 'spread' && def.band.low === -30 && def.band.high === 30 && /확인 필요/.test(def.ratingNote), JSON.stringify(def.band) + def.ratingNote);
+    // 공개 전망표 발표 뒤 금통위가 있었으면 표·전망 문장을 뺀다
+    const pub = d.forecast?.published_dt ?? '2026-01-01';
+    const after = new Date(new Date(`${pub}T00:00:00Z`).getTime() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const d3 = { ...d, forecast: d.forecast ?? null, events: [...d.events, { event_dt: after < d.asof ? after : pub, end_dt: null, kind: '금통위', title: '통화정책방향 결정회의', note: null }] };
+    if (d.forecast && after < d.asof) {
+      check('전망: 오래된 공개 전망표 판정', m.forecastStale(d3));
+      const t3 = m.ruleText(d3, inp);
+      check('전망: 오래된 전망표 숫자는 문안에서 뺌', !t3.forecast.some((x) => /전망표/.test(x)) && !t3.rates.some((x) => /전망표/.test(x)), [...t3.forecast, ...t3.rates].join(' | '));
+      const fs = m.buildSlides(d3, inp, t3).find((x) => x.id === 'forecast');
+      check('전망: 오래된 전망표는 표 생략', fs && !fs.prims.some((p) => p.k === 'table'));
+      const q4 = m.qaChecks(d3, inp, t3, { on: () => true, edited: false });
+      check('전망: 오래된 전망표 검수 경고', q4.some((x) => x.item === 'forecast' && x.level === 'warn'));
+    } else check('전망: 오래된 공개 전망표 판정(전망표 없음)', true);
+    // '최근 4회' 는 실제 회차 수로
+    const t5 = m.ruleText({ ...d, own: d.own.slice(0, 2).map((p) => ({ ...p, increased: true })) }, inp);
+    check('문안: 최근 n회는 실제 회차 수', !t5.sizing.some((x) => /최근 4회/.test(x)) && t5.sizing.some((x) => /최근 2회 모두 증액/.test(x)), t5.sizing.join(' | '));
+    check('문안: 내부용 안내 문장 없음', ![...tx.pipeline, ...tx.sales].some((x) => /내부 자료로 보완|다시 확인 필요/.test(x)));
+    const terms = m.buildSlides(d, inp, tx).find((x) => x.id === 'terms');
+    const ttext = JSON.stringify(terms.prims);
+    check('발행조건: 대표주관수수료 협의·합계', /대표주관수수료 협의/.test(ttext) && (inp.tranches.length < 2 || /합계/.test(ttext)));
+  }
+
+  // 4-5. 목차 템플릿 칩
+  {
+    check('템플릿: 기본 목차 = 기본형', m.templateOf(m.defaultItems()) === 'basic');
+    const lite = m.TEMPLATES.find((t) => t.key === 'lite').items();
+    check('템플릿: 핵심 요약', m.templateOf(lite) === 'lite' && !lite.bok && lite.terms);
+    const mk = m.TEMPLATES.find((t) => t.key === 'market').items();
+    check('템플릿: 시장 자료는 발행 제안 장 없음', !mk.terms && !mk.sizing && mk.rates && mk.peers);
+    check('템플릿: 하나 바꾸면 직접 선택', m.templateOf({ ...m.defaultItems(), events: false }) === null);
+  }
+
+  // 4-6. 검토 표시: 기본값 그대로인 조건·판단 문장·대체 데이터, 바꾸면 사라짐
+  {
+    const sl = m.buildSlides(d, inp, tx);
+    const q = m.qaChecks(d, inp, tx, { on: () => true, edited: false });
+    const mk = m.reviewMarks(sl, d, inp, tx, q);
+    const ti = sl.findIndex((x) => x.id === 'terms');
+    const at = (what) => mk.find((x) => x.slide === ti && x.key.startsWith(`terms:${what}:`));
+    check('검토: 발행조건 기본값(밴드·납입일·금액)·판단 문장 표시', at('band') && at('pay') && at('amount') && at('lead') && at('rating'), mk.filter((x) => x.slide === ti).map((x) => x.key).join(','));
+    check('검토: 표시는 장표 안', mk.every((x) => x.x >= 0 && x.y >= 0 && x.x + x.w <= m.PAGE.w + 4 && x.y + x.h <= m.PAGE.h + 4));
+    const b = at('band');
+    check('검토: 밴드 표시는 금리 밴드 행 위치', b && b.y > 150 && b.h < 80, JSON.stringify(b));
+    check('검토: 민평 미연결 → 트랜치 검토 데이터 표시', mk.some((x) => x.item === 'sizing' && x.kind === 'data'));
+    check('검토: 연락처 없음 → 뒷표지 표시', mk.some((x) => x.item === 'back'));
+    const inp2 = { ...inp, band: { type: 'spread', low: -20, high: 20 }, pay: '2026-12-15', contacts: '홍길동 02-000-0000' };
+    const tx2 = m.ruleText(d, inp2);
+    const sl2 = m.buildSlides(d, inp2, tx2);
+    const mk2 = m.reviewMarks(sl2, d, inp2, tx2, m.qaChecks(d, inp2, tx2, { on: () => true, edited: false }));
+    check('검토: 값을 정하면 표시 사라짐', !mk2.some((x) => /^terms:(band|pay):/.test(x.key)) && !mk2.some((x) => x.item === 'back'));
+    check('검토: 내보내기 장표에는 표시 없음', !sl.some((x) => x.prims.some((p) => p.k === 'mark')));
   }
 
   // 5. PPTX 조립: NH 템플릿 + 고정 장표, 번호·회사명 바꿈
