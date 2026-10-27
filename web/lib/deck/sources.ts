@@ -4,7 +4,7 @@
 // 화면의 '데이터' 탭과 Appendix '데이터 사용 현황' 장표가 같은 결과를 쓴다.
 import { itemOf, planOf, type ItemId, type Plan } from './catalog';
 import { maturityBuckets, tenorMix } from './analytics';
-import { forecastStale, horizonOf, peerPool, pipelineOf, scheduleOf } from './rules';
+import { forecastStale, horizonOf, peerPool, pickIssues, pipelineOf, scheduleOf } from './rules';
 import { hasTable } from './tsv';
 import type { DeckData, DeckInput } from './types';
 
@@ -104,8 +104,17 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
     case 'credit_fc':
       return [
         ext('크레딧 시장 의견(시장 자료 팩)', [...new Set((d.marketNotes ?? []).map((x) => x.house))].join('·') || '증권사·언론', (d.marketNotes ?? []).length > 0, latest((d.marketNotes ?? []).map((x) => x.date))),
-        int('NH 등급별 회사채 금리 전망표', 'NH 리서치', hasTable(inp.internal?.creditFc), '시장 의견과 신용스프레드 추이로 대체'),
+        ext('등급별 공모 회사채 발행 결과(최근 2개월)', 'DART 수요예측 결과', (d.recentIssues ?? []).length > 0, latest((d.recentIssues ?? []).map((x) => x.demand_dt ?? ''))),
+        int('NH 등급별 회사채 금리 전망표', 'NH 리서치', hasTable(inp.internal?.creditFc), '시장 의견과 등급별 발행 결과로 대체'),
       ];
+    case 'issues': {
+      const xs = pickIssues(d);
+      return [
+        ext('주요 이슈(시장 자료 팩)', xs.map((x) => x.topic).join('·') || '시장 자료 팩', xs.length > 0, latest(xs.map((x) => x.as_of)), '중요도·기준일로 선택'),
+        ext('시장 지표(환율·KOSPI·유가·아파트값)', '한국은행 ECOS·FRED', (d.market ?? []).length > 0, latest((d.market ?? []).map((m) => m.pts[m.pts.length - 1]?.[0] ?? ''))),
+        int('NH Discussion Material 주요 이슈', 'IB·리서치', false, '공개 자료로 만든 시장 자료 팩으로 대체'),
+      ];
+    }
     case 'views':
     case 'usviews': {
       const vs = id === 'views' ? d.views : d.usViews;

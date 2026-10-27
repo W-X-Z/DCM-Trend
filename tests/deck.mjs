@@ -11,7 +11,7 @@ export * from './lib/deck/schedule';
 export * from './lib/deck/validate';
 export * from './lib/deck/rules';
 export * from './lib/deck/model';
-export { buildSlides, fileBase, staticSubs, available, parseTsv } from './lib/deck/layout';
+export { buildSlides, fileBase, staticSubs, available, parseTsv, gradeIssueTable } from './lib/deck/layout';
 export { mixOf, valueAt, meetingVolatility, notchStats, typedIssues, pp, tenorDemand, tenorMix, maturityBuckets } from './lib/deck/analytics';
 export { dataReport } from './lib/deck/sources';
 export { qaChecks, creditGridIssues } from './lib/deck/qa';
@@ -129,6 +129,40 @@ const check = (name, cond, detail = '') => {
     const txt = (cs?.prims ?? []).flatMap((p) => (p.k === 'text' ? p.paras : p.k === 'table' ? p.rows.flat().filter(Boolean).flatMap((c) => c.paras) : [])).map((q) => q.runs.map((r) => r.t).join('')).join('\n');
     check('장표: 회사채 금리 = 우량채·비우량채 전망 단락 + 등급별 금리 표', !!cs && /AA등급 이상\(우량채\) 회사채 시장 전망/.test(txt) && /A등급 이하\(비우량채\)/.test(txt) && /등급별 회사채 금리 추이/.test(txt) && /회사채 AA-/.test(txt) && !/■[^\n]*가증권/.test(txt) && /가증권 T1/.test(txt), txt.slice(0, 400));
   }
+  {
+    // 시장 자료 팩(Discussion Material 데이터): 주요 이슈는 양식 고정·이슈 가변(중요도→기준일, 60일·유효기간), 이슈 둘씩 한 쪽
+    const iss = (topic, as_of, priority, chart, valid_until = '2026-12-31') => ({ topic, as_of, valid_until, priority, impact: '금리 상방', points: [`${topic} 내용`], chart, chart_title: `${topic} 차트`, sources: [{ title: `${topic} 출처`, url: 'u', date: as_of }] });
+    const issues = [iss('관세', d.asof, 2, null), iss('유가', d.asof, 5, 'brent'), iss('증시', d.asof, 4, 'kospi'), iss('오래된 이슈', '2020-01-01', 5, null), iss('만료', d.asof, 5, null, '2020-01-01'), iss('부동산', d.asof, 3, 'apt_seoul'), iss('수급', d.asof, 4, 'maturity')];
+    const pts = (n, f) => Array.from({ length: n }, (_, i) => [new Date(Date.parse(d.asof) - (n - i) * 864e5).toISOString().slice(0, 10), f(i)]);
+    const market = [
+      { key: 'brent', label: '브렌트유', unit: '달러/배럴', source: 'FRED', cycle: 'D', pts: pts(300, (i) => 60 + i / 5) },
+      { key: 'kospi', label: 'KOSPI', unit: 'pt', source: 'ECOS', cycle: 'D', pts: pts(300, (i) => 5000 + i) },
+      { key: 'apt_seoul', label: 'KB 서울', unit: '지수', source: 'ECOS', cycle: 'M', pts: Array.from({ length: 20 }, (_, i) => [`2025-${String((i % 12) + 1).padStart(2, '0')}-01`, 100 + i]) },
+    ];
+    const dd = { ...d, issues, market };
+    const picked = m.pickIssues(dd).map((x) => x.topic);
+    check('주요 이슈: 중요도·최신 순 상위 4개, 오래되거나 만료된 이슈 제외', JSON.stringify(picked) === JSON.stringify(['유가', '증시', '수급', '부동산']), picked.join(','));
+    const sl = m.buildSlides(dd, { ...inp, items: { ...inp.items, issues: true } }, tx).filter((x) => x.id.startsWith('issues'));
+    const charts = sl.flatMap((x) => x.prims.filter((p) => p.k === 'chart'));
+    check('주요 이슈: 두 쪽, 이슈별 차트(유가·KOSPI 선, 수급 막대, 아파트값 전월비)', sl.length === 2 && charts.length === 4 && charts.some((c) => c.chart.kind === 'bar'), `${sl.length} ${charts.map((c) => c.chart.kind).join(',')}`);
+    check('주요 이슈: 데이터 없으면 장표 생략', !m.buildSlides(d, inp, tx).some((x) => x.id.startsWith('issues')));
+    // 등급별 발행 결과표: 최근 두 달 시장 전체 수요예측을 등급×만기로
+    const tr = (tenor, y, s, c) => ({ tenor, months: null, initial_krw: 1e11, amount_krw: 1e11, demand_krw: 5e11, in_band_krw: 5e11, ratio: c, under: false, yield_pct: y, spread_bp: s, band_type: '개별민평', band_low: -30, band_high: 30, maturity_dt: null, byType: null });
+    const pi = (name, rating, dt, trs) => ({ key: name + dt, corp_code: name, corp_name: name, sub_type: '일반회사채', series: '1', rating, rating_group: rating.replace(/[+\-0]$/, ''), demand_dt: dt, pricing_dt: dt, deal_dt: dt, tenor_combo: '', initial_krw: 1e11, amount_krw: 1e11, demand_krw: 5e11, in_band_krw: 5e11, ratio: 5, under: false, increased: false, band_type: '개별민평', band_low: -30, band_high: 30, fee_bp: 20, lead: null, nh_lead: false, tranches: trs, amount_max_krw: null });
+    const recent = [
+      pi('가', 'AA-', '2026-09-03', [tr('2년', 4.5, -5, 6), tr('3년', 4.6, 40, 4)]), pi('나', 'AA-', '2026-10-03', [tr('3년', 4.4, -10, 8)]),
+      pi('다', 'A+', '2026-09-10', [tr('2년', 4.9, 0, 3)]), pi('라', 'A+', '2026-10-11', [tr('2년', 4.8, 5, 4), tr('1.5년', 4.7, null, 2)]),
+    ];
+    const gtab = m.gradeIssueTable({ ...d, recentIssues: recent });
+    const aa3 = gtab?.rows.find((r) => r.grade === 'AA-' && r.tenor === '3년');
+    check('회사채: 등급별 발행 결과표(두 달·밴드 밖 가산금리 제외)', !!gtab && gtab.months.join() === '2026-09,2026-10' && aa3 && aa3.cells[1] === '–' && aa3.cells[5] === '-10' && gtab.rows[0].grade === 'AA-', JSON.stringify(gtab));
+    // 금리 전망: 분기 경로 요약
+    check('금리 전망: 경로 요약(같은 값은 이후로 묶음)', m.pathText({ cells: [{ period: '3Q26', value: 3, actual: true }, { period: '4Q26', value: 3.25, actual: false }, { period: '1Q27', value: 3.5, actual: false }, { period: '2Q27', value: 3.5, actual: false }] }) === '4Q26 3.25% → 1Q27 이후 3.50%');
+    // 일정: 납입월 시장 만기 집중
+    const mg = { months: ['2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04'], rows: [], total: [1e12, 0.4e12, 9.9e12, 10.7e12, 2.7e12, 6.8e12], asof: d.asof };
+    const crowd = m.marketCrowd({ ...d, maturityByGrade: mg }, '2027-02-10');
+    check('일정: 납입월 시장 만기 집중이면 분산 검토 문구', !!crowd && /최대/.test(crowd) && /연초/.test(crowd) && !m.marketCrowd({ ...d, maturityByGrade: mg }, '2027-03-10'), crowd);
+  }
   const typed = m.typedIssues(d.own, 4);
   check('장표: 투자자 구분은 수집된 회차만 집계·회차 표기', typed.list.length >= 1 && typed.list.every((p) => p.tranches.some((t) => t.byType?.length)) && tx.sales.some((x) => x.includes(typed.label)), `${typed.label} | ${tx.sales[0]}`);
   {
@@ -224,7 +258,7 @@ const check = (name, cond, detail = '') => {
     check('데이터: 내부 데이터 없는 회사채 금리는 생략으로 기록', rep.omitted.some((o) => o.id === 'credit_fc' && o.kind === 'int'), JSON.stringify(rep.omitted));
     const inp2 = { ...inp, internal: { ...inp.internal, minpyeong: '만기\t개별민평\n2년\t3.898', creditFc: '구분\t1Q\nAA-\t3.1' } };
     const rep2 = m.dataReport(d, inp2, m.available(d, inp2));
-    check('데이터: 내부 데이터를 붙이면 연결로 바뀜', !rep2.intMissing.some((x) => /개별·등급민평|등급별 회사채/.test(x.label)) && !rep2.omitted.length && rep2.intUsed.length >= 2, JSON.stringify(rep2.intUsed));
+    check('데이터: 내부 데이터를 붙이면 연결로 바뀜', !rep2.intMissing.some((x) => /개별·등급민평|등급별 회사채/.test(x.label)) && !rep2.omitted.filter((o) => o.id !== 'issues').length && rep2.intUsed.length >= 2, JSON.stringify(rep2.intUsed));
     const withRep = m.buildSlides(d, { ...inp, items: { ...inp.items, datareport: true } }, tx);
     const dr = withRep.filter((s) => s.id.startsWith('datareport'));
     check('장표: Appendix 데이터 사용 현황(켰을 때만)', dr.length >= 1 && !ids.some((x) => x.startsWith('datareport')) && dr[0].title === 'Appendix 3. 데이터 사용 현황', `${dr.length} ${dr[0]?.title}`);

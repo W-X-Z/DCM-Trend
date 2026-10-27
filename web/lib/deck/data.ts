@@ -94,7 +94,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
   const rating = c.latest_bond_rating ?? last?.rating ?? null;
   const group = (last?.rating_group && last.rating_group !== '등급 미확인' ? last.rating_group : null) ?? ratingGroupOf(rating);
 
-  const [peerRows, mats, latest, rateRows, fc, vw, ev, hol, tdeals, pipeRows, lyRows, gradeMats, pol, dailyRows, polHist, notes] = await Promise.all([
+  const [peerRows, mats, latest, rateRows, fc, vw, ev, hol, tdeals, pipeRows, lyRows, gradeMats, pol, dailyRows, polHist, notes, mktRows, issueRows, recentRows] = await Promise.all([
     group
       ? select<BondIssue>('v_bond_issues', { rating_group: `eq.${group}`, deal_dt: `gte.${since12}`, order: 'deal_dt.desc', limit: 400 })
       : Promise.resolve([] as BondIssue[]),
@@ -127,6 +127,14 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
     getRates(shiftMonths(today, -36), ['ktb2y', 'ktb3y', 'ktb5y', 'corp3y_aa', 'corp3y_bbb']).catch(() => []),
     select<{ country: 'KR' | 'US'; effective_dt: string; rate_low: number; rate_high: number }>('v_policy_rate_history', { order: 'effective_dt.asc', limit: 200 }).catch(() => []),
     select<{ house: string; topic: string; text: string; published_dt: string; source_title: string; source_url: string }>('v_research_notes', { order: 'published_dt.desc', limit: 40 }).catch(() => []),
+    // 시장 자료 팩: 지표 시계열(최근 2년), 주요 이슈, 시장 전체 최근 2개월 수요예측
+    selectAll<{ series_key: string; label_ko: string; unit: string; source_label: string; cycle: 'D' | 'M'; dt: string; value: number }>('v_market_daily', {
+      dt: `gte.${shiftMonths(today, -22)}`, order: 'dt.asc',
+    }).catch(() => []),
+    select<{ topic: string; as_of: string; valid_until: string; priority: number; impact: string; points: string[]; chart_series: string | null; chart_title: string | null; sources: { title: string; url: string; date: string | null }[] }>(
+      'v_market_issues', { valid_until: `gte.${today}`, as_of: `gte.${shiftMonths(today, -3)}`, order: 'priority.desc,as_of.desc', limit: 20 },
+    ).catch(() => []),
+    select<BondIssue>('v_bond_issues', { demand_dt: `gte.${shiftMonths(today, -2)}`, order: 'demand_dt.desc', limit: 200 }).catch(() => [] as BondIssue[]),
   ]);
 
   // 비교군 정제: 같은 회사의 최근 5년 공모채 등급보다 크게 높은 회차(AA0 이하 → AAA, 또는 3노치 이상)는 보증·담보부로 보고 빼고, 공기업도 뺀다
@@ -234,10 +242,28 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
     forecast: fcHouse
       ? {
         house: fcHouse.house, published_dt: fcHouse.published_dt, title: fcHouse.source_title, url: fcHouse.source_url,
-        rows: keys.map((k) => {
-          const rs = fcRows.filter((r) => r.series_key === k).sort((a, b) => a.period_order - b.period_order);
-          return { key: k, label: rs[0].series_label, basis: rs[0].basis, cells: rs.map((r) => ({ period: r.period, value: Number(r.value_pct), actual: r.is_actual })) };
-        }),
+        rows: (() => {
+          const rows = keys.map((k) => {
+            const rs = fcRows.filter((r) => r.series_key === k).sort((a, b) => a.period_order - b.period_order);
+            return { key: k, label: rs[0].series_label, basis: rs[0].basis, cells: rs.map((r) => ({ period: r.period, value: Number(r.value_pct) as number | null, actual: r.is_actual })) };
+          });
+          // 국고채 분기 전망이 공개되지 않은 경로형 전망(기준금리만): 국고채는 일별 금리로 지난·진행 중 분기 평균 실적만 붙인다
+          if (rows.length && !rows.some((r) => r.key.startsWith('ktb'))) {
+            const periods = rows[0].cells.map((c) => c.period);
+            for (const [k, lab] of [['ktb2y', '국고채 2년'], ['ktb3y', '국고채 3년'], ['ktb5y', '국고채 5년']] as const) {
+              const pts = dailyRows.filter((r) => r.series_key === k);
+              if (!pts.length) continue;
+              const cells = periods.map((p) => {
+                const m = p.match(/^([1-4])Q(\d{2})$/);
+                const [from, to] = m ? [`20${m[2]}-${String((+m[1] - 1) * 3 + 1).padStart(2, '0')}-01`, `20${m[2]}-${String(+m[1] * 3).padStart(2, '0')}-31`] : [`${p}-01-01`, `${p}-12-31`];
+                const xs = pts.filter((r) => r.dt >= from && r.dt <= to).map((r) => Number(r.value));
+                return { period: p, value: xs.length && from <= today ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : null, actual: true };
+              });
+              rows.push({ key: k, label: lab, basis: '평균', cells });
+            }
+          }
+          return rows;
+        })(),
         // 주제별 가장 최근 의견 하나
         notes: [...new Map(notes.filter((x) => x.house === fcHouse.house).map((x) => [x.topic, x] as const).reverse()).values()]
           .sort((a, b) => NOTE_ORDER.indexOf(a.topic) - NOTE_ORDER.indexOf(b.topic))
@@ -278,6 +304,15 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
       kr: polHist.filter((x) => x.country === 'KR').map((x) => ({ dt: x.effective_dt, rate: Number(x.rate_high ?? x.rate_low) })),
       us: polHist.filter((x) => x.country === 'US').map((x) => ({ dt: x.effective_dt, low: Number(x.rate_low), high: Number(x.rate_high) })),
     },
+    market: [...new Set(mktRows.map((r) => r.series_key))].map((k) => {
+      const rs = mktRows.filter((r) => r.series_key === k);
+      return { key: k, label: rs[0].label_ko, unit: rs[0].unit, source: rs[0].source_label, cycle: rs[0].cycle, pts: rs.map((r) => [r.dt, Number(r.value)] as [string, number]) };
+    }),
+    issues: issueRows.map((x) => ({
+      topic: x.topic, as_of: x.as_of, valid_until: x.valid_until, priority: x.priority, impact: x.impact, points: x.points ?? [],
+      chart: x.chart_series, chart_title: x.chart_title, sources: x.sources ?? [],
+    })),
+    recentIssues: recentRows.filter((p) => p.demand_dt && p.demand_dt <= today).map(toPeer),
     usViews: us.map((v) => ({
       house: v.house, analysts: v.analysts, published_dt: v.published_dt, title: v.source_title, url: v.source_url,
       next_move: v.next_move, terminal: n(v.terminal_rate_pct), end2026: n(v.end_2026_pct), end2027: n(v.end_2027_pct), summary: v.summary,

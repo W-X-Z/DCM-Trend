@@ -220,6 +220,8 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     if (nextMeet) schedule.push(`발행 기간 중 금통위(${mdw(nextMeet.event_dt)})가 있어 ${nextMeet.event_dt > sch.demand ? '수요예측을 금통위 전에 마쳐 금리 변동성 영향을 줄이는 일정' : '금통위 결과를 확인한 뒤 수요예측을 진행하는 일정'}으로 구성`);
     const nextMat = d.maturities.find((m) => m.dt >= sch.pay);
     if (nextMat && daysBetween(sch.pay, nextMat.dt) <= 120 && !(why.reason && why.pay === sch.pay)) schedule.push(`발행 후 ${mdw(nextMat.dt)} 회사채 만기도래 ${eokW(nextMat.amount_krw)}(제${nextMat.series ?? ''}회) 상환 재원 마련에 대응 가능한 일정`);
+    const crowd = marketCrowd(d, sch.pay);
+    if (crowd) schedule.push(crowd);
     schedule.push('시장 및 회사 상황에 따라 발행일은 유동적으로 조정 가능');
   }
 
@@ -283,6 +285,7 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     const b = d.forecast.rows.find((x) => x.key === 'base_rate');
     const fy = b?.cells.find((c) => /^\d{4}$/.test(c.period) && !c.actual);
     if (b && fy) rates.push(`${d.forecast.house} 리서치 전망표(${yymmdd(d.forecast.published_dt)} 발표): 기준금리 ${fy.period}년 말 ${rate2(fy.value)}`);
+    else if (b && pathText(b)) rates.push(`${d.forecast.house} 리서치 기준금리 경로(${yymmdd(d.forecast.published_dt)}): ${pathText(b)}`);
   }
 
   const corp: string[] = [];
@@ -427,10 +430,11 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
 
   const forecast: string[] = [];
   if (d.forecast && !fcStale) {
-    forecast.push(`${d.forecast.house} 리서치 금리 전망표(${yymmdd(d.forecast.published_dt)} 발표) 기준`);
+    forecast.push(d.forecast.rows.some((r) => r.cells.some((c) => /^\d{4}$/.test(c.period))) ? `${d.forecast.house} 리서치 금리 전망표(${yymmdd(d.forecast.published_dt)} 발표) 기준` : `${d.forecast.house} 리서치 공개 코멘트(${yymmdd(d.forecast.published_dt)}) 기준 기준금리 경로`);
     for (const row of d.forecast.rows) {
       const fy = row.cells.filter((c) => /^\d{4}$/.test(c.period));
       if (fy.length) forecast.push(`${row.label}(${row.basis}): ${fy.map((c) => `${c.period}년 ${rate2(c.value)}`).join(', ')}`);
+      else if (pathText(row)) forecast.push(`${row.label}(${row.basis}) 경로: ${pathText(row)}`);
     }
     if (nhView) forecast.push(`최근 의견(${yymmdd(nhView.published_dt)}): ${nhView.summary}`);
   } else if (nhView) forecast.push(`NH투자증권 리서치 최근 의견(${yymmdd(nhView.published_dt)}): ${nhView.summary}`);
@@ -750,3 +754,37 @@ export function salesFacts(d: DeckData, inp: DeckInput) {
 }
 
 export { eok, shortFirm, tenorYears };
+
+// 분기 경로 요약: 전망 칸만, 같은 값이 이어지면 '이후' 로 묶는다 (예: 4Q26 3.25% → 1Q27 이후 3.50%)
+export function pathText(row: { cells: { period: string; value: number | null; actual: boolean }[] }) {
+  const xs = row.cells.filter((c) => !c.actual && c.value != null);
+  if (!xs.length) return '';
+  const runs: { period: string; value: number; n: number }[] = [];
+  for (const c of xs) {
+    const last = runs[runs.length - 1];
+    if (last && last.value === c.value) last.n++;
+    else runs.push({ period: c.period, value: c.value as number, n: 1 });
+  }
+  return runs.map((r, i) => `${r.period}${i === runs.length - 1 && r.n > 1 ? ' 이후' : ''} ${rate2(r.value)}`).join(' → ');
+}
+
+// 주요 이슈 고르기: 양식은 고정, 내용은 시점별로 바뀐다. 기준일 60일 이내·유효기간 안에서 중요도 → 최신 순으로 상위 k개
+export function pickIssues(d: DeckData, k = 4) {
+  const from = addDays(d.asof, -60);
+  return (d.issues ?? [])
+    .filter((x) => x.as_of >= from && x.as_of <= d.asof && x.valid_until >= d.asof)
+    .sort((a, b) => b.priority - a.priority || b.as_of.localeCompare(a.as_of))
+    .slice(0, k);
+}
+
+// 납입월 시장 만기 집중: 향후 12개월 공모 회사채 만기 중 납입월이 상위 2개 달이고 월평균의 1.5배 이상이면 일정 문구로 알린다
+export function marketCrowd(d: DeckData, pay: string) {
+  const mg = d.maturityByGrade;
+  const i = mg.months.indexOf(pay.slice(0, 7));
+  if (i < 0 || mg.total.length < 6) return null;
+  const avg = mg.total.reduce((a, b) => a + b, 0) / mg.total.length;
+  const rank = [...mg.total].sort((a, b) => b - a).indexOf(mg.total[i]);
+  if (rank > 1 || mg.total[i] < avg * 1.5) return null;
+  const m = Number(pay.slice(5, 7));
+  return `납입월(${m}월) 시장 공모 회사채 만기도래 ${(mg.total[i] / 1e12).toFixed(1)}조원으로 향후 12개월 중 ${rank === 0 ? '최대' : '두 번째'}(월평균 ${(avg / 1e12).toFixed(1)}조원): ${m <= 2 ? '연초 기관 자금 집행과 겹쳐 수요는 우호적이나 ' : ''}차환 발행이 몰리는 시기로, 수요예측일을 예정 내역과 겹치지 않게 분산 검토`;
+}

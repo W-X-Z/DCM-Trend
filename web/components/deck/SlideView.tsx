@@ -141,7 +141,7 @@ function LineEl({ c, x, y, w, h }: { c: LineChart; x: number; y: number; w: numb
         return <path key={s.name} d={d} fill="none" stroke={hex(s.color)} strokeWidth={1.8} strokeLinejoin="round" />;
       })}
       {c.series.map((s, i) => (
-        <g key={`lg-${s.name}`} transform={`translate(${left + i * 110}, ${h - 10})`}>
+        <g key={`lg-${s.name}`} transform={`translate(${left + i * Math.min(110, (w - left) / c.series.length)}, ${h - 10})`}>
           <line x1={0} x2={14} y1={-3} y2={-3} stroke={hex(s.color)} strokeWidth={2} />
           <text x={18} y={0} fontSize={7.5} fill={hex(C.ink)}>{s.name}</text>
         </g>

@@ -6,7 +6,7 @@
 export type ItemId =
   | 'cover' | 'ceo' | 'contents'
   | 'terms' | 'sizing' | 'schedule' | 'sales' | 'ir'
-  | 'rates' | 'bok' | 'fomc'
+  | 'rates' | 'bok' | 'fomc' | 'issues'
   | 'forecast' | 'credit_fc' | 'views' | 'usviews'
   | 'peers' | 'compare' | 'corp'
   | 'pipeline'
@@ -41,6 +41,7 @@ export const SECTIONS: Section[] = [
       { id: 'rates', title: '금리 동향', kind: 'gen', on: true },
       { id: 'bok', title: '금통위', kind: 'gen', on: true },
       { id: 'fomc', title: 'FOMC', kind: 'gen', on: true },
+      { id: 'issues', title: '주요 이슈', kind: 'gen', on: true, note: '시장 자료 팩 주요 이슈: 양식은 고정, 이슈는 중요도·기준일로 상위 4개를 골라 2장' },
     ],
   },
   {

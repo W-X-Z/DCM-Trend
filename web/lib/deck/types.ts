@@ -48,7 +48,7 @@ export type DeckData = {
   policyHistory: { kr: { dt: string; rate: number }[]; us: { dt: string; low: number; high: number }[] };
   forecast: {
     house: string; published_dt: string; title: string; url: string;
-    rows: { key: string; label: string; basis: string; cells: { period: string; value: number; actual: boolean }[] }[];
+    rows: { key: string; label: string; basis: string; cells: { period: string; value: number | null; actual: boolean }[] }[];
     // 하우스 최근 의견(출처별 요약)
     notes: { topic: string; text: string; date: string; title: string; url: string }[];
   } | null;
@@ -67,6 +67,10 @@ export type DeckData = {
   maturityByGrade: { months: string[]; rows: { grade: string; notch: string | null; values: number[]; total: number }[]; total: number[]; asof: string };
   policy: { bok: Meeting | null; fomc: Meeting | null };
   usViews: UsView[];
+  // 시장 자료 팩(Discussion Material 데이터): 시장 지표 시계열, 주요 이슈, 최근 2개월 시장 전체 수요예측
+  market?: MarketSeries[];
+  issues?: MarketIssue[];
+  recentIssues?: PeerIssue[];
 };
 
 export type YearRow = { rank: number; firm: string; krw: number; share: number; isNh: boolean };
@@ -148,3 +152,9 @@ export type DeckText = {
 };
 export type TermNotes = { rating: string; tenor: string; amount: string; band: string; coupon: string; demand: string; pay: string; uw: string; fee: string };
 export type TextKey = keyof DeckText;
+
+export type MarketSeries = { key: string; label: string; unit: string; source: string; cycle: 'D' | 'M'; pts: [string, number][] };
+export type MarketIssue = {
+  topic: string; as_of: string; valid_until: string; priority: number; impact: string; points: string[];
+  chart: string | null; chart_title: string | null; sources: { title: string; url: string; date: string | null }[];
+};

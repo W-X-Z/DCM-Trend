@@ -8,7 +8,7 @@ import {
 import {
   BULLET_INDENT, P, cellBoxes, rich, textHeight, type Cell, type Para, type Prim, type Slide, type SlideLayout, type Table,
 } from './model';
-import { forecastStale, fullUnder, horizonOf, peerPool, pipelineOf, proposedYears, recentWindow, scheduleOf, tenorText, totalEok, verdictOf } from './rules';
+import { forecastStale, fullUnder, horizonOf, peerPool, pickIssues, pipelineOf, proposedYears, recentWindow, scheduleOf, tenorText, totalEok, verdictOf } from './rules';
 import { TYPE_LABEL, TYPE_ORDER, maturityBuckets, mixOf, pp, quarterOf, spreadVsKtb, tenorMix, typedIssues } from './analytics';
 import { dataReport, STATUS_LABEL } from './sources';
 import { parseTsv } from './tsv';
@@ -556,7 +556,7 @@ function policyChart(d: DeckData, x: number, y: number, w: number, h: number): P
     series.push({ name: '국고 3년(월말)', color: C.th, values: ss.pts.map((p) => p[1]) });
   }
   if (kr.length) series.push({ name: '韓 기준금리', color: C.yellow, values: dates.map((dt) => stepAt(kr, dt)) });
-  if (us.length) series.push({ name: '美 기준금리(상단)', color: C.red, values: dates.map((dt) => stepAt(us, dt)) });
+  if (us.length) series.push({ name: '美 기준금리', color: C.red, values: dates.map((dt) => stepAt(us, dt)) });
   const all = series.flatMap((s) => s.values).filter((v): v is number => v != null);
   const ax = axis(all, 0.25);
   return { k: 'chart', x, y, w, h, chart: { kind: 'line', cats, series, ...ax, step: ax.max - ax.min > 2.5 ? 0.5 : 0.25, unit: '%', labelEvery: Math.max(1, Math.round(cats.length / 8)) } };
@@ -575,8 +575,9 @@ function spreadChart(d: DeckData, x: number, y: number, w: number, h: number, ke
     const mb = new Map(bbb?.map((p) => [p[0], p[1]]) ?? []);
     const dates = aa.map((p) => p[0]).filter((dt) => mk.has(dt));
     cats = dates.map(fmtCat);
-    series.push({ name: 'AA- 3년 − 국고 3년', color: C.th, values: dates.map((dt) => Math.round((aa.find((p) => p[0] === dt)![1] - mk.get(dt)!) * 1000) / 10) });
-    if (bbb) series.push({ name: 'BBB- 3년 − 국고 3년', color: C.bar, values: dates.map((dt) => (mb.has(dt) ? Math.round((mb.get(dt)! - mk.get(dt)!) * 1000) / 10 : null)) });
+    // AA- 와 BBB- 스프레드는 크기 차이가 10배라 한 축에 그리면 AA- 가 바닥에 붙는다: 회사 등급군에 맞는 하나만 그린다
+    if (key === 'corp3y_bbb' && bbb) series.push({ name: 'BBB- 3년 − 국고 3년', color: C.th, values: dates.map((dt) => (mb.has(dt) ? Math.round((mb.get(dt)! - mk.get(dt)!) * 1000) / 10 : null)) });
+    else series.push({ name: 'AA- 3년 − 국고 3년', color: C.th, values: dates.map((dt) => Math.round((aa.find((p) => p[0] === dt)![1] - mk.get(dt)!) * 1000) / 10) });
   } else {
     const ks = d.series.find((s) => s.key === 'ktb3y');
     const as = d.series.find((s) => s.key === key) ?? d.series.find((s) => s.key === 'corp3y_aa');
@@ -615,7 +616,7 @@ function ratesSlide({ d, tx }: Ctx, n: Numbered): Body {
   prims.push(...goldTitle(cy, `국고채 및 韓·美 기준금리 추이${daily ? ' (일별)' : ' (월말)'}`, X0, X0 + half, '(단위: %)'));
   prims.push(policyChart(d, X0, cy + 20, half, BOTTOM - cy - 22));
   prims.push(...goldTitle(cy, `국고채 대비 회사채 신용스프레드 추이`, X0 + half + 16, X1, '(단위: bp)'));
-  prims.push(spreadChart(d, X0 + half + 16, cy + 20, half, BOTTOM - cy - 22));
+  prims.push(spreadChart(d, X0 + half + 16, cy + 20, half, BOTTOM - cy - 22, d.company.rating_group === 'BBB' ? 'corp3y_bbb' : 'corp3y_aa'));
   const base = d.rates.find((r) => r.key === 'base_rate');
   prims.push(...footnote([`자료: ${rateSource(d)}${base ? `, ${yymmdd(base.dt)} 기준` : ''}, 한국은행·미 연준(정책금리 변경 이력). 美 기준금리는 목표범위 상단`]));
   return { id: 'rates', title: n.title, prims };
@@ -789,7 +790,7 @@ function forecastSlide({ d, inp, tx, plan }: Ctx, n: Numbered): Body {
     prims.push(...goldTitle(top, '주요 금리 전망치', X0, X1, '(단위: %, 내부 데이터)'));
     prims.push(...pastedTable(X0, top + 20, CW, BOTTOM - top - 24, rateGrid, 8));
   } else if (fc && !forecastStale(d)) {
-    prims.push(...goldTitle(top, `${fc.house} 리서치 주요 금리 전망 (${yymmdd(fc.published_dt)} 발표)`, X0, X1, '(단위: %)'));
+    prims.push(...goldTitle(top, isPath(fc) ? `기준금리 경로 전망(${fc.house} 리서치, ${yymmdd(fc.published_dt)}) 및 국고채 금리` : `${fc.house} 리서치 주요 금리 전망 (${yymmdd(fc.published_dt)} 발표)`, X0, X1, '(단위: %)'));
     const periods = fc.rows[0]?.cells ?? [];
     const pw = (CW - 120 - 50) / Math.max(periods.length, 1);
     const rows: (Cell | null)[][] = [
@@ -801,11 +802,16 @@ function forecastSlide({ d, inp, tx, plan }: Ctx, n: Numbered): Body {
   }
   const src = [...new Map(list.map((x) => [x.url, `${x.title} ${yymmdd(x.date)}`])).values()];
   prims.push(...footnote([
-    rateGrid.length >= 2 ? '주) 금리 전망표는 NH 리서치 내부 데이터' : fc && !forecastStale(d) ? `주) 기준금리는 기말, 국고채는 기간 평균. ${yymmdd(fc.published_dt)} 발표 공개본으로 이후 금통위·FOMC 결과는 반영되지 않음. 자료: ${fc.title}` : '',
+    rateGrid.length >= 2 ? '주) 금리 전망표는 NH 리서치 내부 데이터' : fc && !forecastStale(d) && isPath(fc)
+      ? `주) 실적(회색): 기준금리 기말, 국고채 분기 평균(진행 중 분기는 기준일까지, 한국은행 ECOS). 기준금리 경로는 ${fc.house} 리서치 공개 코멘트, 미국은 상단. 국고채 분기 전망치는 비공개로 미기재. 자료: ${fc.title}`
+      : fc && !forecastStale(d) ? `주) 기준금리는 기말, 국고채는 기간 평균. ${yymmdd(fc.published_dt)} 발표 공개본으로 이후 금통위·FOMC 결과는 반영되지 않음. 자료: ${fc.title}` : '',
     src.length ? `의견 출처: ${src.join('; ')}` : '',
   ].filter(Boolean)));
   return { id: 'forecast', title: n.title, prims };
 }
+
+// 경로형 전망: 국고채 전망 칸이 없는 표(기준금리 경로 + 국고채 실적)
+const isPath = (fc: NonNullable<DeckData['forecast']>) => !fc.rows.some((r) => r.key.startsWith('ktb') && r.cells.some((c) => !c.actual && c.value != null));
 
 // 회사채 시장 의견: 시장 자료 팩(최근 60일 증권사·언론 크레딧 의견)이 있으면 그것, 없으면 NH 리서치 회사채 의견
 const CREDIT_TOPICS = /회사채|크레딧/;
@@ -815,6 +821,56 @@ export const creditNotesOf = (d: DeckData): Notes => {
 };
 // 3-② 회사채 금리: 현업 샘플 양식 = 위 '우량채·비우량채 회사채 시장 전망' 두 단락 + 아래 등급별 전망표(NH 리서치, 내부).
 // 내부 전망표가 없으면 표 자리에 국고 대비 신용스프레드 추이를 넣는다. 단락 본문은 하우스 이름 없이 '- 요약', 출처는 각주.
+// 등급별 발행 결과표(내부 전망표 대체, Discussion Material 방식): 시장 전체 최근 두 달 수요예측을 등급×만기로 묶는다
+const TENOR_B = (t: string) => (/^1(\.5)?년/.test(t) ? '1~1.5년' : /^[235]년$/.test(t) ? t : null);
+const GRADE_ORDER = ['AAA', 'AA+', 'AA0', 'AA', 'AA-', 'A+', 'A0', 'A', 'A-', 'BBB+', 'BBB0', 'BBB', 'BBB-'];
+export function gradeIssueTable(d: DeckData) {
+  const xs = (d.recentIssues ?? []).filter((p) => p.sub_type !== '신종자본증권' && p.ratio != null && p.demand_dt);
+  const months = [...new Set(xs.map((p) => p.demand_dt!.slice(0, 7)))].sort().slice(-2);
+  if (months.length < 2) return null;
+  const g = new Map<string, { y: number[]; s: number[]; c: number[]; n: number }>();
+  for (const p of xs) {
+    const m = p.demand_dt!.slice(0, 7);
+    if (!months.includes(m)) continue;
+    const grade = (p.rating ?? '').replace(/\(.*\)/, '').replace(/^AA$/, 'AA0').replace(/^A$/, 'A0').trim();
+    if (!GRADE_ORDER.includes(grade)) continue;
+    for (const t of p.tranches) {
+      const tb = TENOR_B(t.tenor ?? '');
+      if (!tb) continue;
+      const k = `${grade}|${tb}|${m}`;
+      const e = g.get(k) ?? { y: [], s: [], c: [], n: 0 };
+      e.n++;
+      if (t.yield_pct != null) e.y.push(t.yield_pct);
+      const lo = t.band_low ?? p.band_low;
+      const hi = t.band_high ?? p.band_high;
+      if (t.spread_bp != null && (t.band_type ?? p.band_type) !== '고정금리' && (lo == null || hi == null || (t.spread_bp >= lo && t.spread_bp <= hi))) e.s.push(t.spread_bp);
+      if (t.ratio != null) e.c.push(t.ratio);
+      g.set(k, e);
+    }
+  }
+  const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+  const keys = [...new Set([...g.keys()].map((k) => k.split('|').slice(0, 2).join('|')))]
+    .sort((a, b) => {
+      const [ga, ta] = a.split('|');
+      const [gb, tb] = b.split('|');
+      return GRADE_ORDER.indexOf(ga) - GRADE_ORDER.indexOf(gb) || ['1~1.5년', '2년', '3년', '5년'].indexOf(ta) - ['1~1.5년', '2년', '3년', '5년'].indexOf(tb);
+    });
+  if (keys.length < 4) return null;
+  const rows = keys.slice(0, 18).map((k) => {
+    const [grade, tenor] = k.split('|');
+    const cells = months.flatMap((m) => {
+      const e = g.get(`${k}|${m}`);
+      if (!e) return ['–', '–', '–', '–'];
+      const y = avg(e.y);
+      const sp = avg(e.s);
+      const c = avg(e.c);
+      return [y == null ? '–' : y.toFixed(3), sp == null ? '–' : Math.round(sp) === 0 ? 'Par' : `${Math.round(sp) > 0 ? '+' : ''}${Math.round(sp)}`, c == null ? '–' : c.toFixed(2), String(e.n)];
+    });
+    return { grade, tenor, cells };
+  });
+  return { months, rows };
+}
+
 // 등급별 금리 실적표(내부 전망표 대체): 전년 말 + 모든 줄에 값이 있는 최근 월말 3개 + 현재, 마지막 열은 전년 말 대비(bp)
 function gradeRows(d: DeckData) {
   const ser = (k: string) => (d.series.find((s) => s.key === k)?.pts ?? []) as [string, number][];
@@ -873,10 +929,29 @@ function creditSlide({ d, inp }: Ctx, n: Numbered): Body {
     prims.push({ k: 'rect', x: X0, y: top, w: CW, h, fill: C.label }, { k: 'text', x: X0, y: top, w: CW, h, paras: ps, size, color: C.ink, valign: 'm', pad: 10, line: 1.32 });
     top += h + 12;
   }
-  const gt = grid.length >= 2 ? null : gradeRows(d);
+  const gi = grid.length >= 2 ? null : gradeIssueTable(d);
+  const gt = grid.length >= 2 || gi ? null : gradeRows(d);
   if (grid.length >= 2) {
     prims.push(...goldTitle(top, '회사채 금리 전망', X0, X1, '(단위: %)'));
     prims.push(...pastedTable(X0, top + 20, CW, BOTTOM - top - 24, grid, 7.5));
+  } else if (gi) {
+    // 내부 전망표 자리: 최근 두 달 등급×만기별 공모 회사채 발행 결과(발행금리·가산금리·경쟁률·건수)
+    prims.push(...goldTitle(top, '등급별 공모 회사채 발행 결과', X0, X1, '(단위: %, bp)'));
+    const lw = [70, 60];
+    const cw = (CW - lw[0] - lw[1]) / 8;
+    const ty = top + 20;
+    const rh = Math.max(14, Math.min(19, (BOTTOM - ty - 40) / gi.rows.length));
+    const mlab = (m: string) => `'${m.slice(2, 4)}년 ${Number(m.slice(5, 7))}월`;
+    const rows: (Cell | null)[][] = [
+      [TH('등급', { rowspan: 2 }), TH('만기', { rowspan: 2 }), TH(mlab(gi.months[0]), { colspan: 4 }), null, null, null, TH(mlab(gi.months[1]), { colspan: 4 }), null, null, null],
+      [null, null, ...['발행금리', '가산금리', '경쟁률', '건수', '발행금리', '가산금리', '경쟁률', '건수'].map((h) => TH(h))],
+    ];
+    gi.rows.forEach((r, i) => {
+      const first = i === 0 || gi.rows[i - 1].grade !== r.grade;
+      const span = gi.rows.filter((x) => x.grade === r.grade).length;
+      rows.push([first ? LB(r.grade, { rowspan: span }) : null, TD(r.tenor), ...r.cells.map((v) => TD(v))]);
+    });
+    prims.push(table(X0, ty, [...lw, ...Array(8).fill(cw)], [18, 18, ...gi.rows.map(() => rh)], rows, 8));
   } else if (gt) {
     // 내부 전망표 자리: 같은 모양(구분·만기 × 기간)의 등급별 금리 실적표 + 아래 신용스프레드 추이
     prims.push(...goldTitle(top, '등급별 회사채 금리 추이', X0, X1, '(단위: %, bp)'));
@@ -898,10 +973,90 @@ function creditSlide({ d, inp }: Ctx, n: Numbered): Body {
   const used = groups.flatMap((g) => g.xs);
   const src = [...new Set(used.map((x) => `${x.house ? `${x.house} ` : ''}${x.title} ${yymmdd(x.date)}`))];
   prims.push(...footnote([
-    grid.length >= 2 ? '주) 회사채 금리는 분기 평균 기준. 자료: NH투자증권 리서치본부' : `주) 등급별 금리는 월말 실적(세 금리가 모두 있는 달), 신용스프레드는 회사채 − 국고채. NH 리서치 등급별 전망표를 붙이면 이 자리에 전망표가 들어감. 자료: 한국은행 ECOS`,
+    grid.length >= 2 ? '주) 회사채 금리는 분기 평균 기준. 자료: NH투자증권 리서치본부'
+      : gi ? '주) 공모 일반회사채·금융채(신종자본증권 제외), 수요예측일 기준 트랜치 단순평균. 가산금리는 개별(등급)민평 대비 확정 스프레드(밴드 밖 값 제외). NH 리서치 등급별 전망표를 붙이면 이 자리에 전망표가 들어감. 자료: 전자공시시스템'
+      : `주) 등급별 금리는 월말 실적(세 금리가 모두 있는 달), 신용스프레드는 회사채 − 국고채. NH 리서치 등급별 전망표를 붙이면 이 자리에 전망표가 들어감. 자료: 한국은행 ECOS`,
     src.length ? `전망 출처: ${src.join('; ')}` : '',
   ].filter(Boolean)));
   return { id: 'credit_fc', title: n.title, prims };
+}
+
+// 주요 이슈(시장 자료 팩): 한 쪽에 이슈 둘(위 글상자 [이슈] + 글머리, 아래 이슈별 차트). 양식은 고정, 이슈는 pickIssues 가 고른다
+function issueChart(d: DeckData, key: string | null, x: number, y: number, w: number, h: number): { prim: Prim | null; src: string } {
+  if (!key) return { prim: null, src: '' };
+  if (key === 'maturity') {
+    const mg = d.maturityByGrade;
+    if (!mg.months.length) return { prim: null, src: '' };
+    const vals = mg.total.map((v) => Math.round(v / 1e11) / 10);
+    const top2 = [...vals].map((v, i) => [v, i] as const).sort((a, b) => b[0] - a[0]).slice(0, 2).map((x) => x[1]);
+    return {
+      prim: { k: 'chart', x, y, w, h, chart: { kind: 'bar', cats: mg.months.map((m) => `${m.slice(2, 4)}.${m.slice(5, 7)}`), values: vals, labels: vals.map((v) => (v ? v.toFixed(1) : '')), highlight: top2, color: C.th, hiColor: C.yellow } },
+      src: '전자공시시스템 집계(조원)',
+    };
+  }
+  const s = (d.market ?? []).find((m) => m.key === key);
+  if (!s || s.pts.length < 3) return { prim: null, src: '' };
+  if (s.cycle === 'M') {
+    // 월별 지수 → 전월 대비 상승률(%)
+    const pts = s.pts.slice(-19);
+    const mom = pts.slice(1).map((p, i) => Math.round((p[1] / pts[i][1] - 1) * 1000) / 10);
+    const ax = axis(mom, 0.5);
+    return {
+      prim: { k: 'chart', x, y, w, h, chart: { kind: 'line', cats: pts.slice(1).map((p) => fmtCat(p[0])), series: [{ name: `${s.label} 전월 대비(%)`, color: C.th, values: mom }], min: Math.min(0, ax.min), max: ax.max, step: 0.5, unit: '%', labelEvery: 3 } },
+      src: s.source,
+    };
+  }
+  const pts = s.pts.filter((p) => p[0] >= addMonths(d.asof, -21));
+  const vals = pts.map((p) => p[1]);
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  const mag = 10 ** Math.floor(Math.log10(Math.max(hi - lo, 1)));
+  const step = Math.ceil((hi - lo) / 5 / mag) * mag || 1;
+  return {
+    prim: {
+      k: 'chart', x, y, w, h, chart: {
+        kind: 'line', cats: pts.map((p) => fmtCat(p[0])), series: [{ name: `${s.label}(${s.unit})`, color: key === 'kospi' ? C.red : C.th, values: vals }],
+        min: Math.floor(lo / step) * step, max: Math.ceil(hi / step) * step, step, unit: '', labelEvery: Math.max(1, Math.round(pts.length / 7)),
+      },
+    },
+    src: s.source,
+  };
+}
+
+function issuesSlides({ d }: Ctx, n: Numbered): Body[] {
+  const list = pickIssues(d);
+  const pages: (typeof list)[] = [];
+  for (let i = 0; i < list.length; i += 2) pages.push(list.slice(i, i + 2));
+  return pages.map((pg, pi) => {
+    const prims: Prim[] = [titleBox(n.head, n.sub, pi > 0)];
+    let size = 9.5;
+    const build = (sz: number): Para[] => pg.flatMap((x, i) => [
+      { runs: [{ t: `[${x.topic}]`, b: true }, { t: `  ${x.impact}`, color: C.muted, size: sz - 1 }], gap: i ? Math.round(sz * 0.9) : 0 },
+      ...x.points.map((t) => ({ runs: rich(t), bullet: true, gap: 3 })),
+    ]);
+    let ps = build(size);
+    let h = textHeight(ps, CW - 20, size, false, 1.32, BULLET_INDENT(size)) + 20;
+    while (h > 200 && size > 7.5) {
+      size -= 0.5;
+      ps = build(size);
+      h = textHeight(ps, CW - 20, size, false, 1.32, BULLET_INDENT(size)) + 20;
+    }
+    prims.push({ k: 'rect', x: X0, y: 78, w: CW, h, fill: C.label }, { k: 'text', x: X0, y: 78, w: CW, h, paras: ps, size, color: C.ink, valign: 'm', pad: 10, line: 1.32 });
+    const top = 78 + h + 14;
+    const half = (CW - 20) / 2;
+    const srcs: string[] = [];
+    pg.forEach((x, i) => {
+      const cx = X0 + i * (half + 20);
+      const ch = issueChart(d, x.chart, cx, top + 22, half, BOTTOM - top - 26);
+      if (!ch.prim) return;
+      prims.push(...goldTitle(top, x.chart_title ?? x.topic, cx, cx + half));
+      prims.push(ch.prim);
+      srcs.push(`${x.chart_title ?? x.topic}: ${ch.src}`);
+    });
+    const refs = pg.map((x) => x.sources[0]).filter(Boolean).map((s) => `${s.title}${s.date ? ` ${yymmdd(s.date)}` : ''}`);
+    prims.push(...footnote([`자료: ${srcs.join(' / ')}`, refs.length ? `이슈 출처: ${refs.join('; ')} (기준일 ${pg.map((x) => yymmdd(x.as_of)).join('·')})` : ''].filter(Boolean)));
+    return { id: `issues-${pi}`, title: pi ? `${n.title} (계속)` : n.title, prims };
+  });
 }
 
 // II-2 수요예측 결과 (여러 쪽)
@@ -1311,6 +1466,7 @@ export function available(d: DeckData, inp: DeckInput) {
     if (id === 'usviews') return d.usViews.length > 0;
     if (id === 'bok') return !!d.policy.bok;
     if (id === 'fomc') return !!d.policy.fomc;
+    if (id === 'issues') return pickIssues(d).length > 0;
     if (id === 'forecast') return !!d.forecast || parseTsv(inp.internal?.rateFc ?? '').length >= 2;
     if (id === 'credit_fc') return parseTsv(inp.internal?.creditFc ?? '').length >= 2 || creditNotesOf(d).some((x) => x.date >= addMonths(d.asof, -2));
     if (id === 'sales') return d.own.some((p) => p.tranches.some((t) => t.byType?.length)) || parseTsv(inp.internal?.investors ?? '').length >= 2 || d.peers.some((p) => p.tranches.some((t) => t.byType?.length));
@@ -1350,6 +1506,7 @@ export function buildSlides(d: DeckData, inp: DeckInput, tx: DeckText): Slide[] 
           case 'rates': add(ratesSlide(ctx, n)); break;
           case 'bok': add(meeting(ctx, n, 'bok')); break;
           case 'fomc': add(meeting(ctx, n, 'fomc')); break;
+          case 'issues': add(issuesSlides(ctx, n)); break;
           case 'views': add(viewsSlide(ctx, n)); break;
           case 'usviews': add(usViewsSlide(ctx, n)); break;
           case 'forecast': add(forecastSlide(ctx, n)); break;

@@ -6,3 +6,4 @@ node_modules/
 .next/
 supabase/.temp/
 *.tsbuildinfo
+scripts/local/out/
