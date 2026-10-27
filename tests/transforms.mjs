@@ -229,6 +229,8 @@ await check('회사채 발행 묶음: 금액 합 = 트랜치 합',
   true);
 
 // 금리 조사 값: ECOS 값이 오면 덮어쓰고, 조사 값은 ECOS 값을 덮어쓰지 않는다
+// (시장 자료 팩 마이그레이션이 넣어 둔 실제 일별 금리는 비우고 시험한다)
+await db.exec(`delete from raw.rates where series_key in ('ktb3y', 'ktb10y')`);
 await db.exec('set role service_role');
 await db.query(`select public.ingest_put_rates_research($1::jsonb)`, [JSON.stringify([
   { series_key: 'ktb3y', dt: '2026-10-12', value: 3.921, source_url: 'https://example.com/a' },
