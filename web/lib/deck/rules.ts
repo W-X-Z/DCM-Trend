@@ -3,7 +3,8 @@
 import { bandText, bpS, eok, eokW, mdw, ratioX, rate2, rate3, shortFirm, tenorYears, yy, yymmdd } from './fmt';
 import { BizCal, buildSchedule, korDate, type Schedule } from './schedule';
 import { defaultItems } from './catalog';
-import { fullYearLoads, maturityBuckets, meetingVolatility, mixOf, notchStats, proposedMaturityLoad, spreadVsKtb, tenorDemand, tenorMix, typedIssues, yearsOf } from './analytics';
+import { timingPlan, timingText } from './timing';
+import { fullYearLoads, maturityBuckets, meetingVolatility, mixOf, notchStats, pp, proposedMaturityLoad, spreadVsKtb, suspectOf, tenorDemand, tenorMix, trRatio, typedIssues, typedTranches, yearsOf } from './analytics';
 import type { DeckData, DeckInput, DeckText, PeerIssue, TermNotes } from './types';
 import { eul, eun, ro } from '../josa';
 
@@ -43,6 +44,16 @@ export const hasResult = (p: PeerIssue) => p.ratio != null || p.demand_krw != nu
 export const isReit = (name: string) => /리츠|REIT/i.test(name);
 // 공기업·공공기관: 정부 지원 기대가 등급에 반영돼 일반 기업과 비교하지 않는다(같은 공기업끼리는 비교)
 export const isPublicCorp = (name: string) => /(공사|공단|발전|한국전력|한국수자원|한국가스공사|한국지역난방)$|^한국.*(공사|공단)$/.test(name.replace(/\s|\(주\)|㈜/g, ''));
+// 금융회사(은행·금융지주·증권·카드·캐피탈·리스·보험·F&I 등): 사업회사는 사업회사끼리 비교한다(투자자 구성·만기 관행이 다름)
+export const isFinancial = (name: string) =>
+  /(은행|금융지주|금융그룹|증권|투자증권|캐피탈|카드|리스|오토리스|생명|화재|손해보험|보험|자산운용|에프앤아이|F&I|파이낸스|파이낸셜|종합금융|투자금융|신탁)$/i
+    .test(name.replace(/\s|\(주\)|㈜/g, ''));
+// 신용등급 → 등급군(AA- → AA, A+ → A, BBB0 → BBB)
+export const gradeGroup = (r: string | null | undefined) => (r ? r.replace(/\(.*\)/g, '').trim().replace(/[+\-0]$/, '') : null);
+// 원자료가 상식 밖이라 통계·비교에서 뺀 사례(사유와 함께): 검수에 보인다
+export function suspectPeers(d: DeckData) {
+  return d.peers.filter((p) => p.corp_code !== d.company.corp_code).map((p) => ({ p, why: suspectOf(p) })).filter((x): x is { p: PeerIssue; why: string } => !!x.why);
+}
 // 비교군에서 뺀 사례(사유와 함께): 검수·데이터 화면에 보인다
 export function excludedPeers(d: DeckData) {
   return d.peers.filter((p) => p.flag && p.corp_code !== d.company.corp_code && !(p.flag === '공기업' && isPublicCorp(d.company.corp_name)));
@@ -55,6 +66,8 @@ export function peerPool(d: DeckData, scope: 'group' | 'notch') {
     .filter((p) => (p.sub_type ?? '일반회사채') === '일반회사채')
     .filter((p) => !isReit(p.corp_name))
     .filter((p) => !p.flag || p.corp_code === d.company.corp_code || (p.flag === '공기업' && isPublicCorp(d.company.corp_name)))
+    .filter((p) => p.corp_code === d.company.corp_code || isFinancial(d.company.corp_name) || !isFinancial(p.corp_name))
+    .filter((p) => p.corp_code === d.company.corp_code || !suspectOf(p))
     .filter(hasResult)
     .filter((p) => (p.demand_dt ?? p.deal_dt ?? '') < d.asof)
     .filter((p) => scope === 'group' || !r || p.rating === r)
@@ -75,14 +88,17 @@ export function defaultInput(d: DeckData): DeckInput {
   const last = d.own[0];
   const cal = calOf(d);
   const plan = payPlan(d);
-  const pay = plan.pay;
   // 같은 노치 사례가 10건 이상이면 노치(예: AA-)를 기본 범위로
   const peerScope: 'group' | 'notch' = d.company.rating && peerPool(d, 'notch').length >= 10 ? 'notch' : 'group';
+  // 납입일: 발행 시기 검토(1안/2안)의 권고안. 대안이 없으면 규칙 납입일
+  const tm = timingPlan(d, { peerScope, band: 'spread', pay: null });
+  const pay = tm.opts.length ? tm.opts[tm.rec].sch.pay : plan.pay;
   const pool = peerPool(d, peerScope);
   // 기본형: 최근 6개월 수요예측을 최근 것부터 16건까지 (표는 시간순으로 그린다)
   const from6 = addMonths(d.asof, -6);
   const recent = pool.filter((p) => pd(p) >= from6);
-  const peerKeys = (recent.length >= 4 ? recent : pool).slice(0, 16).map((p) => p.key);
+  // 최근 6개월이 8건 미만이면 최근 1년에서 고른다(현업 덱은 당해 연도 사례를 길게 나열)
+  const peerKeys = (recent.length >= 8 ? recent : pool).slice(0, 16).map((p) => p.key);
   // 비교 장표 기본: 회사 직전 회차 + 최근 미매각 사례 + 같은 노치(없으면 같은 등급군)의 경쟁률 최고 사례
   const ownRecent = pool.find((p) => p.corp_code === d.company.corp_code);
   const taken = new Set([ownRecent?.key]);
@@ -93,6 +109,9 @@ export function defaultInput(d: DeckData): DeckInput {
   const compareKeys = [ownRecent?.key, under?.key, best?.key].filter(Boolean) as string[];
   const m = d.asof;
   const items = defaultItems();
+  // 직전 회차를 NH 가 주관하지 않았으면(신규·재선임 제안) NH 강점 1장(같은 등급 대표주관 실적, 데이터로 생성)을 켠다.
+  // 템플릿 고정 장표(회사 현황 등)는 수치가 오래돼 기본으로 켜지 않는다.
+  if (d.own.length && !d.own[0].nh_lead && d.league.rows.some((r) => r.isNh)) items.strength = true;
   const series = nextSeries(d.company.last_series);
   const issuer = `㈜${d.company.corp_name}`;
   // 직전 회차 트랜치 구성을 기본값으로 (최초 신고 금액)
@@ -201,6 +220,7 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     }
   }
 
+  const timing = timingText(timingPlan(d, { peerScope: inp.peerScope, band: inp.band.type, pay: inp.pay }));
   const schedule: string[] = [];
   if (sch) {
     schedule.push(`발행 일정 案: **${yy(sch.pay).slice(0, 3)}년 ${korDate(sch.pay)} 발행, ${korDate(sch.demandOptions[0])} ~ ${Number(sch.demandOptions[2].slice(8, 10))}일 中 택1 수요예측 진행**`);
@@ -262,11 +282,22 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   const nhG = lg.rows.findIndex((r) => r.isNh);
   const nhA = d.leagueAll.rows.findIndex((r) => r.isNh);
   const nhOwn = d.own.filter((p) => p.nh_lead);
+  const nhRecent = d.own.slice(0, 4).filter((p) => p.nh_lead);
+  const nhTrack = nhRecent.length ? (() => {
+    const sp = nhRecent.flatMap((p) => p.tranches.map((t) => t.spread_bp)).filter((v): v is number => v != null);
+    const avg = sp.length ? Math.round(sp.reduce((a, b) => a + b, 0) / sp.length) : null;
+    const rs = nhRecent.filter((p) => p.ratio != null);
+    const again = d.own[0] && !d.own[0].nh_lead;
+    // 결과 표기: 모든 회차가 모집액 이상이면 경쟁률, 아니면 모집액 이상 횟수. 가산금리는 민평 이하일 때만
+    const ratioTxt = !rs.length ? '발행 지원' : rs.every((p) => Number(p.ratio) >= 1) ? `수요예측 경쟁률 ${rs.map((p) => ratioX(p.ratio)).join('·')}` : `수요예측 ${rs.length}회 중 ${rs.filter((p) => Number(p.ratio) >= 1).length}회 모집액 이상`;
+    const inc = nhRecent.filter((p) => p.increased).length;
+    return `NH투자증권은 ${name} 제${nhRecent.map((p) => p.series ?? '').join('·')}회 대표주관사로 ${ratioTxt}${avg != null && avg <= 0 ? `, 확정 가산금리 평균 ${bpSigned(avg)}(민평 대비)` : ''}${inc ? `, 증액 발행 ${inc}회` : ''}${again ? ` → 제${inp.series || ''}회 **대표주관 재참여** 제안` : ''}`;
+  })() : undefined;
   const strengths: DeckText['strengths'] = [];
   if (nhG >= 0) strengths.push({ title: `${d.company.rating_group ?? ''}등급 발행 실적`, text: `최근 1년 ${lg.scope} 대표주관 실적 **${nhG + 1}위**(${eokW(lg.rows[nhG].credit)}, ${lg.rows[nhG].deals}건)` });
   if (nhA >= 0) strengths.push({ title: '공모 회사채 대표주관', text: `최근 1년 ${d.leagueAll.scope} 대표주관 실적 ${nhA + 1}위, 점유율 ${((d.leagueAll.rows[nhA].credit / (d.leagueAll.total || 1)) * 100).toFixed(1)}%` });
   strengths.push(nhOwn.length
-    ? { title: `${name}에 대한 이해`, text: `${name} 공모 회사채 ${d.own.length}회 중 **${nhOwn.length}회 대표주관**(최근 제${nhOwn[0].series ?? ''}회, ${yy(nhOwn[0].deal_dt)})` }
+    ? { title: `${name}에 대한 이해`, text: `${name} 공모 회사채 ${d.own.length}회 중 **${nhOwn.length}회 대표주관**(최근 제${nhOwn[0].series ?? ''}회, ${yy(nhOwn[0].deal_dt)})${nhTrack && nhRecent.length ? `: ${nhTrack.replace(/^NH투자증권은 .*?대표주관사로 /, '').replace(/ → .*$/, '')}` : ''}` }
     : { title: '최적 컨설팅 역량', text: `${d.company.rating_group ?? ''}등급 발행사의 수요예측 사례를 바탕으로 발행 시기·구조·금리 밴드 제안` });
 
   // 금리
@@ -322,6 +353,17 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   const tr = inp.tranches.filter((t) => t.tenor);
   const total = tr.reduce((a, t) => a + (t.eok ?? 0), 0);
   if (tr.length) sizing.push(`최초 신고 금액 ${total ? `**${total.toLocaleString('ko-KR')}억원**` : '미정'}${inp.maxEok ? `(Max ${inp.maxEok.toLocaleString('ko-KR')}억원)` : ''} 가운데 ${tr.map((t) => `${t.tenor}${t.eok ? ` ${t.eok.toLocaleString('ko-KR')}억원` : ''}`).join(', ')} 구성 제안`);
+  // 차환 수요: 납입일 뒤 75일 안(또는 그 전 기준일 이후) 기존 회사채 만기 → 최초·증액 금액과 비교
+  const refi = refiNeed(d, inp.pay);
+  if (refi.list.length && total) {
+    const amt = refi.list.reduce((a, m) => a + Number(m.amount_krw ?? 0), 0) / 1e8;
+    const what = `${refi.label} 만기 ${eokW(amt * 1e8)}(${refi.list.map((m) => `${mdw(m.dt)} ${eokW(m.amount_krw)}`).join(', ')})`;
+    sizing.push(total >= amt
+      ? `${what} 차환 재원을 최초 신고 금액으로 확보하고, 증액분은 운영·투자 자금 등 추가 조달 여력`
+      : inp.maxEok && inp.maxEok >= amt
+        ? `${what} 차환: 최초 신고 금액으로 ${Math.round((total / amt) * 100)}%, **증액 시 차환 재원 전액 확보**`
+        : `${what} 대비 증액 한도까지 발행해도 부족해 차입·CP 등 병행 검토 필요`);
+  }
   const ownRat = d.own.filter((p) => p.ratio != null).slice(0, 4);
   if (ownRat.length) sizing.push(`${name} 최근 ${ownRat.length}회 수요예측 경쟁률 ${ownRat.map((p) => `${yy(p.demand_dt ?? p.deal_dt)} ${ratioX(p.ratio)}`).join(', ')}`);
   const ownInc = d.own.slice(0, 4).filter((p) => p.increased);
@@ -358,8 +400,13 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   if (missing) sizing.push(missing);
   const spreads = d.own.slice(0, 4).flatMap((p) => p.tranches.map((t) => ({ p, t, s: t.spread_bp })).filter((x) => x.s != null));
   if (spreads.length >= 2) {
-    const last = spreads[0];
-    sizing.push(`최근 발행 확정 가산금리(개별민평 대비) ${spreads.slice(0, 4).map((x) => `제${x.p.series ?? ''}회 ${x.t.tenor} ${bpSigned(x.s)}`).join(', ')}, 직전 회차 ${bpSigned(last.s)} 수준에서 금리 밴드 설정 제안`);
+    // 회사 확정 가산금리(최근 4회 평균·범위)를 같은 등급 최근 3개월 확정 가산금리와 나란히: 밴드 안에서 민평 이하 확정을 목표로 한다
+    const avgOwn = Math.round(spreads.reduce((a, x) => a + Number(x.s), 0) / spreads.length);
+    const lo = Math.min(...spreads.map((x) => Number(x.s)));
+    const hi = Math.max(...spreads.map((x) => Number(x.s)));
+    const mkt = gradeSpreads(pool.filter((p) => p.corp_code !== d.company.corp_code), d.asof, 3, tr.map((t) => t.tenor));
+    const mktTxt = mkt.length ? ` vs 최근 3개월 ${grp}등급 ${mkt.map((x) => `${x.k} ${bpSigned(x.avg)}`).join(', ')}(평균)` : '';
+    sizing.push(`확정 가산금리(개별민평 대비) ${name} 최근 ${nOwn}회 평균 ${bpSigned(avgOwn)}(${bpSigned(lo)} ~ ${bpSigned(hi)})${mktTxt}${avgOwn < 0 ? ` → 민평 이하 발행 이력을 근거로 밴드 ${bandDescShort(inp)} 안에서 **민평 이하 확정 목표**` : ` → 밴드 ${bandDescShort(inp)} 유지, 수요예측 결과에 따라 확정`}`);
   }
   if (d.maturities.length) {
     // 제안 트랜치가 만기되는 연도의 기존 만기도래를 비교한다(만기도래 자료 3년 안의 만기만)
@@ -393,11 +440,17 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   if (pipe.length) {
     const done = pipe.filter((p) => p.demand_dt && p.demand_dt < d.asof).length;
     pipeline.push(`${yymmdd(d.asof)} 현재 증권신고서를 제출하고 발행 전인 일반 공모 회사채 ${pipe.length}건(${eokW(pipe.reduce((t, p) => t + p.tranches.reduce((a, x) => a + (x.initial_krw ?? 0), 0), 0))})${done ? `, 이 중 ${done}건은 수요예측을 마치고 납입 전` : ''}`);
-    const same = pipe.filter((p) => p.rating && d.company.rating_group && p.rating.startsWith(d.company.rating_group));
-    pipeline.push(same.length ? `같은 등급군(${d.company.rating_group}) 예정 발행 ${same.length}건: ${same.map((p) => p.corp_name).join(', ')}` : `같은 등급군(${d.company.rating_group ?? ''}) 예정 발행은 없음`);
+    // 등급군은 등급에서 부호를 떼어 비교한다(AA- 는 AA 등급군, A 등급군이 아님)
+    const same = pipe.filter((p) => d.company.rating_group && gradeGroup(p.rating) === d.company.rating_group);
+    pipeline.push(same.length ? `같은 등급군(${d.company.rating_group}) 예정 발행 ${same.length}건: ${same.map((p) => `${p.corp_name}(${p.rating})`).join(', ')}` : `같은 등급군(${d.company.rating_group ?? ''}) 예정 발행은 없음`);
     if (sch) {
       const clash = pipe.filter((p) => p.demand_dt && Math.abs(new Date(p.demand_dt).getTime() - new Date(sch.demand).getTime()) <= 3 * 86_400_000);
+      const near = nearPipeline(d, sch.demand);
       if (clash.length) pipeline.push(`제안 수요예측일(${mdw(sch.demand)}) 전후 3일 안에 ${clash.map((p) => p.corp_name).join(', ')} 수요예측 예정`);
+      else if (!near.length) {
+        const lastPay = pipe.map((p) => p.pay_dt ?? p.demand_dt ?? '').filter(Boolean).sort().at(-1);
+        pipeline.push(`제안 수요예측일(${mdw(sch.demand)}) 전후 3주 안에 잡힌 예정 건은 아직 없음${lastPay ? `(현재 예정 건은 ${mdw(lastPay)}까지 납입)` : ''}`);
+      }
     }
   } else {
     pipeline.push(`${yymmdd(d.asof)} 현재 증권신고서를 제출하고 발행 전인 일반 공모 회사채 없음`);
@@ -467,29 +520,59 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
     if (!sup) maturity.push(`앞 6개월 ${eokW(h1)}, 뒤 6개월 ${eokW(h2)}으로 ${h1 >= h2 ? '앞쪽' : '뒤쪽'}에 만기가 몰려 있어 ${h1 >= h2 ? '단기적으로 차환 발행이 집중될 것으로 판단' : '해당 기간 차환 발행 증가에 대비한 일정 선점 필요'}`);
   }
 
-  // Sales 전략: 투자자 구분별 참여(회사·같은 등급)
+  // Sales 전략: 투자자 구분별 참여(회사·같은 등급). 같은 등급보다 높은 투자자군은 강점(유지·재마케팅), 낮은 투자자군은 확대 대상.
+  // 만기와 투자자군 연결은 회사 만기별 구성에 실제 차이(5%p 이상)가 있을 때만 쓴다(통념으로 잇지 않음).
   const sales: string[] = [];
   const ownTyped = typedIssues(d.own, 4);
   const ownMix = mixOf(ownTyped.trs);
-  const peerMix = mixOf(peerPool(d, inp.peerScope).flatMap((p) => p.tranches));
+  const peerTyped = typedTranches(peerPool(d, inp.peerScope).filter((p) => p.corp_code !== d.company.corp_code));
+  const peerMix = mixOf(peerTyped.trs);
+  const how: Record<string, string> = {
+    fund: '운용사 대상 IR·NDR',
+    broker: '증권사(리테일·인수단) 세일즈',
+    inst: '연기금·은행·보험 대상 NDR',
+    etc: '기타 기관 수요 파악',
+    foreign_y: '외국 기관 수요 파악',
+    foreign_n: '외국 기관 수요 파악',
+  };
   if (ownMix.total) {
-    const top = [...ownMix.rows].sort((a, b) => b.q - a.q)[0];
-    sales.push(`${name} ${ownTyped.label} 수요예측 참여 ${eokW(ownMix.total)} 중 **${top.label} ${top.share.toFixed(0)}%**로 주력 수요층 확인`);
+    const rows = [...ownMix.rows].sort((a, b) => b.q - a.q).filter((x) => x.share >= 1);
+    sales.push(`${name} ${ownTyped.label} 수요예측 참여 ${eokW(ownMix.total)}: ${rows.map((x, k) => (k ? `${x.label} ${x.share.toFixed(0)}%` : `**${x.label} ${x.share.toFixed(0)}%**`)).join(', ')}`);
   }
-  if (peerMix.total) {
-    sales.push(`최근 1년 ${grp}등급 수요예측 참여 구성: ${peerMix.rows.filter((x) => x.share >= 0.5).slice(0, 4).map((x) => `${x.label} ${x.share.toFixed(0)}%`).join(', ')}`);
-    if (ownMix.total) {
-      const gap = peerMix.rows.map((x) => ({ x, own: ownMix.rows.find((o) => o.t === x.t)?.share ?? 0 })).sort((a, b) => (b.x.share - b.own) - (a.x.share - a.own))[0];
-      // 투자자군별 마케팅 경로: 증권사는 리테일·인수단 세일즈, 나머지는 기관 IR·NDR
-      const how: Record<string, string> = {
-        fund: '운용사 대상 IR·NDR 집중 필요',
-        broker: '증권사(리테일·인수단) 세일즈 강화 필요',
-        inst: '연기금·은행·보험 대상 NDR 집중 필요',
-        etc: '기타 기관 수요 파악 필요',
-        foreign_y: '외국 기관 수요 파악 필요',
-        foreign_n: '외국 기관 수요 파악 필요',
-      };
-      if (gap && gap.x.share - gap.own >= 5) sales.push(`같은 등급 대비 ${gap.x.label} 참여 비중이 ${(gap.x.share - gap.own).toFixed(0)}%p 낮아 ${how[gap.x.t] ?? '해당 투자자군 대상 IR·NDR 집중 필요'}`);
+  if (peerMix.total && !ownMix.total) {
+    const rows = [...peerMix.rows].sort((a, b) => b.q - a.q).filter((x) => x.share >= 1);
+    sales.push(`최근 1년 ${grp}등급(${peerTyped.n}건) 수요예측 참여: ${rows.map((x, k) => (k ? `${x.label} ${x.share.toFixed(0)}%` : `**${x.label} ${x.share.toFixed(0)}%**`)).join(', ')}`);
+    sales.push(`같은 등급 주력 투자자군(${rows[0].label}) 대상 ${how[rows[0].t] ?? 'IR·NDR'}와 직전 참여 기관 재마케팅 병행 제안`);
+  }
+  if (peerMix.total && ownMix.total) {
+    const gaps = peerMix.rows.map((x) => ({ x, own: ownMix.rows.find((o) => o.t === x.t)?.share ?? 0 })).map((g) => ({ ...g, diff: g.own - g.x.share }));
+    const strong = gaps.filter((g) => g.diff >= 5).sort((a, b) => b.diff - a.diff);
+    const weak = gaps.filter((g) => g.diff <= -5).sort((a, b) => a.diff - b.diff);
+    const peerTxt = `최근 1년 ${grp}등급(${peerTyped.n}건)`;
+    if (strong.length) {
+      const inst = strong.filter((g) => g.x.t === 'fund' || g.x.t === 'inst');
+      sales.push(`${peerTxt} 대비 ${strong.map((g) => `${g.x.label} +${Math.round(g.diff)}%p`).join(', ')}${inst.length ? ' 높아 **기관 수요 기반이 두터움**' : ' 높음'} → 직전 참여 기관 재마케팅으로 수요 유지`);
+    }
+    if (weak.length) {
+      const g = weak[0];
+      sales.push(`${g.x.label} 참여 비중은 같은 등급보다 ${Math.abs(Math.round(g.diff))}%p 낮음 → ${how[g.x.t] ?? 'IR·NDR'}로 수요 확대 여지${g.x.t === 'broker' ? '(NH투자증권 리테일·인수단 네트워크 활용)' : ''}`);
+    }
+    if (!strong.length && !weak.length) sales.push(`${peerTxt}과 투자자 구성이 비슷해(차이 5%p 미만) 직전 참여 기관 중심 재마케팅 제안`);
+  }
+  // 만기별 투자자 구성 차이: 제안 만기끼리, 같은 투자자군의 비중 차이가 가장 큰 것
+  {
+    const tenors = inp.tranches.map((t) => t.tenor.trim()).filter(Boolean);
+    const per = tenors.map((k) => ({ k, m: mixOf(ownTyped.trs.filter((t) => t.tenor === k)) })).filter((x) => x.m.total);
+    if (per.length >= 2) {
+      let best: { t: string; label: string; hi: string; lo: string; diff: number } | null = null;
+      for (const r of ownMix.rows) {
+        const sh = per.map((x) => ({ k: x.k, v: x.m.rows.find((y) => y.t === r.t)?.share ?? 0 }));
+        const hi = sh.reduce((a, b) => (a.v >= b.v ? a : b));
+        const lo = sh.reduce((a, b) => (a.v <= b.v ? a : b));
+        if (!best || hi.v - lo.v > best.diff) best = { t: r.t, label: r.label, hi: hi.k, lo: lo.k, diff: hi.v - lo.v };
+      }
+      if (best && best.diff >= 5) sales.push(`${best.hi}물은 ${best.lo}물보다 ${best.label} 비중이 ${Math.round(best.diff)}%p 높아 ${best.hi}물은 ${how[best.t] ?? 'IR·NDR'} 중심으로 배분`);
+      else if (best) sales.push(`만기별 투자자 구성 차이가 작아(${per.map((x) => x.k).join('·')} 모두 ${[...ownMix.rows].sort((a, b) => b.q - a.q)[0].label} 최대) 만기 구분 없이 같은 세일즈 진행`);
     }
   }
 
@@ -515,7 +598,7 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   const dmp = d.dm?.pages;
   const use = (x: string[] | undefined, fb: string[]) => (x?.length ? [...x] : fb);
   return {
-    lead, peers, compare, schedule, structure, structureRows, strengths,
+    lead, nhTrack, peers, compare, schedule, timing, structure, structureRows, strengths,
     rates: use(dmp?.rates, rates), corp, views: use(dmp?.views, views), sizing, pipeline, bok: use(dmp?.bok, bok), fomc: use(dmp?.fomc, fomc), usviews: use(dmp?.usviews, usviews),
     forecast: use(dmp?.forecast, forecast), league, maturity, sales, termNotes,
   };
@@ -553,6 +636,30 @@ export function comboCounts(pool: PeerIssue[]) {
   return [...m.entries()].map(([combo, issues]) => ({ combo, issues, share: pool.length ? (issues / pool.length) * 100 : 0 })).sort((a, b) => b.issues - a.issues);
 }
 
+// 차환 수요: 납입일 뒤 75일 안의 기존 공모 회사채 만기(납입일이 없으면 기준일 뒤 150일)
+export function refiNeed(d: DeckData, pay: string | null | undefined) {
+  const ok = !!pay && /^\d{4}-\d{2}-\d{2}$/.test(pay);
+  const from = ok ? addDays(pay!, -1) : d.asof;
+  const to = ok ? addDays(pay!, 75) : addDays(d.asof, 150);
+  const list = (d.maturitiesLong?.rows ?? d.maturities).filter((m) => m.amount_krw && m.dt > from && m.dt <= to);
+  const ms = [...new Set(list.map((m) => Number(m.dt.slice(5, 7))))];
+  const ys = [...new Set(list.map((m) => m.dt.slice(2, 4)))];
+  const label = !list.length ? '' : `'${ys[0]}.${ms.length > 1 ? `${ms[0]}~${ms[ms.length - 1]}` : ms[0]}월`;
+  return { list, label };
+}
+// 같은 등급 최근 n개월 만기별 확정 가산금리 평균(제안 만기만)
+export function gradeSpreads(pool: PeerIssue[], asof: string, months: number, tenors: string[]) {
+  const from = addMonths(asof, -months);
+  const want = new Set(tenors.map((t) => t.replace(/\s/g, '')));
+  const by = new Map<string, number[]>();
+  for (const p of pool) {
+    if ((p.demand_dt ?? p.deal_dt ?? '') < from) continue;
+    for (const t of p.tranches) if (t.spread_bp != null && want.has(t.tenor.replace(/\s/g, ''))) by.set(t.tenor, [...(by.get(t.tenor) ?? []), Number(t.spread_bp)]);
+  }
+  return [...by.entries()].map(([k, xs]) => ({ k, n: xs.length, avg: Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) })).sort((a, b) => (parseFloat(a.k) || 0) - (parseFloat(b.k) || 0));
+}
+const bandDescShort = (inp: DeckInput) => (inp.band.type === 'later' ? '(추후 결정)' : inp.band.type === 'fixed' ? `${inp.band.low ?? '–'}~${inp.band.high ?? '–'}%` : `${inp.band.low ?? '–'}~+${inp.band.high ?? '–'}bp`);
+
 // 증액 한도: 회사 최근 4회 중 최대 증액 배율(발행/최초 신고)을 신고 금액에 곱하고 100억 단위로 올림. 배율은 1~2배로 자른다.
 export function maxPlan(d: DeckData, totalEok: number) {
   if (!totalEok) return null;
@@ -570,7 +677,9 @@ export function payPlan(d: DeckData) {
   const cal = calOf(d);
   const earliest = cal.add(d.asof, 25);
   const snap = (s: string) => cal.next(s);
-  const yearEnd = (s: string) => s.slice(5) >= '12-15';
+  // 연말 북클로징(12/15~12/31): 납입일뿐 아니라 수요예측 가능일(납입 7영업일 전)이 걸려도 피한다
+  const yearEnd = (s: string) => s.slice(5) >= '12-15' || cal.add(s, -7).slice(5) >= '12-15';
+  const decOf = (s: string) => `${Number(s.slice(0, 4)) - (s.slice(5, 7) === '12' ? 0 : 1)}-12-10`;
   const janStart = (s: string) => {
     const y = Number(s.slice(0, 4)) + (s.slice(5, 7) === '12' ? 1 : 0);
     return cal.add(`${y}-01-07`, 3);
@@ -587,7 +696,7 @@ export function payPlan(d: DeckData) {
         pay = janStart(pay);
         reason = `기존 회사채 만기(${mdw(next.dt)}, ${eokW(next.amount_krw)})를 앞두고 연말을 피해 연초 기관 자금 집행 시기에 발행`;
       } else {
-        const dec = snap(`${pay.slice(0, 4)}-12-10`);
+        const dec = snap(decOf(pay));
         pay = dec >= earliest ? dec : janStart(pay);
         reason = `기존 회사채 만기(${mdw(next.dt)}, ${eokW(next.amount_krw)}) 전 납입, 연말 북클로징 전 발행`;
       }
@@ -606,6 +715,10 @@ function addDays(s: string, n: number) {
 
 // 수요예측 예정 내역: 일반 회사채만(금융채·신종자본증권·후순위 제외), 리츠 제외
 export const pipelineOf = (d: DeckData) => d.pipeline.filter((p) => (p.sub_type ?? '일반회사채') === '일반회사채' && !isReit(p.corp_name));
+// 제안 수요예측일 전후 3주 안의 예정 건(경쟁 발행). 일정·Sales 판단에는 이 건들만 쓴다(먼 날짜의 예정 건은 경쟁이 아니다)
+export function nearPipeline(d: DeckData, demand: string, days = 21) {
+  return pipelineOf(d).filter((p) => p.demand_dt && daysBetween(p.demand_dt, demand) <= days);
+}
 
 // 공개 전망표 발표 뒤에 금통위·FOMC 결과가 나왔으면 오래된 표로 본다(표 대신 최근 의견만 쓴다)
 export function forecastStale(d: DeckData) {
@@ -687,6 +800,29 @@ export function factsFor(d: DeckData, inp: DeckInput) {
       const py = proposedYears(inp);
       return { 구간: b.buckets.map((x) => `${x.label} ${x.amount ? eokW(x.amount) : '없음'}`), 제안만기해: py.map((y) => `'${y.slice(2)}년`), 제안만기해중_만기도래없음: b.gaps.filter((y) => py.includes(y)).map((y) => `'${y.slice(2)}년`) };
     })(),
+    차환수요: (() => {
+      const r = refiNeed(d, inp.pay);
+      if (!r.list.length) return null;
+      const amt = r.list.reduce((a, m) => a + Number(m.amount_krw ?? 0), 0);
+      const tot = totalEok(inp) * 1e8;
+      return { 구간: r.label, 합계: eokW(amt), 만기: r.list.map((m) => `${mdw(m.dt)} ${eokW(m.amount_krw)}`), 최초신고대비: tot ? `${Math.round((tot / amt) * 100)}%` : null };
+    })(),
+    확정가산금리비교: (() => {
+      const sp = d.own.slice(0, 4).flatMap((p) => p.tranches.map((t) => t.spread_bp)).filter((v): v is number => v != null);
+      const mkt = gradeSpreads(pool.filter((p) => p.corp_code !== d.company.corp_code), d.asof, 3, inp.tranches.map((t) => t.tenor));
+      return sp.length ? { 회사최근4회평균: bpSigned(Math.round(sp.reduce((a, b) => a + b, 0) / sp.length)), 최저: bpSigned(Math.min(...sp)), 최고: bpSigned(Math.max(...sp)), 같은등급최근3개월: mkt.map((x) => `${x.k} ${bpSigned(x.avg)}(${x.n}건)`) } : null;
+    })(),
+    발행시기후보: (() => {
+      const t = timingPlan(d, { peerScope: inp.peerScope, band: inp.band.type, pay: inp.pay });
+      return t.opts.map((o, i) => ({
+        안: o.key, 권고: i === t.rec, 성격: o.title, 수요예측: mdw(o.sch.demand), 납입: mdw(o.sch.pay),
+        만기대응: o.before.length ? `납입 전 만기 ${eokW(o.before.reduce((a, m) => a + m.amount, 0))}` : o.covered.map((m) => `${mdw(m.dt)} ${eokW(m.amount)} 선조달 ${m.idle}일`),
+        시장만기도래: o.market && `${o.market.month}월 ${(o.market.amount / 1e12).toFixed(1)}조원(${o.market.rank}위)`,
+        전년같은달: o.lastYear && `${o.lastYear.label} ${o.lastYear.n}건 평균 ${ratioX(o.lastYear.avg)}`,
+        장점: o.pros, 단점: o.cons, 참고: o.notes,
+      }));
+    })(),
+    NH주관이력: d.own.slice(0, 4).filter((p) => p.nh_lead).map((p) => ({ 회차: `제${p.series ?? ''}회`, 경쟁률: ratioX(p.ratio), 확정가산금리: p.tranches.map((t) => `${t.tenor} ${bpSigned(t.spread_bp)}`) })),
     만기구조통계: d.combos.map((c) => ({ 구조: c.combo, 건수: c.issues, 비중: `${Math.round(c.share ?? 0)}%`, 경쟁률중간값: ratioX(c.medComp) })),
     리그테이블: {
       등급군: d.league.rows.slice(0, 6).map((r, i) => ({ 순위: i + 1, 증권사: r.firm, 실적: eokW(r.credit), 건수: r.deals })),
@@ -717,8 +853,8 @@ export function factsFor(d: DeckData, inp: DeckInput) {
       회사회차: typedIssues(d.own, 4).label || null,
       회사합계: eokW(mixOf(typedIssues(d.own, 4).trs).total),
       회사: mixOf(typedIssues(d.own, 4).trs).rows.map((x) => ({ 구분: x.label, 금액: eokW(x.q), 비중: `${x.share.toFixed(0)}%` })),
-      같은등급합계: eokW(mixOf(pool.flatMap((p) => p.tranches)).total),
-      같은등급최근1년: mixOf(pool.flatMap((p) => p.tranches)).rows.map((x) => ({ 구분: x.label, 금액: eokW(x.q), 비중: `${x.share.toFixed(0)}%` })),
+      같은등급합계: eokW(mixOf(typedTranches(pool.filter((p) => p.corp_code !== d.company.corp_code)).trs).total),
+      같은등급최근1년: mixOf(typedTranches(pool.filter((p) => p.corp_code !== d.company.corp_code)).trs).rows.map((x) => ({ 구분: x.label, 금액: eokW(x.q), 비중: `${x.share.toFixed(0)}%` })),
     },
     회사트랜치별결과: d.own.slice(0, 4).flatMap((p) => p.tranches.map((t) => ({
       회차: `제${p.series ?? ''}회`, 만기: t.tenor, 수요예측일: p.demand_dt ? mdw(p.demand_dt) : null, 신고: eokW(t.initial_krw), 참여: eokW(t.demand_krw),
@@ -750,6 +886,21 @@ export function salesFacts(d: DeckData, inp: DeckInput) {
     회사: f.회사, 등급: f.등급, 기준일: f.기준일, 제안조건: f.제안조건,
     일정: f.일정 && { 납입일: f.일정.납입일, 권장수요예측일: f.일정.권장수요예측일 },
     투자자구분참여: f.투자자구분참여,
+    // 같은 등급(사업회사, 원자료 점검 통과 건) 대비 비중 차이: +면 회사가 더 높음(강점), -면 낮음(확대 대상)
+    같은등급대비_비중차이: (() => {
+      const own = mixOf(typedIssues(d.own, 4).trs);
+      const peer = mixOf(typedTranches(pool.filter((p) => p.corp_code !== d.company.corp_code)).trs);
+      if (!own.total || !peer.total) return null;
+      return peer.rows.map((x) => {
+        const o = own.rows.find((y) => y.t === x.t)?.share ?? 0;
+        return { 구분: x.label, 회사: `${o.toFixed(0)}%`, 같은등급: `${x.share.toFixed(0)}%`, 차이: `${pp(o - x.share)}%p` };
+      });
+    })(),
+    // 회사 만기별 투자자 구성(제안 만기만). 만기와 투자자군을 잇는 근거는 이 수치뿐이다
+    회사_만기별투자자구성: inp.tranches.map((t) => t.tenor.trim()).filter(Boolean).map((k) => {
+      const m = mixOf(typedIssues(d.own, 4).trs.filter((t) => t.tenor === k));
+      return m.total ? { 만기: k, 구성: m.rows.map((x) => `${x.label} ${x.share.toFixed(0)}%`) } : null;
+    }).filter(Boolean),
     회사직전회차: f.회사직전회차,
     회사트랜치별결과: f.회사트랜치별결과.map(({ 국고대비: _x, ...r }) => r),
     만기별수요_최근4회: f.만기별수요_최근4회,
@@ -759,7 +910,13 @@ export function salesFacts(d: DeckData, inp: DeckInput) {
       증액발행: `${pool.filter((p) => p.increased).length}건`, 미매각: `${pool.filter(fullUnder).length}건`,
     },
     같은등급만기비중: f.같은등급만기비중,
-    수요예측예정: f.수요예측예정,
+    // 경쟁 발행은 제안 수요예측일 전후 3주 안의 예정 건만(없으면 없다고 적는다)
+    제안일전후3주_수요예측예정: (() => {
+      const sch = scheduleOf(d, inp);
+      if (!sch) return null;
+      const near = nearPipeline(d, sch.demand);
+      return near.length ? near.map((p) => ({ 회사: p.corp_name, 등급: p.rating, 수요예측일: p.demand_dt ? mdw(p.demand_dt) : null })) : '없음';
+    })(),
   };
 }
 

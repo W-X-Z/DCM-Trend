@@ -131,9 +131,11 @@ export type DeckInput = {
 // 장표 문안 (AI 또는 규칙). 줄마다 하나의 글머리. **강조**, !!빨강!!
 export type DeckText = {
   lead: string; // 주요 제안 상단 한 줄
+  nhTrack?: string; // NH 대표주관 이력(회사 직전 4회 중 NH 주관 회차와 결과). 없으면 생략
   peers: string[];
   compare: string[];
   schedule: string[];
+  timing?: string[]; // 발행 시기 검토(1안/2안). 예전 저장본에는 없을 수 있다
   structure: string[];
   structureRows: { label: string; desc: string }[];
   strengths: { title: string; text: string }[];

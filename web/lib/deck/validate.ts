@@ -60,6 +60,8 @@ export function mergeValidated(ai: Partial<DeckText>, rule: DeckText, allowed: S
     peers: list('peers'),
     compare: list('compare'),
     schedule: list('schedule'),
+    timing: rule.timing,
+    nhTrack: rule.nhTrack,
     structure: list('structure'),
     structureRows: rows.length === rule.structureRows.length && rows.length ? rows : rule.structureRows,
     strengths,

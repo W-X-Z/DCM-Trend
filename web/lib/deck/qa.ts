@@ -4,7 +4,8 @@ import { type ItemId } from './catalog';
 import { mdw, rate3, yymmdd } from './fmt';
 import { allowedNumbers } from './validate';
 import { parseTsv } from './tsv';
-import { excludedPeers, factsFor, forecastStale, pickIssues, ruleText, scheduleOf, supplyIssues } from './rules';
+import { excludedPeers, factsFor, forecastStale, isFinancial, peerPool, pickIssues, ruleText, scheduleOf, supplyIssues, suspectPeers } from './rules';
+import { typedOk } from './analytics';
 import type { DeckData, DeckInput, DeckText, PeerIssue } from './types';
 
 export type Qa = { level: 'warn' | 'info'; item: ItemId | null; text: string };
@@ -151,6 +152,26 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
     const odd = sel.filter((p) => p.tranches.some((t) => t.in_band_krw != null && t.demand_krw != null && t.in_band_krw > t.demand_krw));
     if (odd.length) out.push({ level: 'warn', item: 'peers', text: `수요예측 결과 표: ${odd.map((p) => p.corp_name).join('·')}의 밴드 내 금액이 총참여보다 커서 총참여만 표시했습니다(원자료 확인).` });
     for (const s of repeatedYields(sel)) out.push({ level: 'warn', item: 'peers', text: `수요예측 결과 표: 같은 발행금리 ${s}(원자료 확인).` });
+  }
+  // 4-1. 원자료 점검: 상식 밖 수요예측 결과(파싱 오류 의심)·회차 합계와 안 맞는 투자자 구분 참여는 통계·비교에서 뺐다
+  for (const { p, why } of suspectPeers(d)) {
+    out.push({ level: 'warn', item: 'peers', text: `원자료 확인: ${p.corp_name}${p.series ? ` 제${p.series}회` : ''}(${yymmdd(p.demand_dt ?? p.deal_dt ?? '')}) ${why}입니다. 공시 파싱 오류로 보고 같은 등급 통계·사례 비교·참여 구성에서 뺐습니다.` });
+  }
+  {
+    const pool = peerPool(d, inp.peerScope);
+    const badType = pool.filter((p) => p.corp_code !== d.company.corp_code && p.tranches.some((t) => t.byType?.length) && !typedOk(p));
+    const ownBad = d.own.slice(0, 4).filter((p) => p.tranches.some((t) => t.byType?.length) && !typedOk(p));
+    if (ownBad.length && on('sales')) out.push({ level: 'warn', item: 'sales', text: `${d.company.corp_name} 제${ownBad.map((p) => p.series ?? '').join('·')}회의 투자자 구분별 참여 합계가 수요예측 참여금액과 맞지 않아 Sales 비교에서 뺐습니다(공시 원문 확인).` });
+    if (badType.length && on('sales')) out.push({ level: 'info', item: 'sales', text: `투자자 구분별 참여 합계가 수요예측 참여금액과 맞지 않는 ${[...new Set(badType.map((p) => p.corp_name))].join('·')}는 참여 구성 비교에서 뺐습니다(원자료 확인).` });
+    if (!isFinancial(d.company.corp_name)) {
+      const fin = d.peers.filter((p) => isFinancial(p.corp_name) && p.corp_code !== d.company.corp_code);
+      if (fin.length && (on('peers') || on('sizing') || on('sales'))) out.push({ level: 'info', item: 'peers', text: `같은 등급 사례·통계는 사업회사 기준입니다(금융회사 ${fin.length}건 제외: ${[...new Set(fin.map((p) => p.corp_name))].slice(0, 4).join('·')}${fin.length > 4 ? ' 등' : ''}).` });
+    }
+  }
+  // 4-2. NH 템플릿 고정 장표(회사 현황·핵심 경쟁력 등)는 템플릿 작성 시점(FY2024·2023년 실적) 수치다
+  {
+    const st = (['nh_company', 'nh_core', 'nh_scope', 'nh_org'] as ItemId[]).filter((x) => on(x));
+    if (st.length) out.push({ level: 'warn', item: st[0], text: `NH투자증권 강점 템플릿 장표(${st.length}장)는 FY2024·2023년 기준 수치(재무·자기자본·리그테이블)입니다. 최신 수치로 고치거나, 데이터로 만드는 '같은 등급 대표주관 실적'·'연간 League Table' 장표를 쓰세요.` });
   }
   // 5. 일정·표지
   const sch = scheduleOf(d, inp);

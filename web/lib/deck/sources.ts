@@ -22,6 +22,11 @@ export type DataReport = {
   intMissing: { label: string; source: string; items: string[]; note: string }[]; // 연결하면 채워질 내부 데이터
 };
 
+const monthsAgo = (s: string, n: number) => {
+  const x = new Date(`${s}T00:00:00Z`);
+  x.setUTCMonth(x.getUTCMonth() - n);
+  return x.toISOString().slice(0, 10);
+};
 const latest = (xs: (string | null | undefined)[]) => xs.filter((x): x is string => !!x).sort().at(-1) ?? null;
 
 // 출처 문자열 → 제공 기관(요약 개수용)
@@ -75,10 +80,18 @@ function srcsOf(id: ItemId, d: DeckData, inp: DeckInput): Src[] {
         ext('같은 등급 만기별 발행 비중', 'DART 증권신고서·정정신고서', t.total > 0, latest(peerPool(d, inp.peerScope).map((p) => p.deal_dt)), t.total ? `최근 1년 ${t.issues}건` : '최근 1년 사례 없음'),
         ext('회사 최근 발행 결과(만기별 경쟁률·확정 가산금리)', 'DART 정정신고서', d.own.length > 0, d.own[0]?.deal_dt, d.own.length ? undefined : '공모 회사채 발행 이력 없음'),
         ext('회사 공모채 만기분포', 'DART', true, d.asof, maturityBuckets(d, horizonOf(inp)).gaps.length ? `만기도래 없는 해 ${maturityBuckets(d, horizonOf(inp)).gaps.join('·')}` : undefined),
-        ext('국고채·회사채 금리', '한국은행 ECOS', d.rates.length > 0, rateDt),
+        ext('같은 등급 최근 3개월 확정 가산금리', 'DART 발행조건확정 정정신고서', peerPool(d, inp.peerScope).some((p) => (p.demand_dt ?? '') >= monthsAgo(d.asof, 3) && p.tranches.some((t) => t.spread_bp != null))),
         int('민평 커브(2/3/5년 개별 vs 등급)', '민평 4사', mp, '근거에서 민평 커브를 빼고, 금리 표는 ECOS 값으로'),
       ];
     }
+    case 'timing':
+      return [
+        ext('기존 공모 회사채 만기일·금액', 'DART', true, d.asof),
+        ext('월별 공모 회사채 만기도래(시장)', 'DART 발행 내역', d.maturityByGrade.months.length > 0, d.maturityByGrade.asof),
+        ext('전년 같은 달 같은 등급 수요예측', 'DART 정정신고서', peerPool(d, inp.peerScope).length > 0),
+        ext('금통위·FOMC 일정, 공휴일', '한국은행·미 연준·관공서 공휴일', d.events.length > 0 || d.holidays.length > 0),
+        ext('기준금리 경로', d.dm?.forecastTable ? 'NH 리서치 공개 코멘트(DM 판)' : 'NH 리서치 공개 자료', !!d.dm?.forecastTable || !!d.forecast),
+      ];
     case 'schedule':
       return [
         ext('공휴일·금통위·FOMC·정기보고서 기한', '관공서 공휴일·한국은행·미 연준·금융감독원', d.events.length > 0 || d.holidays.length > 0),

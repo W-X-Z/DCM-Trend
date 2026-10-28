@@ -6,6 +6,39 @@ export const TYPE_LABEL: Record<DemandType['t'], string> = {
 };
 export const TYPE_ORDER: DemandType['t'][] = ['fund', 'broker', 'inst', 'etc', 'foreign_y', 'foreign_n'];
 
+// ---------------------------------------------------------------------------------------------
+// 원자료 점검: 공시 원문 파싱이 틀린 건을 통계·비교에서 빼고, 검수에 사유를 남긴다.
+// 공모 회사채 수요예측 경쟁률은 높아야 20~30배 안팎이다. 40배를 넘으면 참여금액 단위 오류로 본다(예: 3,000억원을 30조원으로 읽음).
+export const MAX_RATIO = 40;
+const krw = (v: number) => (v >= 1e12 ? `${(v / 1e12).toFixed(1)}조원` : `${Math.round(v / 1e8).toLocaleString('ko-KR')}억원`);
+export function suspectOf(p: PeerIssue): string | null {
+  const init = Number(p.initial_krw ?? 0);
+  const dem = Number(p.demand_krw ?? 0);
+  if (init > 0 && dem / init > MAX_RATIO) return `참여금액 ${krw(dem)}이 신고 ${krw(init)}의 ${Math.round(dem / init)}배`;
+  if (p.ratio != null && p.ratio > MAX_RATIO) return `경쟁률 ${p.ratio.toFixed(2)}:1`;
+  return null;
+}
+
+// 투자자 구분별 참여가 회차 참여금액과 맞는지(±15%). 트랜치마다 같은 표가 반복 파싱된 건(합계가 크게 다름)은 쓰지 않는다.
+export function typedOk(p: PeerIssue) {
+  const typed = p.tranches.filter((t) => t.byType?.length);
+  if (!typed.length) return false;
+  const sumType = typed.reduce((a, t) => a + (t.byType ?? []).reduce((s, x) => s + x.q, 0), 0);
+  const sumDem = typed.reduce((a, t) => a + Number(t.in_band_krw ?? t.demand_krw ?? 0), 0);
+  if (!sumDem) return true;
+  return Math.abs(sumType - sumDem) / sumDem <= 0.15;
+}
+
+// 트랜치 경쟁률: 공시 경쟁률이 (밴드 내 또는 총)참여 ÷ 신고와 25% 넘게 다르면 계산값을 쓴다(트랜치마다 같은 값이 들어간 파싱 오류 대비)
+export function trRatio(t: Pick<PeerTranche, 'ratio' | 'initial_krw' | 'demand_krw' | 'in_band_krw'>) {
+  const init = Number(t.initial_krw ?? 0);
+  const dems = [t.in_band_krw, t.demand_krw].filter((v): v is number => v != null && v > 0).map(Number);
+  if (!init || !dems.length) return t.ratio ?? null;
+  const calc = dems.map((v) => v / init);
+  if (t.ratio != null && calc.some((c) => Math.abs(t.ratio! - c) / c <= 0.25)) return t.ratio;
+  return Math.round(calc[0] * 100) / 100;
+}
+
 // 투자자 구분별 참여 합계·비중
 export function mixOf(trs: PeerTranche[]) {
   const sums = new Map<DemandType['t'], { n: number; q: number }>();
@@ -21,8 +54,14 @@ export function mixOf(trs: PeerTranche[]) {
 
 // 투자자 구분 참여가 수집된 회차만 (최근 n회 안에서). 문장·표에 회차를 그대로 밝힌다.
 export function typedIssues(ps: PeerIssue[], n: number) {
-  const list = ps.slice(0, n).filter((p) => p.tranches.some((t) => t.byType?.length));
+  const list = ps.slice(0, n).filter((p) => p.tranches.some((t) => t.byType?.length) && typedOk(p));
   return { list, label: list.length ? `제${list.map((p) => p.series ?? '?').join('·')}회` : '', trs: list.flatMap((p) => p.tranches.filter((t) => t.byType?.length)) };
+}
+
+// 같은 등급 사례의 투자자 구분별 참여(회차 합계와 맞는 건만)
+export function typedTranches(ps: PeerIssue[]) {
+  const ok = ps.filter(typedOk);
+  return { n: ok.length, trs: ok.flatMap((p) => p.tranches.filter((t) => t.byType?.length)) };
 }
 
 // 회사 최근 n회 만기별 수요: 평균 경쟁률·참여금액 합·평균 신고금액.
@@ -31,7 +70,8 @@ export function tenorDemand(own: PeerIssue[], n = 4) {
   const by = new Map<string, { ratios: number[]; demand: number; init: number; n: number }>();
   for (const p of own.slice(0, n)) for (const t of p.tranches) {
     const e = by.get(t.tenor) ?? { ratios: [], demand: 0, init: 0, n: 0 };
-    if (t.ratio != null) e.ratios.push(t.ratio);
+    const r = trRatio(t);
+    if (r != null) e.ratios.push(r);
     e.demand += t.demand_krw ?? 0;
     e.init += t.initial_krw ?? 0;
     e.n++;
