@@ -19,14 +19,17 @@ export function suspectOf(p: PeerIssue): string | null {
   return null;
 }
 
-// 투자자 구분별 참여가 회차 참여금액과 맞는지(±15%). 트랜치마다 같은 표가 반복 파싱된 건(합계가 크게 다름)은 쓰지 않는다.
+// 투자자 구분별 참여가 회차 참여금액(밴드 내 또는 총참여)과 맞는지(±15%). 트랜치마다 같은 표가 반복 파싱된 건(합계가 크게 다름)은 쓰지 않는다.
 export function typedOk(p: PeerIssue) {
   const typed = p.tranches.filter((t) => t.byType?.length);
   if (!typed.length) return false;
   const sumType = typed.reduce((a, t) => a + (t.byType ?? []).reduce((s, x) => s + x.q, 0), 0);
-  const sumDem = typed.reduce((a, t) => a + Number(t.in_band_krw ?? t.demand_krw ?? 0), 0);
-  if (!sumDem) return true;
-  return Math.abs(sumType - sumDem) / sumDem <= 0.15;
+  const bases = [
+    typed.reduce((a, t) => a + Number(t.in_band_krw ?? t.demand_krw ?? 0), 0),
+    typed.reduce((a, t) => a + Number(t.demand_krw ?? t.in_band_krw ?? 0), 0),
+  ].filter((v) => v > 0);
+  if (!bases.length) return true;
+  return bases.some((b) => Math.abs(sumType - b) / b <= 0.15);
 }
 
 // 트랜치 경쟁률: 공시 경쟁률이 (밴드 내 또는 총)참여 ÷ 신고와 25% 넘게 다르면 계산값을 쓴다(트랜치마다 같은 값이 들어간 파싱 오류 대비)

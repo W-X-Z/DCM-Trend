@@ -13,7 +13,7 @@ export * from './lib/deck/rules';
 export * from './lib/deck/model';
 export { buildSlides, fileBase, staticSubs, available, parseTsv, gradeIssueTable } from './lib/deck/layout';
 export { mixOf, valueAt, meetingVolatility, notchStats, typedIssues, pp, tenorDemand, tenorMix, maturityBuckets, suspectOf, trRatio, typedOk, typedTranches } from './lib/deck/analytics';
-export { timingPlan, timingText, habitOf } from './lib/deck/timing';
+export { timingPlan, timingOf, timingText, habitOf } from './lib/deck/timing';
 export { SYSTEM as DECK_SYSTEM, DECK_PROMPT_VERSION } from './lib/deck/prompt';
 export { dataReport } from './lib/deck/sources';
 export { qaChecks, creditGridIssues } from './lib/deck/qa';
@@ -569,7 +569,39 @@ const check = (name, cond, detail = '') => {
     const t3 = m.timingPlan(d, { peerScope: inp.peerScope, band: 'spread', pay: '2027-01-21' });
     check('시기: 담당자가 고른 납입일이 권고(Term-sheet 와 일치)', t2.opts.length === 2 && t2.rec === 1 && t3.opts[0].kind === 'input' && t3.rec === 0 && t3.opts[0].sch.pay === '2027-01-21', `${t2.rec}/${t3.opts.map((o) => o.kind).join(',')}/${t3.rec}`);
   }
-  check('시기: 리서치 기준금리 경로 반영', /3\.50%/.test(t.path ?? ''), t.path);
+  // 독립 검토(10-28) 반영: 같은 분기 금리 경로·상위 달 시장 만기도래로 장점을 만들지 않음, 만기 대응은 발행 금액과 맞춤
+  check('시기: 두 안이 같은 분기면 금리 경로로 판단하지 않음', t.path == null && !t.opts.some((o) => o.pros.some((p) => /경로|인상/.test(p))), t.path);
+  const tl = m.timingOf(d, inp);
+  check('시기: 시장 만기도래 상위 달(1·2월)엔 덜 몰린다는 장점 없음', !tl.opts.some((o) => o.pros.some((p) => /덜 몰리는|덜함/.test(p))) && tl.opts.every((o) => o.market && o.market.rank <= 3), tl.opts.map((o) => o.pros.join('|')).join(' // '));
+  check('시기: 만기 대응 문안이 발행 금액과 일치(최초 75%, 증액 시 전액)', /최초 신고 금액으로 75%, 증액 시 전액/.test(tl.opts[0].pros[0] ?? ''), tl.opts[0].pros[0]);
+  check('시기: 같은 일수를 장점·단점으로 함께 쓰지 않음', tl.opts.every((o) => { const a = o.pros.join(' ').match(/첫 만기 (\d+)일 전/); const b = o.cons.join(' ').match(/최장 (\d+)일/); return !a || !b || a[1] !== b[1]; }));
+  {
+    // 담당자가 고른 수요예측일(D-7)이 시기 검토에도 같게
+    const sch = m.scheduleOf(d, inp);
+    const t4 = m.timingOf(d, { ...inp, demand: sch.demandOptions[0] });
+    check('시기: 고른 수요예측일이 시기 검토와 일치', t4.opts[t4.rec].sch.demand === sch.demandOptions[0], `${t4.opts[t4.rec].sch.demand} vs ${sch.demandOptions[0]}`);
+    // 먼 날짜(4/20)를 고르면 그 안도 타임라인에 나온다. 내부 표기 '(입력)' 없음
+    const inp3 = { ...inp, pay: '2027-04-20', demand: null };
+    const t5 = m.timingOf(d, inp3);
+    const s5 = m.buildSlides(d, inp3, m.ruleText(d, inp3)).find((x) => x.id === 'timing');
+    check('시기: 먼 날짜 안도 타임라인에 표시', t5.opts[0].kind === 'input' && JSON.stringify(s5.prims.find((p) => p.k === 'table')).includes('납입 4/20'));
+    check('시기: 내부 표기 없음', !JSON.stringify(s5.prims).includes('(입력)'));
+  }
+  {
+    // 연초 납입: 수요예측 가능일(납입 7영업일 전)도 1월
+    const cal = m.calOf(d);
+    const j = m.janPayOf(cal, '2026-12-20');
+    check('일정: 연초 납입은 수요예측도 1월', !m.yearEndOf(cal, j) && j.startsWith('2027-01') && m.buildSchedule(cal, j, { band: 'spread' }).demandOptions[0] >= '2027-01-01', j);
+  }
+  // 투자자 구분 합계가 총참여 기준이어도 쓴다(밴드 내 기준만 보면 정상 건이 빠짐)
+  check('원자료: 투자자 구분이 총참여 기준이어도 사용', m.typedOk({ tranches: [{ in_band_krw: 1000, demand_krw: 1500, byType: [{ t: 'fund', q: 1500 }] }] }));
+  {
+    // 회사 자신의 회차도 원자료 점검(210배 오류가 NH 이력 문장에 들어가지 않게)
+    const own = d.own.map((p, i) => (i === 1 ? { ...p, demand_krw: Number(p.initial_krw) * 210, ratio: 210.23 } : p));
+    const d2 = { ...d, own };
+    const tx2 = m.ruleText(d2, inp);
+    check('원자료: 회사 회차 오류는 검수 경고·NH 문장에서 제외', m.qaChecks(d2, inp, tx2, { on: () => true, edited: false }).some((q) => /원자료 확인: LS전선 제31회/.test(q.text)) && !/210/.test(tx2.nhTrack ?? ''), tx2.nhTrack);
+  }
   check('시기: 문안에 권고·대안 장단점', /1안.*권고/.test(tx.timing[0]) && tx.timing.some((x) => /^2안.*2월 정례 발행.*먼저 상환/.test(x)), tx.timing.join(' / '));
   const sl = m.buildSlides(d, inp, tx);
   const ts = sl.find((x) => x.id === 'timing');

@@ -5,7 +5,8 @@ import { mdw, rate3, yymmdd } from './fmt';
 import { allowedNumbers } from './validate';
 import { parseTsv } from './tsv';
 import { excludedPeers, factsFor, forecastStale, isFinancial, peerPool, pickIssues, ruleText, scheduleOf, supplyIssues, suspectPeers } from './rules';
-import { typedOk } from './analytics';
+import { suspectOf, typedOk } from './analytics';
+import { eun } from '../josa';
 import type { DeckData, DeckInput, DeckText, PeerIssue } from './types';
 
 export type Qa = { level: 'warn' | 'info'; item: ItemId | null; text: string };
@@ -157,12 +158,20 @@ export function qaChecks(d: DeckData, inp: DeckInput, tx: DeckText, opts: { on: 
   for (const { p, why } of suspectPeers(d)) {
     out.push({ level: 'warn', item: 'peers', text: `원자료 확인: ${p.corp_name}${p.series ? ` 제${p.series}회` : ''}(${yymmdd(p.demand_dt ?? p.deal_dt ?? '')}) ${why}입니다. 공시 파싱 오류로 보고 같은 등급 통계·사례 비교·참여 구성에서 뺐습니다.` });
   }
+  // 회사 자신의 회차도 같은 기준으로 점검한다(경쟁률·참여금액이 Term-sheet·트랜치 검토 문장에 바로 쓰인다)
+  for (const p of d.own.slice(0, 4)) {
+    const why = suspectOf(p);
+    if (why) out.push({ level: 'warn', item: on('sizing') ? 'sizing' : 'terms', text: `원자료 확인: ${d.company.corp_name} 제${p.series ?? ''}회 ${why}입니다. 공시 파싱 오류로 보여 NH 주관 이력 문장의 경쟁률에서 뺐습니다. 트랜치 검토 표·문장의 수치를 원문과 대조하세요.` });
+  }
   {
     const pool = peerPool(d, inp.peerScope);
     const badType = pool.filter((p) => p.corp_code !== d.company.corp_code && p.tranches.some((t) => t.byType?.length) && !typedOk(p));
     const ownBad = d.own.slice(0, 4).filter((p) => p.tranches.some((t) => t.byType?.length) && !typedOk(p));
     if (ownBad.length && on('sales')) out.push({ level: 'warn', item: 'sales', text: `${d.company.corp_name} 제${ownBad.map((p) => p.series ?? '').join('·')}회의 투자자 구분별 참여 합계가 수요예측 참여금액과 맞지 않아 Sales 비교에서 뺐습니다(공시 원문 확인).` });
-    if (badType.length && on('sales')) out.push({ level: 'info', item: 'sales', text: `투자자 구분별 참여 합계가 수요예측 참여금액과 맞지 않는 ${[...new Set(badType.map((p) => p.corp_name))].join('·')}는 참여 구성 비교에서 뺐습니다(원자료 확인).` });
+    if (badType.length && on('sales')) {
+      const names = [...new Set(badType.map((p) => p.corp_name))].join('·');
+      out.push({ level: 'info', item: 'sales', text: `투자자 구분별 참여 합계가 수요예측 참여금액과 맞지 않는 ${names}${eun(names)} 참여 구성 비교에서 뺐습니다(원자료 확인).` });
+    }
     if (!isFinancial(d.company.corp_name)) {
       const fin = d.peers.filter((p) => isFinancial(p.corp_name) && p.corp_code !== d.company.corp_code);
       if (fin.length && (on('peers') || on('sizing') || on('sales'))) out.push({ level: 'info', item: 'peers', text: `같은 등급 사례·통계는 사업회사 기준입니다(금융회사 ${fin.length}건 제외: ${[...new Set(fin.map((p) => p.corp_name))].slice(0, 4).join('·')}${fin.length > 4 ? ' 등' : ''}).` });

@@ -95,7 +95,7 @@ export function reviewMarks(slides: Slide[], d: DeckData, inp: DeckInput, tx: De
     if (id === 'sizing' && firstPage) {
       add(i, 'judge', 'call', calloutOf(s), '트랜치 구성 판단 문장입니다. 회사 자금 수요·투자자 반응과 맞는지 확인하세요.', tx.sizing);
       if (!hasTable(inp.internal?.minpyeong)) {
-        const sp = tableWith(s, '최근 4회 평균');
+        const sp = tableWith(s, '최근 3개월');
         add(i, 'data', 'minpyeong', sp ?? tableWith(s, '국고채 3년'), sp
           ? '개별민평이 연결되지 않아 공시의 확정 가산금리(민평 대비)로 비교했습니다. 내부 데이터를 연결하면 개별민평 표가 들어갑니다.'
           : '개별민평이 연결되지 않아 ECOS 국고·회사채 금리로 대신했습니다(내부 데이터 연결 시 개별민평 표).', 'ecos');

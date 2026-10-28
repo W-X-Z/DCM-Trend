@@ -11,7 +11,7 @@ import {
 import { forecastStale, fullUnder, gradeSpreads, horizonOf, isFinancial, peerPool, suspectPeers, pickIssues, pipelineOf, proposedYears, recentWindow, scheduleOf, tenorText, totalEok, verdictOf } from './rules';
 import { TYPE_LABEL, TYPE_ORDER, maturityBuckets, mixOf, pp, quarterOf, spreadVsKtb, tenorMix, trRatio, typedIssues, typedTranches } from './analytics';
 import { dataReport, STATUS_LABEL } from './sources';
-import { timingPlan, timingText } from './timing';
+import { timingOf, timingText } from './timing';
 import { parseTsv } from './tsv';
 import { WD, korDate, md, weekday } from './schedule';
 import { C, PAGE, textW } from './theme';
@@ -284,6 +284,12 @@ function spreadCmp(d: DeckData, inp: DeckInput) {
   }).filter((x) => x.own != null || x.mkt != null);
   return out.some((x) => x.own != null) ? out : [];
 }
+// 회사 평균에 쓴 회차: 최근 4회가 모두 가산금리를 공시했으면 '최근 n회 평균', 아니면 쓴 회차를 밝힌다
+function spreadOwnLabel(d: DeckData) {
+  const recent = d.own.slice(0, 4);
+  const used = recent.filter((p) => p.tranches.some((t) => t.spread_bp != null));
+  return used.length === recent.length ? `최근 ${recent.length}회 평균` : `제${used.map((p) => p.series ?? '').join('·')}회 평균`;
+}
 
 // 1-② 트랜치 검토: 왼쪽 = 같은 등급 만기별 발행 비중(등급 관행) + 회사 최근 발행 결과, 오른쪽 = 금리(민평) + 회사 만기분포
 function sizing({ d, inp, tx }: Ctx, n: Numbered): Body {
@@ -371,7 +377,7 @@ function sizing({ d, inp, tx }: Ctx, n: Numbered): Body {
     const rowsS = spreadCmp(d, inp);
     prims.push(...goldTitle(ry, '확정 가산금리 비교(민평 대비)', rx, X1, '(단위: bp)'));
     const rr: (Cell | null)[][] = [
-      [TH('만기', { size: 7 }), TH(`${name}\n최근 4회 평균`, { size: 7 }), TH(`직전\n(제${d.own[0]?.series ?? ''}회)`, { size: 7 }), TH(`${scope}등급\n최근 3개월`, { size: 7 }), TH('차이', { size: 7 })],
+      [TH('만기', { size: 7 }), TH(`${name}\n${spreadOwnLabel(d)}`, { size: 7 }), TH(`직전\n(제${d.own[0]?.series ?? ''}회)`, { size: 7 }), TH(`${scope}등급\n최근 3개월`, { size: 7 }), TH('차이', { size: 7 })],
       ...rowsS.map((x) => [LB(x.k, { size: 7 }), TD(bpSign(x.own), { size: 7, bold: true }), TD(bpSign(x.last), { size: 7 }), TD(x.mkt == null ? '–' : `${bpSign(x.mkt)} (${x.n}건)`, { size: 7 }), TD(x.own != null && x.mkt != null ? bpSign(x.own - x.mkt) : '–', { size: 7, bold: true, color: x.own != null && x.mkt != null && x.own < x.mkt ? C.blue : undefined })]),
     ];
     prims.push(table(rx, ry + 18, [rw * 0.16, rw * 0.24, rw * 0.18, rw * 0.26, rw * 0.16], [24, ...rowsS.map(() => 15)], rr, 7));
@@ -477,7 +483,7 @@ const addD = (s: string, n: number) => {
 };
 const mondayOf = (s: string) => addD(s, weekday(s) === 0 ? -6 : 1 - weekday(s));
 function timingSlide({ d, inp, tx }: Ctx, n: Numbered): Body {
-  const t = timingPlan(d, { peerScope: inp.peerScope, band: inp.band.type, pay: inp.pay });
+  const t = timingOf(d, inp);
   const lines = tx.timing?.length ? tx.timing : timingText(t);
   const c = callout(78, lines, undefined, 78);
   const prims: Prim[] = [titleBox(n.head, n.sub), ...c.prims];
@@ -486,14 +492,22 @@ function timingSlide({ d, inp, tx }: Ctx, n: Numbered): Body {
   const mats = [...new Map([...t.opts.flatMap((o) => [...o.covered, ...o.before])].map((m) => [m.dt, m])).values()].sort((a, b) => a.dt.localeCompare(b.dt));
   const start = mondayOf(t.opts.map((o) => o.sch.filing).sort()[0]);
   const lastDt = [...t.opts.map((o) => o.sch.pay), ...mats.map((m) => m.dt)].sort().at(-1)!;
-  const weeks: string[] = [];
-  for (let w = start; w <= lastDt && weeks.length < 10; w = addD(w, 7)) weeks.push(w);
+  // 주 단위 열: 10주를 넘으면 각 안의 신고~납입 주와 만기 주만 남긴다(먼 날짜를 고른 안도 표에 나오게)
+  const span: string[] = [];
+  for (let w = start; w <= lastDt; w = addD(w, 7)) span.push(w);
+  let weeks = span;
+  if (span.length > 10) {
+    const need = new Set<string>();
+    for (const o of t.opts) for (let w = mondayOf(o.sch.filing); w <= o.sch.pay; w = addD(w, 7)) need.add(w);
+    for (const m of mats) need.add(mondayOf(m.dt));
+    weeks = span.filter((w) => need.has(w)).slice(0, 12);
+  }
   const inWeek = (dt: string, w: string) => dt >= w && dt <= addD(w, 4);
   let top = c.bottom + 8;
   prims.push(...goldTitle(top, '발행 시기 후보와 주요 일정', X0, X1, '(주 단위: 월~금)'));
   const lw = 92;
   const ww = (CW - lw) / weeks.length;
-  const sz = weeks.length > 8 ? 6.5 : 7;
+  const sz = weeks.length > 10 ? 6 : weeks.length > 8 ? 6.5 : 7;
   const mg = d.maturityByGrade;
   const evs = [
     ...d.events.filter((e) => e.kind === 'FOMC').map((e) => ({ dt: addD(e.end_dt ?? e.event_dt, 1), t: 'FOMC 결과' })),
@@ -556,7 +570,7 @@ function timingSlide({ d, inp, tx }: Ctx, n: Numbered): Body {
   const fixedH = 18 + (cmpRows.length - 2) * 15;
   const judgeH = Math.max(36, BOTTOM - tTop - fixedH);
   prims.push(table(X0, tTop, [lw, ...t.opts.map(() => (CW - lw) / t.opts.length)], [18, ...cmpRows.slice(1, -1).map(() => 15), judgeH], cmpRows, 7));
-  prims.push(...footnote([`주) 선조달 = 납입일부터 기존 회사채 만기일까지 일수. 시장 만기도래는 일반 공모 회사채 월별 합계. 전년 같은 달은 수요예측월 기준 같은 등급(사업회사) 평균 경쟁률.${t.path ? ` 금리 경로: ${t.path}.` : ''}`, '자료: 금융감독원 DART, 한국은행·미 연준 일정, 관공서 공휴일, NH투자증권 리서치']));
+  prims.push(...footnote([`주) 선조달 = 납입일부터 기존 회사채 만기일까지 일수. 시장 만기도래는 일반 공모 회사채 월별 합계. 전년 같은 달은 수요예측월 기준 같은 등급${isFinancial(d.company.corp_name) ? '' : '(사업회사)'} 평균 경쟁률(회사 자신 제외).${t.path ? ` 금리 경로: ${t.path}.` : ''}`, '자료: 금융감독원 DART, 한국은행·미 연준 일정, 관공서 공휴일, NH투자증권 리서치']));
   return { id: 'timing', title: n.title, prims };
 }
 
@@ -656,7 +670,7 @@ function sales({ d, inp, tx }: Ctx, n: Numbered): Body {
     const rest = (CW - w0.reduce((a, b) => a + b, 0)) / Math.max(1, types.length);
     prims.push(table(X0, by + 18, [...w0, ...types.map(() => rest)], [18, ...trend.map(() => 15)], rows, 7));
   }
-  prims.push(...footnote([`주) ${typed.label ? `${name} ${typed.label} 기준. ` : ''}투자자 구분은 발행조건확정 증권신고서(정정)의 수요예측 참여 내역 기준(운용사(집합)은 투자일임·집합투자재산). 같은 등급은 사업회사·원자료 점검 통과 건.${trend.length >= 2 ? ' 노란 칸은 NH투자증권 대표주관 참여 회차.' : ''} 배정 내역은 공시에 기관 합계만 있어 내부 자료로 보완.`, '자료: 금융감독원 DART']));
+  prims.push(...footnote([`주) ${typed.label ? `${name} ${typed.label} 기준. ` : ''}투자자 구분은 발행조건확정 증권신고서(정정)의 수요예측 참여 내역 기준(운용사(집합)은 투자일임·집합투자재산). 같은 등급은 ${isFinancial(d.company.corp_name) ? '' : '사업회사·'}원자료 점검 통과 건.${trend.length >= 2 ? ' 노란 칸은 NH투자증권 대표주관 참여 회차.' : ''} 배정 내역은 공시에 기관 합계만 있어 내부 자료로 보완.`, '자료: 금융감독원 DART']));
   return { id: 'sales', title: n.title, prims };
 }
 
@@ -1863,7 +1877,7 @@ export function available(d: DeckData, inp: DeckInput) {
     if (id === 'forecast') return !!d.forecast || !!d.dm?.pages.forecast?.length || !!d.dm?.forecastTable || parseTsv(inp.internal?.rateFc ?? '').length >= 2;
     if (id === 'credit_fc') return parseTsv(inp.internal?.creditFc ?? '').length >= 2 || !!d.dm?.pages.credit_fc || creditNotesOf(d).some((x) => x.date >= addMonths(d.asof, -2));
     if (id === 'sales') return d.own.some((p) => p.tranches.some((t) => t.byType?.length)) || parseTsv(inp.internal?.investors ?? '').length >= 2 || d.peers.some((p) => p.tranches.some((t) => t.byType?.length));
-    if (id === 'timing') return timingPlan(d, { peerScope: inp.peerScope, band: inp.band.type, pay: inp.pay }).opts.length >= 2;
+    if (id === 'timing') return timingOf(d, inp).opts.length >= 2;
     if (id === 'compare') return inp.compareKeys.length > 0;
     if (id === 'league') return d.leagueYearly.length > 0;
     return true;

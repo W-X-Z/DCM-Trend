@@ -4,7 +4,7 @@
 // 장단점은 데이터로만 정한다: 기존 만기 대응·선조달 기간·시장 만기도래·전년 같은 달 수요예측·발행 관행·금리 경로(리서치)·이벤트/연휴.
 // 점수가 같으면 ①(현업 기본 규칙)을 권고한다. 권고안이 기본 납입일이 된다.
 import { buildSchedule, type Schedule } from './schedule';
-import { calOf, payPlan, peerPool } from './rules';
+import { calOf, forecastStale, janPayOf, payPlan, peerPool, totalEok, yearEndOf } from './rules';
 import { eokW, mdw, rate2, ratioX } from './fmt';
 import type { DeckData, DeckInput } from './types';
 
@@ -61,35 +61,48 @@ function ratePath(d: DeckData) {
     });
     return { src: 'NH 리서치', pts: out };
   }
+  // 공개 전망표는 발표 뒤 금통위·FOMC 결과가 나왔으면 쓰지 않는다(본문 전망 장표와 같은 기준)
   const b = d.forecast?.rows.find((r) => r.key === 'base_rate');
-  if (!b || !d.forecast) return null;
+  if (!b || !d.forecast || forecastStale(d)) return null;
   const pts = b.cells.map((c) => ({ m: c.period.match(/^(\d)Q(\d{2})$/), v: c.value })).filter((x) => x.m && x.v != null)
     .map((x) => ({ y: 2000 + Number(x.m![2]), q: Number(x.m![1]), v: Number(x.v) }));
   return pts.length ? { src: `${d.forecast.house} 리서치`, pts } : null;
 }
 
-export function timingPlan(d: DeckData, o: { peerScope: DeckInput['peerScope']; band: DeckInput['band']['type']; pay?: string | null }): Timing {
+type PlanOpts = {
+  peerScope: DeckInput['peerScope'];
+  band: DeckInput['band']['type'];
+  pay?: string | null;
+  demand?: string | null; // 담당자가 고른 수요예측일(그 납입일 안에만 적용)
+  totalEok?: number; // 최초 신고 금액(억원): 만기 대응 문안을 금액과 맞춘다
+  maxEok?: number | null;
+};
+// 입력값 그대로 쓰는 호출(장표·문안·AI 근거가 같은 결과를 보게)
+export const timingOf = (d: DeckData, inp: DeckInput) =>
+  timingPlan(d, { peerScope: inp.peerScope, band: inp.band.type, pay: inp.pay, demand: inp.demand, totalEok: totalEok(inp), maxEok: inp.maxEok });
+
+export function timingPlan(d: DeckData, o: PlanOpts): Timing {
   const cal = calOf(d);
-  const sch = (pay: string) => buildSchedule(cal, pay, { band: o.band, demand: null, events: d.events });
   const A = payPlan(d).pay;
   const habit = habitOf(d);
   const raw: { kind: TimingKind; pay: string }[] = [{ kind: 'rule', pay: A }];
   // 2안: 정례 발행월(①과 다른 달, 기준일 200일 안) → 첫 만기 직전 납입(①보다 5영업일 이상 늦을 때)
   const mats = (d.maturitiesLong?.rows ?? d.maturities).filter((m) => m.amount_krw);
+  // 정례 발행월은 ①에서 90일 안일 때만 후보(만기가 없을 때 관행 하나로 납입이 멀리 밀리지 않게)
   if (habit && habit.month !== mon(A)) {
     const day = String(Math.min(25, Math.max(5, Math.round(habit.days.reduce((a, b) => a + b, 0) / habit.days.length)))).padStart(2, '0');
     let y = Number(A.slice(0, 4));
     let c = `${y}-${String(habit.month).padStart(2, '0')}-${day}`;
     if (c <= A) c = `${++y}-${String(habit.month).padStart(2, '0')}-${day}`;
     const hp = cal.next(c);
-    if (days(d.asof, c) <= 200 && cal.add(hp, -7).slice(5) < '12-15' && !raw.some((x) => x.pay === hp)) raw.push({ kind: 'habit', pay: hp });
+    if (days(A, hp) <= 90 && !yearEndOf(cal, hp) && !raw.some((x) => x.pay === hp)) raw.push({ kind: 'habit', pay: hp });
   }
   if (raw.length < 2) {
     // 첫 만기 1주 전 납입(선조달 최소화). 수요예측이 연말 북클로징(12/15~)에 걸리면 1월 첫 영업일 뒤로 미루고, 그래도 만기 전이어야 한다
     const m1 = mats.find((m) => m.dt > A && days(A, m.dt) <= 60);
     if (m1) {
       let jit = cal.add(m1.dt, -5);
-      if (cal.add(jit, -7).slice(5) >= '12-15') jit = cal.add(cal.next(`${Number(jit.slice(0, 4)) + (jit.slice(5, 7) === '12' ? 1 : 0)}-01-02`), 7);
+      if (yearEndOf(cal, jit)) jit = janPayOf(cal, jit);
       if (jit < m1.dt && cal.diff(A, jit) >= 5 && !raw.some((x) => x.pay === jit)) raw.push({ kind: 'jit', pay: jit });
     }
   }
@@ -105,6 +118,8 @@ export function timingPlan(d: DeckData, o: { peerScope: DeckInput['peerScope']; 
     }
   }
   if (raw.length < 2) return { opts: [], rec: 0, habit: habit && { month: habit.month, deals: habit.deals }, path: null };
+  // 담당자가 고른 수요예측일은 그 납입일 안에만(다른 안은 기본 수요예측일)
+  const sch = (pay: string) => buildSchedule(cal, pay, { band: o.band, demand: want && pay === want ? o.demand ?? null : null, events: d.events });
 
   const minPay = raw.map((x) => x.pay).sort()[0];
   const maxPay = raw.map((x) => x.pay).sort().at(-1)!;
@@ -129,7 +144,8 @@ export function timingPlan(d: DeckData, o: { peerScope: DeckInput['peerScope']; 
     const market = mi >= 0 ? { month: mon(s.pay), amount: mg.total[mi], rank: ranked.indexOf(mg.total[mi]) + 1 } : null;
     const ly = `${Number(s.demand.slice(0, 4)) - 1}-${s.demand.slice(5, 7)}`;
     const covers = pool.some((p) => (p.demand_dt ?? p.deal_dt ?? '') < `${ly}-01`);
-    const lyList = pool.filter((p) => (p.demand_dt ?? '').startsWith(ly));
+    // 회사 자신의 회차는 '발행 관행'에서 따로 보므로 뺀다
+    const lyList = pool.filter((p) => p.corp_code !== d.company.corp_code && (p.demand_dt ?? '').startsWith(ly));
     const lyR = lyList.filter((p) => p.ratio != null);
     const lastYear = covers || lyList.length ? { label: `'${ly.slice(2, 4)}.${Number(ly.slice(5, 7))}월`, n: lyList.length, avg: lyR.length ? lyR.reduce((a, p) => a + Number(p.ratio), 0) / lyR.length : null } : null;
     const notes: string[] = [];
@@ -144,24 +160,36 @@ export function timingPlan(d: DeckData, o: { peerScope: DeckInput['peerScope']; 
     const hol = d.holidays.filter((h) => h.dt > s.demand && h.dt < s.pay);
     if (hol.length) notes.push(`수요예측~납입 사이 ${[...new Set(hol.map((h) => h.name.replace(/\s*연휴$/, '')))].join('·')} 휴일(${hol.map((h) => mdw(h.dt)).join('·')})`);
     const kind = r.kind;
-    const title = kind === 'habit' ? `${mon(s.pay)}월 정례 발행` : kind === 'jit' ? `${mon(s.pay)}월 ${part(s.pay)} 만기 직전 납입` : kind === 'input' ? `${mon(s.pay)}월 ${part(s.pay)} 납입(입력)` : `${mon(s.pay)}월 ${part(s.pay)} 선조달`;
+    const title = kind === 'habit' ? `${mon(s.pay)}월 정례 발행` : kind === 'jit' ? `${mon(s.pay)}월 ${part(s.pay)} 만기 직전 납입` : kind === 'input' ? `${mon(s.pay)}월 ${part(s.pay)} 납입` : `${mon(s.pay)}월 ${part(s.pay)} 선조달`;
     return { key: `${i + 1}안`, kind, title, sch: s, covered, before, market, lastYear, habit: !!habit && habit.month === mon(s.pay), notes, pros: [], cons: [], score: 0 };
   });
 
   // 장단점·점수
   const idleSum = (x: TimingOpt) => x.covered.reduce((a, m) => a + m.amount * m.idle, 0);
   const minIdle = Math.min(...opts.filter((x) => !x.before.length && x.covered.length).map(idleSum));
+  const initK = (o.totalEok ?? 0) * 1e8;
+  const maxK = (o.maxEok ?? 0) * 1e8;
   for (const x of opts) {
     const list = (ms: { dt: string; amount: number }[]) => ms.map((m) => `${mdw(m.dt)} ${eokW(m.amount)}`).join('·');
-    const sum = (ms: { amount: number }[]) => eokW(ms.reduce((a, m) => a + m.amount, 0));
+    const sumK = (ms: { amount: number }[]) => ms.reduce((a, m) => a + m.amount, 0);
+    const sum = (ms: { amount: number }[]) => eokW(sumK(ms));
     if (x.before.length) {
       x.cons.push(`납입 전에 만기 ${sum(x.before)}(${list(x.before)}) 도래 → 보유 현금 등으로 먼저 상환 필요`);
       x.score -= 1;
     } else if (x.covered.length) {
-      x.pros.push(`만기 ${sum(x.covered)}(${x.covered.length}건) 전액 차환 재원을 만기 전에 확보`);
+      // 만기 대응 문안은 발행 금액과 맞춘다(트랜치 검토의 차환 수요 문안과 같은 기준)
+      const need = sumK(x.covered);
+      const what = `만기 ${sum(x.covered)}(${x.covered.length}건)`;
+      x.pros.push(!initK
+        ? `${what} 전에 납입해 차환 재원을 만기 전에 확보`
+        : initK >= need
+          ? `${what} 전액 차환 재원을 만기 전에 확보`
+          : maxK >= need
+            ? `${what} 전에 납입(최초 신고 금액으로 ${Math.round((initK / need) * 100)}%, 증액 시 전액 차환)`
+            : `${what} 전에 납입해 ${maxK ? `증액 한도 ${eokW(maxK)}` : `신고 금액 ${eokW(initK)}`}만큼 차환(부족분은 별도 재원)`);
       x.score += 1;
       const first = x.covered[0].idle;
-      if (first >= 10) {
+      if (first >= 10 && first <= 30) {
         x.pros.push(`첫 만기 ${first}일 전 납입으로 일정 지연·시장 변동 시 대응 여유`);
         x.score += 0.5;
       } else if (first < 5) {
@@ -182,41 +210,53 @@ export function timingPlan(d: DeckData, o: { peerScope: DeckInput['peerScope']; 
       x.pros.push(`최근 ${habit.deals.length}회 중 ${habit.days.length}회와 같은 ${habit.month}월 발행(투자자에게 익숙한 시기)`);
       x.score += 0.5;
     }
+    // 담당자가 고른 날짜가 연말 북클로징에 걸리면 알린다(규칙 후보는 이미 피함)
+    if (x.kind === 'input' && yearEndOf(cal, x.sch.pay)) {
+      x.cons.push('수요예측·납입이 연말 북클로징(12/15~) 기간에 걸려 기관 참여 위축 가능');
+      x.score -= 0.5;
+    }
     if (x.notes.length) x.score -= 0.25 * x.notes.length;
   }
-  // 상대 비교: 납입월 시장 만기도래, 전년 같은 달 수요예측
+  // 상대 비교: 납입월 시장 만기도래(12개월 중 3위 안 = 차환 발행이 몰리는 달, 7위 밖 = 적은 달). 같은 달인 안은 같이 본다
   const mk = opts.filter((x) => x.market);
   if (mk.length > 1 && new Set(mk.map((x) => x.market!.month)).size > 1) {
-    const lo = mk.reduce((a, b) => (a.market!.amount <= b.market!.amount ? a : b));
-    const hi = mk.reduce((a, b) => (a.market!.amount >= b.market!.amount ? a : b));
-    lo.pros.push(`납입월 시장 만기도래 ${jo(lo.market!.amount)}(12개월 중 ${lo.market!.rank}위)로 차환 발행 집중이 덜함`);
-    lo.score += 0.5;
-    hi.cons.push(`납입월 시장 만기도래 ${jo(hi.market!.amount)}로 12개월 중 ${hi.market!.rank}위, 차환 발행 집중`);
-    hi.score -= 0.5;
+    const loAmt = Math.min(...mk.map((x) => x.market!.amount));
+    const hiAmt = Math.max(...mk.map((x) => x.market!.amount));
+    const lo = mk.filter((x) => x.market!.amount === loAmt);
+    const hi = mk.filter((x) => x.market!.amount === hiAmt);
+    const loRank = lo[0].market!.rank;
+    const hiRank = hi[0].market!.rank;
+    if (loRank > 6 || (loRank > 3 && hiRank <= 3)) for (const x of lo) {
+      x.pros.push(`납입월 시장 만기도래 ${jo(loAmt)}(12개월 중 ${loRank}위)으로 차환 발행이 덜 몰리는 달`);
+      x.score += 0.5;
+    }
+    if (hiRank <= 3 && loRank > 3) for (const x of hi) {
+      x.cons.push(`납입월 시장 만기도래 ${jo(hiAmt)}(12개월 중 ${hiRank}위)으로 차환 발행이 몰리는 달`);
+      x.score -= 0.5;
+    }
   }
   const lyOk = opts.filter((x) => x.lastYear && x.lastYear.n >= 2 && x.lastYear.avg != null);
   if (lyOk.length > 1 && new Set(lyOk.map((x) => x.lastYear!.label)).size > 1) {
-    const best = lyOk.reduce((a, b) => (a.lastYear!.avg! >= b.lastYear!.avg! ? a : b));
-    const worst = lyOk.reduce((a, b) => (a.lastYear!.avg! <= b.lastYear!.avg! ? a : b));
-    if (best.lastYear!.avg! - worst.lastYear!.avg! >= 0.5) {
+    const bestAvg = Math.max(...lyOk.map((x) => x.lastYear!.avg!));
+    const worstAvg = Math.min(...lyOk.map((x) => x.lastYear!.avg!));
+    if (bestAvg - worstAvg >= 0.5) for (const best of lyOk.filter((x) => x.lastYear!.avg === bestAvg)) {
       best.pros.push(`전년 같은 달(${best.lastYear!.label}) ${grp}등급 수요예측 ${best.lastYear!.n}건, 평균 경쟁률 ${ratioX(best.lastYear!.avg)}로 수요 견조`);
       best.score += 0.5;
     }
   }
-  // 금리 경로(리서치): 가장 이른 안의 분기 경로값이 현재보다 높으면(인상 전망) 이른 발행이 인상 영향 노출이 짧다
+  // 금리 경로(리서치): 이른 안과 늦은 안의 분기 경로값이 다르고(늦은 쪽이 더 높음) 현재보다 높을 때만 이른 발행의 장점으로 쓴다
   let pathText: string | null = null;
   if (path && base != null) {
     const early = opts.reduce((a, b) => (a.sch.pay <= b.sch.pay ? a : b));
-    const v = pathAt(early.sch.pay);
     const late = opts.reduce((a, b) => (a.sch.pay >= b.sch.pay ? a : b));
+    const v = pathAt(early.sch.pay);
     const vl = pathAt(late.sch.pay);
-    if (v != null && v > base) {
+    if (v != null && vl != null && vl > v && vl > base && early !== late) {
       const q = qOf(early.sch.pay);
-      pathText = `${path.src} 기준금리 경로 ${q.q}Q${String(q.y).slice(2)} ${rate2(v)}(현재 ${rate2(base)})`;
-      if (vl != null && vl >= v && early !== late) {
-        early.pros.push(`${pathText}: 인상 국면에서 더 이른 발행으로 금리 상승 노출 축소`);
-        early.score += 0.5;
-      }
+      const ql = qOf(late.sch.pay);
+      pathText = `${path.src} 기준금리 경로 ${q.q}Q${String(q.y).slice(2)} ${rate2(v)} → ${ql.q}Q${String(ql.y).slice(2)} ${rate2(vl)}(현재 ${rate2(base)})`;
+      early.pros.push(`${pathText}: 경로상 인상 전 분기에 발행`);
+      early.score += 0.5;
     }
   }
   const rec = forced ?? opts.reduce((bi, x, i) => (x.score > opts[bi].score + 1e-9 ? i : bi), Math.max(0, opts.findIndex((x) => x.kind === 'rule')));
