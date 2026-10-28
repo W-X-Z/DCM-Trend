@@ -72,6 +72,7 @@ function download(blob: Blob, name: string) {
 const TEXT_FIELDS: { key: keyof DeckText; item: ItemId; label: string }[] = [
   { key: 'structure', item: 'terms', label: '제안 Term-sheet' },
   { key: 'sizing', item: 'sizing', label: '트랜치 검토' },
+  { key: 'timing', item: 'timing', label: '발행 시기 검토(1안/2안)' },
   { key: 'schedule', item: 'schedule', label: '발행 일정(안)' },
   { key: 'sales', item: 'sales', label: 'Sales 전략' },
   { key: 'pipeline', item: 'pipeline', label: '수요예측 예정 내역' },
@@ -454,7 +455,7 @@ export function DeckStudio({ corp }: { corp: string }) {
         {TEXT_FIELDS.filter((f) => input.items[f.item]).map((f) => (
           <div key={f.key} id={`dk-t-${f.key}`}>
             <Field label={f.label}>
-              <textarea rows={Math.min(8, (shownText[f.key] as string[]).length + 1)} value={(shownText[f.key] as string[]).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
+              <textarea rows={Math.min(8, ((shownText[f.key] as string[] | undefined) ?? []).length + 1)} value={((shownText[f.key] as string[] | undefined) ?? []).join('\n')} onChange={(e) => editText(f.key, e.target.value.split('\n').filter((l) => l.trim()))} />
             </Field>
             <Tips list={myTips} slide={f.item as KnowledgeSlide} />
           </div>
@@ -872,7 +873,7 @@ function NumIn({ v, on, step }: { v: number | null; on: (v: number | null) => vo
 // 장표별 고치기 바로가기: 조건이 바뀌는 장표는 해당 탭, 요약 상자는 문안 칸으로
 const TEXT_OF: Record<string, string> = {
   sizing: 'sizing', sales: 'sales', pipeline: 'pipeline', rates: 'rates', bok: 'bok', fomc: 'fomc', views: 'views', usviews: 'usviews',
-  forecast: 'forecast', peers: 'peers', compare: 'compare', corp: 'corp', league: 'league', strength: 'strengths', maturity: 'maturity', schedule: 'schedule', terms: 'structure',
+  forecast: 'forecast', peers: 'peers', compare: 'compare', corp: 'corp', league: 'league', strength: 'strengths', maturity: 'maturity', schedule: 'schedule', terms: 'structure', timing: 'timing',
 };
 function editTargets(id: string): { tab: Tab; anchor?: string; label: string }[] {
   const base = id.replace(/-\d+$/, '');
@@ -881,7 +882,7 @@ function editTargets(id: string): { tab: Tab; anchor?: string; label: string }[]
   if (base === 'back') out.push({ tab: 'cover', anchor: 'dk-a-back', label: '뒷표지 고치기' });
   if (base === 'contents' || base.startsWith('folder')) out.push({ tab: 'toc', label: '목차 고치기' });
   if (base === 'terms') out.push({ tab: 'terms', label: '발행 조건 고치기' });
-  if (base === 'schedule') out.push({ tab: 'schedule', label: '일정 고치기' });
+  if (base === 'schedule' || base === 'timing') out.push({ tab: 'schedule', label: '일정 고치기' });
   if (base === 'peers' || base === 'compare') out.push({ tab: 'peers', label: '사례 고르기' });
   if (base === 'sales' || base === 'forecast' || base === 'credit_fc' || base === 'sizing' || base === 'terms') out.push({ tab: 'internal', label: '내부 데이터' });
   if (base === 'datareport') out.push({ tab: 'data', label: '관련 데이터 보기' });

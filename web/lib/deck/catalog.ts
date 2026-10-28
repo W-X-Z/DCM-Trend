@@ -7,7 +7,7 @@
 
 export type ItemId =
   | 'cover' | 'ceo' | 'contents' | 'folders'
-  | 'terms' | 'sizing' | 'schedule' | 'sales' | 'ir'
+  | 'terms' | 'sizing' | 'timing' | 'schedule' | 'sales' | 'ir'
   | 'rates' | 'bok' | 'fomc' | 'issues'
   | 'forecast' | 'credit_fc' | 'views' | 'usviews'
   | 'issuance' | 'liquidity' | 'peers' | 'compare' | 'corp'
@@ -16,7 +16,7 @@ export type ItemId =
   | 'maturity' | 'events' | 'datareport'
   | 'back';
 
-export type Item = { id: ItemId; title: string; kind: 'gen' | 'static'; on: boolean; note?: string };
+export type Item = { id: ItemId; title: string; kind: 'gen' | 'static'; on: boolean; note?: string; multiTitle?: string }; // multiTitle: 한 장에 장표가 둘 이상일 때 소제목
 export type PartKey = 'Ⅰ' | 'Ⅱ';
 export type Section = { key: string; label: string; part?: PartKey; appendix?: boolean; items: Item[] };
 // 부: Ⅰ 은 회사·조건 입력으로 장표마다 만들고, Ⅱ 는 DM 판 문구·자료를 그대로 쓴다(고객 등급 쪽만 맞춤)
@@ -43,7 +43,13 @@ export const SECTIONS: Section[] = [
       { id: 'ir', title: 'IR 및 수요예측 전략', kind: 'static', on: false, note: '템플릿 도식 3장' },
     ],
   },
-  { key: 'schedule', label: '발행 일정(안)', part: 'Ⅰ', items: [{ id: 'schedule', title: '발행 일정(안)', kind: 'gen', on: true }] },
+  {
+    key: 'schedule', label: '발행 일정(안)', part: 'Ⅰ',
+    items: [
+      { id: 'timing', title: '발행 시기 검토', kind: 'gen', on: true, note: '1안/2안 장단점(기존 만기·시장 만기도래·전년 같은 달 수요예측·발행 관행·금리 경로). 대안이 없으면 빠짐' },
+      { id: 'schedule', title: '발행 일정(안)', multiTitle: '세부 일정', kind: 'gen', on: true },
+    ],
+  },
   {
     key: 'sales', label: 'Sales 전략', part: 'Ⅰ',
     items: [{ id: 'sales', title: 'Sales 전략', kind: 'gen', on: true, note: '수요예측 참여 데이터 기반, 문안은 AI(기관별 내역은 내부 데이터)' }],
@@ -134,9 +140,9 @@ export function planOf(on: Record<ItemId, boolean>, available: (id: ItemId) => b
     sections.push({
       key: s.key, no: k0, label: s.label, appendix: false, part,
       items: items.map((i, k) => {
-        const sub = multi ? `${CIRCLED[k]} ${i.title}` : i.title !== s.label ? i.title : null;
+        const sub = multi ? `${CIRCLED[k]} ${i.multiTitle ?? i.title}` : i.title !== s.label ? i.title : null;
         const head = `${k0}. ${s.label}`;
-        return { id: i.id, section: s.key, head, sub, title: `${head}${sub ? `_${sub}` : ''}`, label: `${part}-${k0}${multi ? `-${CIRCLED[k]}` : '.'} ${i.title}` };
+        return { id: i.id, section: s.key, head, sub, title: `${head}${sub ? `_${sub}` : ''}`, label: `${part}-${k0}${multi ? `-${CIRCLED[k]}` : '.'} ${multi ? i.multiTitle ?? i.title : i.title}` };
       }),
     });
   }
