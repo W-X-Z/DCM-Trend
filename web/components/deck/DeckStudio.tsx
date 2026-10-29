@@ -359,10 +359,8 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
             <FlowView
               report={report}
               data={data}
-              input={input}
               tips={tips}
               slides={slides}
-              avail={avail}
               checks={marks.length}
               examples={SUGGESTIONS}
               onGo={(i) => {
@@ -370,6 +368,7 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
                 setView('preview');
               }}
               onData={() => setView('data')}
+              onTips={setTips}
             />
           )}
         </div>
