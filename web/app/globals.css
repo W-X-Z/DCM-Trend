@@ -7635,3 +7635,95 @@ a.cta-sm:hover {
 .dk2-input textarea {
   width: 100%;
 }
+
+/* 홈 영업 추천 필터: 만기일정 | 신용등급 | 상장시장 드롭다운 */
+.reco-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fm {
+  position: relative;
+}
+
+.fm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px 5px 13px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--s-1);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fm-btn:hover {
+  border-color: var(--rule-strong);
+  color: var(--ink);
+}
+
+.fm-btn svg {
+  color: var(--muted);
+}
+
+.fm-btn.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.fm-btn.is-active svg {
+  color: rgb(255 255 255 / 0.7);
+}
+
+.fm-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  min-width: 170px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px rgb(20 33 61 / 0.16);
+}
+
+.fm-menu a {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: var(--s-1);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.fm-menu a:hover,
+.fm-menu a:focus-visible {
+  background: var(--accent-soft);
+}
+
+.fm-menu a[aria-current='true'] {
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.fm-menu .tnum {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+@media (max-width: 719px) {
+  .fm:first-child .fm-menu {
+    right: auto;
+    left: 0;
+  }
+}
