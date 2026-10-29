@@ -6102,6 +6102,19 @@ table.data th.col-cta {
   padding-top: 4px;
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
+}
+
+/* 카드 보조 CTA (자세히 보기): 회색 테두리, 주 CTA(제안서 초안)는 그대로 */
+a.cta-sm.is-sub {
+  border-color: var(--rule-strong);
+  color: var(--ink-2);
+}
+
+a.cta-sm.is-sub:hover {
+  background: var(--paper);
+  border-color: var(--ink-2);
+  color: var(--ink);
 }
 
 a.cta-sm {

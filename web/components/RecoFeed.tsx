@@ -79,8 +79,11 @@ function Card({ it }: { it: RecoItem }) {
         )}
       </dl>
       <div className="rc-foot">
-        <Link href={`/company/${it.corp_code}`} className="cta-sm" aria-label={`${it.corp_name} 자세히 보기`}>
+        <Link href={`/company/${it.corp_code}`} className="cta-sm is-sub" aria-label={`${it.corp_name} 자세히 보기`}>
           자세히 보기
+        </Link>
+        <Link href={`/proposal/deck?corp=${it.corp_code}`} target="_blank" rel="noopener" className="cta-sm" aria-label={`${it.corp_name} 제안서 초안 (새 탭)`}>
+          제안서 초안
         </Link>
       </div>
     </li>
