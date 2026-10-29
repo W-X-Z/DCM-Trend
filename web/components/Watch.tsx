@@ -131,7 +131,7 @@ async function resolveNames(text: string): Promise<{ found: Item[]; missed: stri
   return { found, missed };
 }
 
-export function WatchPanel() {
+export function WatchPanel({ hideEmpty = false }: { hideEmpty?: boolean }) {
   const [items, save] = useWatch();
   const [events, setEvents] = useState<Ev[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -182,6 +182,7 @@ export function WatchPanel() {
   );
 
   if (!items.length) {
+    if (hideEmpty) return null;
     return (
       <section className="section watch-sec is-empty" aria-labelledby="watch-h">
         <div className="section-head">

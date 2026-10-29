@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import './globals.css';
 import { Footer, Header } from '@/components/Chrome';
+import { Fab } from '@/components/Fab';
 import { Feedback } from '@/components/Feedback';
 import { Notice } from '@/components/Notice';
 
@@ -26,6 +28,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Header />
         {children}
         <Footer />
+        <Suspense fallback={null}>
+          <Fab aiEnabled={Boolean(process.env.OPENAI_API_KEY)} />
+        </Suspense>
         <Feedback />
         <Notice />
       </body>

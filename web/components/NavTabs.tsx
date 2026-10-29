@@ -3,16 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+// 1depth 탭: 모니터링 화면만 둔다. 제안서 작성·AI 질문은 화면 아래 플로팅 버튼(Fab)에서 연다.
 const TABS = [
   { href: '/', label: '홈', match: (p: string) => p === '/' },
-  { href: '/trends/bond', label: '발행 동향', match: (p: string) => p.startsWith('/trends') },
-  { href: '/filings', label: '주요 공시', match: (p: string) => p.startsWith('/filings') },
   { href: '/maturities', label: '만기도래', match: (p: string) => p.startsWith('/maturities') },
-  { href: '/expansion', label: '사업 확장', match: (p: string) => p.startsWith('/expansion') },
-  { href: '/proposal', label: '제안서 초안', match: (p: string) => p.startsWith('/proposal') },
+  { href: '/trends/bond', label: '발행동향', match: (p: string) => p.startsWith('/trends') },
+  { href: '/filings', label: '주요공시', match: (p: string) => p.startsWith('/filings') || p.startsWith('/expansion') },
   { href: '/rates', label: '금리', match: (p: string) => p.startsWith('/rates') },
-  { href: '/ai', label: 'AI 질문', match: (p: string) => p.startsWith('/ai') },
-  { href: '/how', label: '작동 방식', match: (p: string) => p.startsWith('/how') },
 ];
 
 export function NavTabs() {

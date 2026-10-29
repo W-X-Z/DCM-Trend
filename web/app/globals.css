@@ -5972,3 +5972,517 @@ table.data th.col-cta {
     justify-self: end;
   }
 }
+
+/* 홈: 영업 추천 피드 ---------------------------------------------------------- */
+.home .reco-sec {
+  margin-top: 28px;
+}
+
+.reco {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .reco {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1000px) {
+  .reco {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.rc {
+  --rc: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 14px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--rc);
+  border-radius: 2px 2px 6px 6px;
+  min-width: 0;
+}
+
+.rc.r-keep { --rc: var(--accent); }
+.rc.r-win { --rc: #b54708; }
+.rc.r-co { --rc: var(--bond); }
+.rc.r-new { --rc: var(--ink-2); }
+
+.rc-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--s-1);
+}
+
+.rc-d {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.rc-dt {
+  color: var(--muted);
+}
+
+.rc-rel {
+  margin-left: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--rc);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.rc-co {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.rc-corp {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 1.1875rem;
+  line-height: 1.35;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.rc-corp:hover {
+  text-decoration: underline;
+}
+
+.rc-meta {
+  font-size: var(--s-1);
+  color: var(--muted);
+}
+
+.rc-mat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  color: var(--ink-2);
+  font-size: var(--s-1);
+}
+
+.rc-mat strong {
+  font-size: 1.125rem;
+  color: var(--ink);
+}
+
+.rc-hist {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px dotted var(--rule-strong);
+  display: grid;
+  gap: 2px;
+  font-size: var(--s-1);
+}
+
+.rc-hist div {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+}
+
+.rc-hist dt {
+  color: var(--muted);
+}
+
+.rc-hist dd {
+  margin: 0;
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.rc-hist dd strong {
+  color: var(--accent-ink);
+}
+
+.rc-foot {
+  margin-top: auto;
+  padding-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+a.cta-sm {
+  text-decoration: none;
+}
+
+a.cta-sm:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.reco-more {
+  margin-top: 14px;
+}
+
+.reco-done {
+  margin-top: 18px;
+}
+
+.reco-done-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: var(--s-1);
+}
+
+.reco-done-list li {
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* 플로팅 버튼: 제안서 작성 · AI 질문 (2depth 는 오른쪽 패널) ---------------------- */
+.fab {
+  position: fixed;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 46;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.fab > * {
+  pointer-events: auto;
+}
+
+.fab.has-panel {
+  display: none;
+}
+
+.fab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-weight: 600;
+  padding: 12px 18px 12px 15px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 22px rgb(15 110 110 / 0.32);
+  cursor: pointer;
+}
+
+.fab-btn:hover {
+  background: var(--accent-ink);
+}
+
+.fab-btn.is-open {
+  background: var(--ink);
+  box-shadow: 0 8px 22px rgb(20 33 61 / 0.24);
+}
+
+.fab-menu {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  min-width: 250px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px rgb(20 33 61 / 0.18);
+}
+
+.fab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.fab-item:hover,
+.fab-item:focus-visible {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.fab-item strong {
+  font-weight: 600;
+}
+
+.fab-item span {
+  font-size: var(--s-1);
+  color: var(--muted);
+}
+
+.fab-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  width: min(460px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--rule);
+  box-shadow: -18px 0 44px rgb(20 33 61 / 0.14);
+}
+
+.fab-panel[hidden] {
+  display: none;
+}
+
+.fab-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px 14px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.fab-panel-head h2 {
+  margin-right: auto;
+  font-size: var(--s1);
+}
+
+.fab-x {
+  font: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 2px 8px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.fab-x:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.fab-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 0;
+}
+
+.fab-panel .ai {
+  flex: 1;
+  min-height: 0;
+}
+
+.fab-panel .ai-form {
+  background: linear-gradient(to bottom, rgb(255 255 255 / 0), var(--surface) 30%);
+}
+
+.fab-cos {
+  margin-top: 20px;
+}
+
+.fab-cos ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.fab-cos li + li {
+  border-top: 1px solid var(--rule);
+}
+
+.fab-cos a {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.fab-cos a:hover {
+  background: var(--accent-soft);
+}
+
+.fab-cos a strong {
+  font-weight: 600;
+  min-width: 0;
+}
+
+.fab-cos a span {
+  font-size: var(--s-1);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.fab-more {
+  margin: 16px 0 24px;
+}
+
+/* 의견 보내기는 보조 동작: 왼쪽 아래, 옅은 버튼 */
+.fb {
+  right: auto;
+  left: max(20px, env(safe-area-inset-left));
+  align-items: flex-start;
+}
+
+.fb-fab {
+  padding: 8px 14px 8px 12px;
+  font-weight: 500;
+  border-color: var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  box-shadow: 0 4px 12px rgb(20 33 61 / 0.1);
+}
+
+.fb-fab:hover {
+  background: var(--paper);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 주요공시: 필터 아이콘 안에 덜 쓰는 조건을 넣는다 --------------------------------- */
+.fx {
+  position: relative;
+  margin-left: auto;
+}
+
+.fx > summary {
+  list-style: none;
+}
+
+.fx > summary::-webkit-details-marker {
+  display: none;
+}
+
+.fx-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fx-btn:hover,
+.fx[open] > .fx-btn {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.fx-n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+}
+
+.fx-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  width: min(540px, calc(100vw - 32px));
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px rgb(20 33 61 / 0.16);
+}
+
+.fx-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.fx-k {
+  font-size: var(--s-1);
+  color: var(--muted);
+}
+
+.fx-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fx-foot {
+  display: flex;
+  gap: 16px;
+  font-size: var(--s-1);
+}
+
+.fx-foot:empty {
+  display: none;
+}
+
+.kf-range {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.xp-rest > summary {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--rule);
+}
+
+/* 플로팅 버튼이 마지막 줄을 가리지 않게 */
+.site-footer {
+  padding-bottom: 84px;
+}
+
+@media (max-width: 719px) {
+  .kf-controls .fx {
+    order: 1;
+  }
+
+  .kf-controls .chips {
+    order: 2;
+  }
+}

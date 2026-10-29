@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { BarChart } from '@/components/BarChart';
 import { ChangeTiles } from '@/components/Insights';
+import { FabContext } from '@/components/Fab';
 import { MaturityTable, groupByCorp } from '@/components/MaturityTable';
 import { PageHead, SectionHead } from '@/components/Ui';
 import { date, month, num, won } from '@/lib/format';
@@ -132,6 +133,19 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
           </div>
         </PageHead>
 
+        <FabContext
+          label={tab === 'short' ? '1년 안 만기 잔액 상위' : `${TABS[tab]} ${win.replace('-', '~')}개월 뒤`}
+          companies={
+            tab === 'short'
+              ? (shortDebt ?? []).slice(0, 10).map((r) => ({ c: r.corp_code, n: r.corp_name, sub: `1년 안 ${won(r.total_1y_krw)}` }))
+              : groups.slice(0, 10).map((g) => ({
+                  c: g.corp_code,
+                  n: g.corp_name,
+                  sub: `${date(g.first_dt)} · ${won(g.amount)}`,
+                  href: tab === 'mezz' ? `/proposal?corp=${g.corp_code}&type=mezz` : undefined,
+                }))
+          }
+        />
         {tab !== 'short' && rows && (
           <dl className="stats">
             <div className="stat"><dt>회사</dt><dd>{num(groups.length)}<small>곳</small></dd></div>
@@ -169,7 +183,7 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
           ) : groups.length === 0 ? (
             <p className="empty">이 기간에 도래하는 건이 없습니다.</p>
           ) : (
-            <MaturityTable groups={groups} kind={tab} />
+            <MaturityTable groups={groups} kind={tab} from={href(searchParams, {})} />
           )}
         </section>
 

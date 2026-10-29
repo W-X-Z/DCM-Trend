@@ -1,3 +1,4 @@
+import { FabContext } from '@/components/Fab';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -99,6 +100,7 @@ export default async function CompanyPage({ params }: { params: { corp: string }
         <div className="page-head">
           <div className="page-head-row">
             <h1 className="page-title">{company.corp_name}</h1>
+            <FabContext label={company.corp_name} corp={{ c: company.corp_code, n: company.corp_name, href: `/proposal?corp=${company.corp_code}` }} />
             <WatchButton corp={company.corp_code} name={company.corp_name} />
             <Link href={`/proposal?corp=${company.corp_code}`} className="watch-btn">제안서 초안</Link>
           </div>
