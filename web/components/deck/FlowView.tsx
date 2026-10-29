@@ -1,43 +1,38 @@
 'use client';
 
-// 흐름도: 초안 작성·채팅 → 제안서 Agent(의도 해석 → 실행 계획) → 초안(미리보기 → 확인 → PPT·PDF), 확인 뒤 다음 요청으로 돌아감.
-// Agent 아래에 암묵지(Skill)·도구(Tool)·기억(Memory), 도구 아래에 데이터 수집 → 외부·내부 데이터.
-// 아키텍처 구성도(DCM 제안서 Agent p2)와 같은 깊이. 상자를 누르면 아래에 짧게 열린다.
+// 흐름도: 사용자 입력 → 제안서 Agent(의도 해석 → 실행 계획 → Sub-agent) → Output.
+// Agent 아래에 암묵지(Skill)·도구(Tool)·데이터·기억(Memory)을 나란히. 상자를 누르면 아래에 짧게 열린다.
+// 암묵지·도구·데이터·기억의 상세는 모두 같은 줄 모양(태그 + 한 문장)으로 보이고, 암묵지 중 장표별 노하우는 여기서 바로 고치고 더한다.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ACTION_TYPES, type ActionType } from '@/lib/deck/agent';
-import { PARTS, SECTIONS, TEMPLATES, templateOf, type ItemId, type Section } from '@/lib/deck/catalog';
-import { KIND_LABEL, SLIDES as TIP_SLIDES, forGrade, type Knowledge } from '@/lib/deck/knowledge';
+import { PARTS, SECTIONS, TEMPLATES } from '@/lib/deck/catalog';
+import { KINDS, KIND_LABEL, SLIDES as TIP_SLIDES, forGrade, type Knowledge, type KnowledgeKind, type KnowledgeSlide } from '@/lib/deck/knowledge';
 import type { DataReport } from '@/lib/deck/sources';
 import type { Slide } from '@/lib/deck/model';
-import type { DeckData, DeckInput } from '@/lib/deck/types';
-import { rowsOf, type DataRow } from './DataView';
+import type { DeckData } from '@/lib/deck/types';
+import { rowsOf } from './DataView';
 
-type Node = 'entry' | 'agent' | 'out' | 'tacit' | 'tool' | 'memory' | 'collect' | 'ext' | 'int';
+type Node = 'entry' | 'agent' | 'out' | 'tacit' | 'tool' | 'data' | 'memory';
 
-// 도식 좌표 (960 × 440, 좁으면 비율대로 줄임)
+// 도식 좌표 (960 × 232, 좁으면 비율대로 줄임)
 const W = 960;
-const H = 440;
+const H = 232;
 const BOX: Record<Node, [x: number, y: number, w: number, h: number]> = {
-  entry: [0, 28, 200, 76],
-  agent: [280, 28, 400, 76],
-  out: [760, 28, 200, 76],
-  tacit: [168, 168, 196, 64],
-  tool: [382, 168, 196, 64],
-  memory: [596, 168, 196, 64],
-  collect: [382, 270, 196, 56],
-  ext: [272, 370, 196, 64],
-  int: [492, 370, 196, 64],
+  entry: [0, 12, 200, 76],
+  agent: [280, 12, 400, 76],
+  out: [760, 12, 200, 76],
+  tacit: [61, 158, 196, 64],
+  tool: [275, 158, 196, 64],
+  data: [489, 158, 196, 64],
+  memory: [703, 158, 196, 64],
 };
-const EDGES: { a: Node; b: Node; d: string; arrow?: boolean; dash?: boolean }[] = [
-  { a: 'entry', b: 'agent', d: 'M200 66 H277', arrow: true },
-  { a: 'agent', b: 'out', d: 'M680 66 H757', arrow: true },
-  { a: 'out', b: 'entry', d: 'M860 28 V10 H100 V25', arrow: true },
-  { a: 'agent', b: 'tacit', d: 'M480 104 V136 H266 V168' },
-  { a: 'agent', b: 'tool', d: 'M480 104 V168' },
-  { a: 'agent', b: 'memory', d: 'M480 104 V136 H694 V168' },
-  { a: 'tool', b: 'collect', d: 'M480 232 V270' },
-  { a: 'collect', b: 'ext', d: 'M480 326 V348 H370 V370' },
-  { a: 'collect', b: 'int', d: 'M480 326 V348 H590 V370', dash: true },
+const EDGES: { a: Node; b: Node; d: string; arrow?: boolean }[] = [
+  { a: 'entry', b: 'agent', d: 'M200 50 H277', arrow: true },
+  { a: 'agent', b: 'out', d: 'M680 50 H757', arrow: true },
+  { a: 'agent', b: 'tacit', d: 'M480 88 V122 H159 V158' },
+  { a: 'agent', b: 'tool', d: 'M480 88 V122 H373 V158' },
+  { a: 'agent', b: 'data', d: 'M480 88 V122 H587 V158' },
+  { a: 'agent', b: 'memory', d: 'M480 88 V122 H801 V158' },
 ];
 
 const ACTION_LABEL: Record<ActionType, string> = {
@@ -46,33 +41,35 @@ const ACTION_LABEL: Record<ActionType, string> = {
   peer_scope: '비교 범위', sales_ai: 'Sales 전략 문안', edit_text: '문안 고치기', goto: '장표 이동', reset: '처음으로',
 };
 
-// 작성 규칙: 현업 관행에서 온 것 (rules.ts·validate.ts 와 같은 내용)
-const RULES: [string, string][] = [
-  ['발행 시기', '기준일 + 25영업일, 150일 안 만기가 있으면 2주 전 납입, 12/15~31 피함'],
-  ['증액 한도', '최근 4회 최대 배율 × 신고 금액, 100억 단위 올림'],
-  ['금리 밴드', '개별민평 ±30bp'],
-  ['비교 사례', '같은 등급 최근 1년, 보증·담보부·공기업 제외'],
-  ['문안', '데이터에 있는 숫자만, 출처 없는 전망은 뺌'],
+// 코드에 반영된 암묵지 (rules.ts·validate.ts·catalog.ts 와 같은 내용). 여기서는 읽기만.
+type Fixed = { slide: KnowledgeSlide | 'toc'; kind: 'rule' | 'toc'; body: string };
+const RULES: Fixed[] = [
+  { slide: 'all', kind: 'rule', body: '데이터에 있는 숫자만 쓰고, 출처 없는 시장 전망·단정 표현은 뺀다.' },
+  { slide: 'terms', kind: 'rule', body: '금리 밴드는 개별민평 ±30bp로 제시한다.' },
+  { slide: 'sizing', kind: 'rule', body: '최대 증액은 최근 4회 최대 증액 배율(1~2배) × 신고 금액, 100억 단위로 올린다.' },
+  { slide: 'schedule', kind: 'rule', body: '납입일은 기준일 + 25영업일 이후. 150일 안에 기존 공모채 만기가 있으면 만기 2주 전에 맞추고 12/15~12/31은 피한다.' },
+  { slide: 'peers', kind: 'rule', body: '같은 등급 최근 1년 사례만 쓰고, 보증·담보부로 보이는 회차와 공기업은 뺀다.' },
 ];
-
-// 출처 문자열 → 기관 (한 줄이 여러 기관일 수 있음)
-const PROVIDERS: [string, RegExp][] = [
-  ['DART', /DART/],
-  ['한국은행', /한국은행|ECOS/],
-  ['미 연준', /연준|Federal|FOMC/],
-  ['금융감독원', /금융감독원/],
-  ['공휴일', /공휴일/],
-  ['DM 판', /DM 판|Discussion Material/],
-  ['증권사 리포트·언론', /리포트|언론|뉴스|이데일리|증권(?!신고서|발행)/],
-];
-function byProvider(rows: DataRow[], named: boolean): [string, number][] {
-  const m = new Map<string, number>();
-  for (const r of rows) {
-    const hits = named ? PROVIDERS.filter(([, re]) => re.test(r.source)).map(([n]) => n) : [r.source];
-    for (const n of hits.length ? hits : [r.source]) m.set(n, (m.get(n) ?? 0) + 1);
-  }
-  return [...m.entries()].sort((a, b) => b[1] - a[1]);
+function tocAtoms(): Fixed[] {
+  const on = (part: string) =>
+    SECTIONS.filter((s) => (part === 'A' ? s.appendix : s.part === part) && s.items.some((i) => i.on)).map((s) => (part === 'A' ? s.items.filter((i) => i.on).map((i) => i.title).join(' · ') : s.label)).join(' · ');
+  const [p1, p2] = PARTS;
+  const lite = TEMPLATES.find((t) => t.key === 'lite');
+  return [
+    { slide: 'toc', kind: 'toc', body: `기본 목차는 ${p1.key} ${p1.label}(${on(p1.key)}) → ${p2.key} ${p2.label}(${on(p2.key)}) → Appendix(${on('A')}) 순서.` },
+    { slide: 'toc', kind: 'toc', body: `${p1.key}부는 회사·발행 조건으로 장표마다 만들고, ${p2.key}부는 이번 달 Discussion Material 판을 순서·양식 그대로 붙인다(고객 등급 쪽만 맞춤).` },
+    ...(lite ? [{ slide: 'toc' as const, kind: 'toc' as const, body: `간략 목차는 ${lite.hint.replace(/\(([^)]*)\)/, ', $1')}.` }] : []),
+    { slide: 'toc', kind: 'toc', body: 'NH투자증권 강점·IR·미매각 사례 같은 상세 장표는 남겨 두되 기본으로 끈다.' },
+    { slide: 'toc', kind: 'toc', body: '번호는 부마다 1부터, 한 장에 장표가 둘 이상이면 ①② 소제목, 간지는 부마다 한 장.' },
+  ];
 }
+
+// 기억 예시: 회사·담당자 메모는 정책이 정해지면 붙인다 (지금은 보여 주기만, Agent 에는 보내지 않음)
+const MEMORY_SAMPLES: [string, string][] = [
+  ['담당자', 'Term-sheet는 2년·3년 두 트랜치안을 먼저 보여 주길 선호'],
+  ['담당자', '수요예측 사례는 같은 등급만(등급군 전체 X)'],
+  ['회사', '재무팀은 납입일을 월초로 잡길 원함 (지난 미팅)'],
+];
 
 // 도식을 칸 너비에 맞춰 줄임
 function Fit({ children }: { children: ReactNode }) {
@@ -94,22 +91,22 @@ function Fit({ children }: { children: ReactNode }) {
   );
 }
 
-export function FlowView({ report, data, input, tips, slides, avail, checks, examples, onGo, onData }: {
+export function FlowView({ report, data, tips, slides, checks, examples, onGo, onData, onTips }: {
   report: DataReport;
   data: DeckData;
-  input: DeckInput;
   tips: Knowledge[];
   slides: Slide[];
-  avail: (id: ItemId) => boolean;
   checks: number;
   examples: string[];
   onGo: (i: number) => void;
   onData: () => void;
+  onTips: (list: Knowledge[]) => void;
 }) {
   const [on, setOn] = useState<Node>('agent');
   const ext = rowsOf(report, 'ext');
   const int = rowsOf(report, 'int');
   const myTips = forGrade(tips, data.company.rating_group);
+  const tacitN = myTips.length + RULES.length + tocAtoms().length;
 
   const box = (id: Node, body: ReactNode, cls = '') => {
     const [x, y, w, h] = BOX[id];
@@ -142,45 +139,45 @@ export function FlowView({ report, data, input, tips, slides, avail, checks, exa
             <path
               key={`${e.a}-${e.b}`}
               d={e.d}
-              className={`fl-e${lit(e) ? ' is-on' : ''}${e.dash ? ' is-dash' : ''}`}
+              className={`fl-e${lit(e) ? ' is-on' : ''}`}
               markerEnd={e.arrow ? `url(#fl-ah${lit(e) ? 'on' : ''})` : undefined}
             />
           ))}
-          <text x="480" y="14" className={`fl-edge-label${on === 'out' || on === 'entry' ? ' is-on' : ''}`} textAnchor="middle">다음 요청</text>
         </svg>
 
-        {box('entry', <><strong>초안 작성 · 채팅</strong><span>회사 고르기 · 요청</span></>)}
+        {box('entry', <><strong>사용자 입력</strong><span>초안 작성 · 채팅</span></>)}
         {box(
           'agent',
           <>
             <strong>제안서 Agent</strong>
             <span className="fl-agent-steps">
-              <em>의도 해석 <i>LLM</i></em>
+              <em>의도 해석</em>
               <b aria-hidden>→</b>
-              <em>실행 계획 <i>코드</i></em>
+              <em>실행 계획</em>
+              <b aria-hidden>→</b>
+              <em>Sub-agent</em>
             </span>
           </>,
           'is-core',
         )}
-        {box('out', <><strong>초안 {slides.length}장</strong><span>미리보기 → 확인 → PPT·PDF</span></>)}
-        {box('tacit', <><strong>암묵지 <i className="fl-kind">Skill</i></strong><span>템플릿 · 목차 · 팁 · 규칙</span></>, 'is-tacit')}
+        {box('out', <><strong>Output</strong><span>편집·저장 가능한 장표</span></>)}
+        {box('tacit', <><strong>암묵지 <i className="fl-kind">Skill</i></strong><span>목차 · 규칙 · 장표별 팁 {tacitN}</span></>, 'is-tacit')}
         {box('tool', <><strong>도구 <i className="fl-kind">Tool</i></strong><span>계산 · 조회 · 문안 · 산출 · 검수</span></>)}
-        {box('memory', <><strong>기억 <i className="fl-kind">Memory</i></strong><span>덱 상태 · 대화</span></>)}
-        {box('collect', <><strong>데이터 수집</strong><span>{data.asof} 기준</span></>)}
-        {box('ext', <><strong>외부 데이터</strong><span>{ext.length}건 · DART · 한국은행 등</span></>)}
-        {box('int', <><strong>내부 데이터</strong><span><b className="dk2-unlinked">미연계</b> {int.length}건</span></>, 'is-dashed')}
+        {box('data', <><strong>데이터</strong><span>외부 {ext.length} · 내부 {int.length} <b className="dk2-unlinked">미연계</b></span></>)}
+        {box('memory', <><strong>기억 <i className="fl-kind">Memory</i></strong><span>덱 상태 · 대화 · 메모</span></>)}
       </Fit>
 
       <section className="fl-detail" aria-live="polite">
         {on === 'entry' && (
           <>
-            <Head title="초안 작성 · 채팅" />
-            <Kv
-              rows={[
-                ['초안 작성', '회사를 고르면 기본 조건으로 바로 만듦'],
-                ['채팅', '딜 조건 · 전략 · 문안 바꾸기'],
-                ['다음 요청', '초안을 확인하고 다시 채팅'],
-              ]}
+            <Head title="사용자 입력" />
+            <Atoms
+              groups={[{
+                items: [
+                  { key: 'draft', tag: '초안 작성', body: '회사를 고르면 기본 조건으로 바로 만든다.' },
+                  { key: 'chat', tag: '채팅 입력', body: '딜 조건 · 전략 · 문안을 말로 바꾼다.' },
+                ],
+              }]}
             />
             <Chips label="예시" list={examples} />
           </>
@@ -191,22 +188,27 @@ export function FlowView({ report, data, input, tips, slides, avail, checks, exa
             <Head title="제안서 Agent" />
             <div className="fl-steps">
               <div>
-                <strong>의도 해석</strong><span className="fl-tag">LLM</span>
-                <p>요청 → 행동 목록</p>
+                <strong>의도 해석</strong><span className="fl-tag t-llm">LLM</span>
+                <p>요청 → 할 일 목록</p>
               </div>
               <b aria-hidden>→</b>
               <div>
-                <strong>실행 계획</strong><span className="fl-tag is-code">코드</span>
-                <p>값 검사 → 반영 → 다시 계산</p>
+                <strong>실행 계획</strong><span className="fl-tag t-code">코드</span>
+                <p>할 일마다 도구·Sub-agent를 정하고, 값을 검사한 뒤 반영</p>
+              </div>
+              <b aria-hidden>→</b>
+              <div>
+                <strong>Sub-agent 호출</strong><span className="fl-tag t-llm">LLM</span>
+                <p>Sales 전략 문안</p>
               </div>
             </div>
-            <Chips label={`할 수 있는 행동 ${ACTION_TYPES.length}`} list={ACTION_TYPES.map((a) => ACTION_LABEL[a])} />
+            <Chips label={`할 수 있는 일 ${ACTION_TYPES.length}`} list={ACTION_TYPES.map((a) => ACTION_LABEL[a])} />
           </>
         )}
 
         {on === 'out' && (
           <>
-            <Head title={`초안 ${slides.length}장`} extra={checks ? <span className="muted small">확인할 곳 {checks}곳</span> : null} />
+            <Head title="Output" extra={<span className="muted small tnum">{slides.length}장{checks ? ` · 확인할 곳 ${checks}곳` : ''} · PPT·PDF</span>} />
             <ol className="fl-slides">
               {slides.map((s, i) => (
                 <li key={`${s.id}-${i}`}>
@@ -219,69 +221,58 @@ export function FlowView({ report, data, input, tips, slides, avail, checks, exa
           </>
         )}
 
-        {on === 'tacit' && <Tacit input={input} tips={myTips} avail={avail} />}
+        {on === 'tacit' && <Tacit mine={myTips} onTips={onTips} />}
 
         {on === 'tool' && (
           <>
             <Head title="도구" kind="Tool" />
-            <ul className="fl-cards">
-              {([
-                ['계산', '코드', '발행 일정 · 증액 한도 · 밴드'],
-                ['조회', '코드', '공시 · 금리 · 발행 사례'],
-                ['문안', '규칙 · LLM', '장표 문안, Sales 전략만 LLM'],
-                ['산출', '코드', 'PPT · PDF'],
-                ['검수', '코드', checks ? `숫자 대조 · 확인할 곳 ${checks}곳` : '숫자 대조'],
-              ] as const).map(([k, how, v]) => (
-                <li key={k}>
-                  <strong>{k}</strong>
-                  <span className={`fl-tag${how === '코드' ? ' is-code' : ''}`}>{how}</span>
-                  <p>{v}</p>
-                </li>
-              ))}
-            </ul>
+            <Atoms
+              groups={[{
+                items: [
+                  { key: 'calc', tag: '코드', tone: 'code', title: '계산', body: '발행 일정 · 최대 증액 · 금리 밴드' },
+                  { key: 'look', tag: '코드', tone: 'code', title: '조회', body: '공시 · 금리 · 같은 등급 발행 사례' },
+                  { key: 'text', tag: '규칙·LLM', tone: 'llm', title: '문안', body: '장표 문안은 규칙으로, Sales 전략만 LLM' },
+                  { key: 'out', tag: '코드', tone: 'code', title: '산출', body: 'PPT · PDF' },
+                  { key: 'qa', tag: '코드', tone: 'code', title: '검수', body: checks ? `숫자 대조 · 확인할 곳 ${checks}곳` : '숫자 대조' },
+                ],
+              }]}
+            />
+          </>
+        )}
+
+        {on === 'data' && (
+          <>
+            <Head title="데이터" extra={<span className="muted small tnum">{ext.length + int.length}건 · {data.asof} 기준</span>} />
+            <Atoms
+              groups={[{
+                items: [
+                  ...ext.map((r) => ({ key: `e|${r.label}|${r.source}`, tag: '외부', tone: 'ext', body: <>{r.label}<span className="fl-src">{r.source}</span></> })),
+                  ...int.map((r) => ({ key: `i|${r.label}|${r.source}`, tag: '내부', tone: 'int', body: <>{r.label}<span className="fl-src">{r.source} · <b className="dk2-unlinked">미연계</b></span></> })),
+                ],
+              }]}
+            />
+            <button type="button" className="dk2-more" onClick={onData}>데이터 탭에서 보기</button>
           </>
         )}
 
         {on === 'memory' && (
           <>
             <Head title="기억" kind="Memory" />
-            <Kv
-              rows={[
-                ['덱 상태', '조건 · 문안, 이 브라우저에 저장'],
-                ['대화', '최근 6개 메시지'],
-                ['회사·담당자 메모', <span key="m" className="muted">정책 정해지면</span>],
+            <Atoms
+              groups={[
+                {
+                  head: '지금 쓰는 것',
+                  items: [
+                    { key: 'deck', tag: '덱 상태', body: '조건 · 문안을 이 브라우저에 저장' },
+                    { key: 'chat', tag: '대화', body: '최근 6개 메시지를 요청과 함께 보냄' },
+                  ],
+                },
+                {
+                  head: '메모 (예시)',
+                  items: MEMORY_SAMPLES.map(([who, body], i) => ({ key: `m${i}`, tag: who, tone: 'sample', body })),
+                },
               ]}
             />
-          </>
-        )}
-
-        {on === 'collect' && (
-          <>
-            <Head title="데이터 수집" />
-            <Kv
-              rows={[
-                ['시점', `초안을 열 때 · ${data.asof} 기준`],
-                ['외부', `${ext.length}건`],
-                ['내부', <span key="i">{int.length}건 <b className="dk2-unlinked">미연계</b></span>],
-              ]}
-            />
-            <More onData={onData} />
-          </>
-        )}
-
-        {on === 'ext' && (
-          <>
-            <Head title="외부 데이터" extra={<span className="muted small tnum">{ext.length}건</span>} />
-            <Kv rows={byProvider(ext, true).map(([n, c]) => [n, `${c}건`])} />
-            <More onData={onData} />
-          </>
-        )}
-
-        {on === 'int' && (
-          <>
-            <Head title="내부 데이터" extra={<b className="dk2-unlinked">미연계</b>} />
-            <Kv rows={byProvider(int, false).map(([n, c]) => [n, `${c}건`])} />
-            <More onData={onData} />
           </>
         )}
       </section>
@@ -289,26 +280,16 @@ export function FlowView({ report, data, input, tips, slides, avail, checks, exa
   );
 }
 
-function Head({ title, kind, extra }: { title: string; kind?: string; extra?: ReactNode }) {
+function Head({ title, kind, extra, right }: { title: string; kind?: string; extra?: ReactNode; right?: ReactNode }) {
   return (
-    <h3 className="fl-head">
-      {title}
-      {kind && <i className="fl-kind">{kind}</i>}
-      {extra}
-    </h3>
-  );
-}
-
-function Kv({ rows }: { rows: [ReactNode, ReactNode][] }) {
-  return (
-    <dl className="fl-kv">
-      {rows.map(([k, v], i) => (
-        <div key={i}>
-          <dt>{k}</dt>
-          <dd>{v}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="fl-head-row">
+      <h3 className="fl-head">
+        {title}
+        {kind && <i className="fl-kind">{kind}</i>}
+        {extra}
+      </h3>
+      {right}
+    </div>
   );
 }
 
@@ -323,91 +304,165 @@ function Chips({ label, list }: { label: string; list: string[] }) {
   );
 }
 
-function More({ onData }: { onData: () => void }) {
+// 암묵지·도구·데이터·기억 공통 줄: 태그 + 한 문장 (+ 고치기·지우기)
+type Atom = { key: string; tag: string; tone?: string; title?: string; body: ReactNode; act?: ReactNode; edit?: ReactNode };
+function Atoms({ groups }: { groups: { head?: string; items: Atom[] }[] }) {
   return (
-    <button type="button" className="dk2-more" onClick={onData}>
-      데이터 탭에서 보기
-    </button>
+    <dl className="fl-atoms">
+      {groups.map((g, gi) => {
+        const items = g.items;
+        if (!items.length) return null;
+        return (
+          <div key={g.head ?? gi} className={g.head ? undefined : 'is-flat'}>
+            {g.head && <dt>{g.head}</dt>}
+            <dd>
+              <ul>
+                {items.map((a) => (
+                  <li key={a.key} className="fl-atom">
+                    {a.edit ?? (
+                      <>
+                        <span className={`fl-tag${a.tone ? ` t-${a.tone}` : ''}`}>{a.tag}</span>
+                        <p className="fl-atom-text">
+                          {a.title && <strong>{a.title}</strong>}
+                          {a.body}
+                        </p>
+                        {a.act}
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
   );
 }
 
-function Tacit({ input, tips, avail }: { input: DeckInput; tips: Knowledge[]; avail: (id: ItemId) => boolean }) {
-  const [tab, setTab] = useState<'tpl' | 'toc' | 'tips' | 'rules'>('tpl');
-  const cur = templateOf(input.items);
-  const bySlide = TIP_SLIDES.map(([k, label]) => [label, tips.filter((t) => t.slide === k)] as const).filter(([, xs]) => xs.length);
-  const parts: { key: string; label: string; secs: Section[] }[] = [
-    ...PARTS.map((p) => ({ key: p.key, label: `${p.key}. ${p.label}`, secs: SECTIONS.filter((s) => s.part === p.key) })),
-    { key: 'A', label: 'Appendix', secs: SECTIONS.filter((s) => s.appendix) },
+// 암묵지: 목차·규칙(코드에 반영, 읽기만) + 장표별 노하우(DB, 고치기·더하기·지우기). 모두 같은 줄 모양.
+const AUTHOR_KEY = 'dcm.fb.author';
+const CLIENT_KEY = 'dcm.client.v1';
+function ls(key: string) {
+  try {
+    return localStorage.getItem(key) ?? '';
+  } catch {
+    return '';
+  }
+}
+function clientId() {
+  let id = ls(CLIENT_KEY);
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    try {
+      localStorage.setItem(CLIENT_KEY, id);
+    } catch {
+      /* 무시 */
+    }
+  }
+  return id;
+}
+async function post(payload: Record<string, unknown>) {
+  const r = await fetch('/api/deck/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, author: ls(AUTHOR_KEY) || null, clientId: clientId() }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error ?? '저장하지 못했어요.');
+  return j as { id: number };
+}
+
+type Draft = { id: number | null; slide: KnowledgeSlide; kind: KnowledgeKind; grade: string | null; body: string; source: string | null };
+
+function Tacit({ mine, onTips }: { mine: Knowledge[]; onTips: (list: Knowledge[]) => void }) {
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ text: string; undo?: number } | null>(null);
+  const toc = tocAtoms();
+
+  async function refresh() {
+    const r = await fetch('/api/deck/knowledge', { cache: 'no-store' });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) onTips(j.items ?? []);
+  }
+  async function run(fn: () => Promise<unknown>, done: { text: string; undo?: number }) {
+    setBusy(true);
+    try {
+      await fn();
+      setNote(done);
+      setDraft(null);
+      await refresh();
+    } catch (e) {
+      setNote({ text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+  const save = (d: Draft) => {
+    if (d.body.trim().length < 5) return setNote({ text: '내용을 5자 이상 적어 주세요.' });
+    run(() => post({ action: 'save', ...d }), { text: d.id ? '고쳤어요.' : '더했어요.' });
+  };
+  const remove = (k: Knowledge) => run(() => post({ action: 'delete', id: k.id }), { text: '지웠어요.', undo: k.id });
+  const restore = (id: number) => run(() => post({ action: 'restore', id }), { text: '되살렸어요.' });
+
+  const editor = (d: Draft) => (
+    <form className="fl-edit" onSubmit={(e) => { e.preventDefault(); save(d); }} aria-label={d.id ? '암묵지 고치기' : '암묵지 더하기'}>
+      <div className="fl-edit-row">
+        <select aria-label="장표" value={d.slide} onChange={(e) => setDraft({ ...d, slide: e.target.value as KnowledgeSlide })}>
+          {TIP_SLIDES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </select>
+        <select aria-label="유형" value={d.kind} onChange={(e) => setDraft({ ...d, kind: e.target.value as KnowledgeKind })}>
+          {KINDS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </select>
+      </div>
+      <textarea aria-label="내용" rows={2} maxLength={500} value={d.body} autoFocus onChange={(e) => setDraft({ ...d, body: e.target.value })} placeholder="예: AA급 2년물은 보험사 참여가 적어 3년물 중심으로 제안" />
+      <div className="fl-edit-act">
+        <button type="submit" className="btn" disabled={busy}>{busy ? '저장 중…' : '저장'}</button>
+        <button type="button" className="linklike" onClick={() => setDraft(null)}>취소</button>
+      </div>
+    </form>
+  );
+
+  const fixedAtom = (f: Fixed, i: number): Atom => ({ key: `f${f.slide}${i}`, tag: f.kind === 'toc' ? '목차' : '규칙', tone: 'fixed', body: f.body });
+  const tipAtom = (k: Knowledge): Atom => ({
+    key: `k${k.id}`,
+    tag: KIND_LABEL[k.kind],
+    tone: k.kind,
+    body: <>{k.body}{k.grade && <span className="fl-grade">{k.grade}</span>}</>,
+    edit: draft?.id === k.id ? editor(draft) : undefined,
+    act: (
+      <span className="fl-atom-act">
+        <button type="button" className="linklike" onClick={() => setDraft({ id: k.id, slide: k.slide, kind: k.kind, grade: k.grade, body: k.body, source: k.source })}>고치기</button>
+        <button type="button" className="linklike" onClick={() => remove(k)} disabled={busy}>지우기</button>
+      </span>
+    ),
+  });
+
+  const groups = [
+    { head: '목차', items: toc.map(fixedAtom) },
+    ...TIP_SLIDES.map(([key, label]) => ({
+      head: label,
+      items: [...RULES.filter((r) => r.slide === key).map(fixedAtom), ...mine.filter((k) => k.slide === key).map(tipAtom)],
+    })).filter((g) => g.items.length),
   ];
+
   return (
     <>
-      <Head title="암묵지" kind="Skill" />
-      <div className="fl-subtabs" role="tablist" aria-label="암묵지">
-        {([['tpl', `템플릿 ${TEMPLATES.length}`], ['toc', '목차'], ['tips', `장표별 팁 ${tips.length}`], ['rules', `작성 규칙 ${RULES.length}`]] as const).map(([k, l]) => (
-          <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>
-        ))}
-      </div>
-
-      {tab === 'tpl' && (
-        <ul className="fl-cards is-2">
-          {TEMPLATES.map((t) => (
-            <li key={t.key} className={cur === t.key ? 'is-on' : undefined}>
-              <strong>{t.label}</strong>
-              {cur === t.key && <span className="fl-tag is-code">지금</span>}
-              <p>{t.hint}</p>
-            </li>
-          ))}
-        </ul>
+      <Head
+        title="암묵지"
+        kind="Skill"
+        extra={<span className="muted small tnum">{toc.length + RULES.length + mine.length}개</span>}
+        right={
+          <button type="button" className="fl-add" onClick={() => setDraft({ id: null, slide: 'all', kind: 'judge', grade: null, body: '', source: null })} disabled={!!draft && !draft.id}>
+            + 더하기
+          </button>
+        }
+      />
+      {note && (
+        <p className="fl-note small" role="status">
+          {note.text}
+          {note.undo && <> <button type="button" className="linklike" onClick={() => restore(note.undo!)} disabled={busy}>되돌리기</button></>}
+        </p>
       )}
-
-      {tab === 'toc' && (
-        <dl className="fl-kv fl-toc">
-          {parts.map((p) => (
-            <div key={p.key}>
-              <dt>{p.label}</dt>
-              <dd>
-                <ul>
-                  {p.key === 'A'
-                    ? p.secs.flatMap((s) => s.items).map((i) => (
-                        <li key={i.id} className={input.items[i.id] && avail(i.id) ? 'is-on' : undefined}>{i.title}</li>
-                      ))
-                    : p.secs.map((s) => {
-                        const n = s.items.filter((i) => input.items[i.id] && avail(i.id)).length;
-                        return (
-                          <li key={s.key} className={n ? 'is-on' : undefined}>
-                            {s.label} <span className="tnum">{n}/{s.items.length}</span>
-                          </li>
-                        );
-                      })}
-                </ul>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
-
-      {tab === 'tips' && (
-        bySlide.length ? (
-          <dl className="fl-kv fl-tips">
-            {bySlide.map(([label, xs]) => (
-              <div key={label}>
-                <dt>{label}</dt>
-                <dd>
-                  <ul>
-                    {xs.map((k) => (
-                      <li key={k.id}><span className="fl-tag">{KIND_LABEL[k.kind]}</span>{k.body}</li>
-                    ))}
-                  </ul>
-                </dd>
-              </div>
-            ))}
-          </dl>
-        ) : (
-          <p className="muted">이 등급에 맞는 장표별 팁이 아직 없어요.</p>
-        )
-      )}
-
-      {tab === 'rules' && <Kv rows={RULES} />}
+      {draft && !draft.id && <div className="fl-edit-new">{editor(draft)}</div>}
+      <Atoms groups={groups} />
     </>
   );
 }
