@@ -1,4 +1,5 @@
 // 홈 '영업 추천': 공모 회사채 만기도래 일정 + 과거 주관 이력으로 RM 이 먼저 연락할 회사를 고른다.
+// 순서는 만기가 가까운 순(같은 날이면 만기 금액이 큰 순). 점수는 같은 날·같은 금액일 때만 쓴다.
 // 기준은 이 파일 맨 위 RECO 하나에서 바꾼다 (현업 의견 → 숫자만 수정).
 import type { BondIssue, Maturity } from './types';
 
@@ -105,7 +106,7 @@ export function buildReco(maturities: Maturity[], history: HistoryRow[], today: 
       score,
     });
   }
-  return out.sort((a, b) => b.score - a.score || a.first_dt.localeCompare(b.first_dt));
+  return out.sort((a, b) => a.first_dt.localeCompare(b.first_dt) || b.amount_krw - a.amount_krw || b.score - a.score);
 }
 
 export const historySince = (today: string) => `${Number(today.slice(0, 4)) - RECO.historyYears}${today.slice(4)}`;

@@ -99,7 +99,7 @@ export async function RecoFeed({ grade }: { grade: Grade | null }) {
     <SectionHead
       id="reco-h"
       title="영업 추천"
-      info={`앞으로 ${Math.round(RECO.windowDays / 30)}개월 안에 공모 회사채(금융채 제외) 만기가 돌아오는 회사를 만기 시기(만기 ${RECO.pitchFrom}~${RECO.pitchTo}일 전이 제안 적기), 만기 금액, 최근 ${RECO.historyYears}년 공모채 발행 횟수로 점수를 매겼습니다. 등급은 최근 공모채 기준입니다. 이미 차환 신고서를 낸 회사는 맨 아래에 따로 둡니다.`}
+      info={`앞으로 ${Math.round(RECO.windowDays / 30)}개월 안에 공모 회사채(금융채 제외) 만기가 돌아오는 회사를 만기가 가까운 순으로 보여 줍니다(같은 날은 만기 금액이 큰 순). 주관 이력은 최근 ${RECO.historyYears}년 공모채 기준, 등급은 최근 공모채 기준입니다. 이미 차환 신고서를 낸 회사는 맨 아래에 따로 둡니다.`}
       right={right}
     />
   );

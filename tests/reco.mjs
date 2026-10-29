@@ -57,6 +57,7 @@ eq('주관 빈도 상위', by.BIG.top_leads.map((x) => x.firm), ['KB증권', 'NH
 eq('금액이 크면 점수 높음', by.BIG.score > by.SMALL.score, true);
 eq('D-12 는 제안 적기보다 낮음', by.SOON.score < by.BIG.score, true);
 eq('남은 일수', by.SOON.days_left, 12);
+eq('만기 가까운 순, 같은 날은 금액 큰 순, 그다음 점수', r.map((x) => x.corp_code), ['SOON', 'REFI', 'BIG', 'OLDRATE', 'NORATE', 'SMALL']);
 eq('차환 신호', by.REFI.refi, true);
 eq('등급: 최근 공모채 우선', [by.BIG.grade, by.OLDRATE.grade, by.OLDRATE.rating], ['AA', 'BBB', 'BBB+']);
 eq('등급: 이력 없으면 만기 회차, 둘 다 없으면 없음', [by.SMALL.grade, by.NORATE.grade], ['AA', null]);
