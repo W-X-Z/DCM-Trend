@@ -31,7 +31,8 @@ export function rowsOf(report: DataReport, kind: Src['kind']): DataRow[] {
   return [...map.values()];
 }
 
-const short = (label: string) => label.replace(/^(Ⅰ|Ⅱ)-\d+(-[①-⑧])?\.?\s*/, '').replace(/^App\d+\.\s*/, '');
+// 장표 이름에서 번호 떼기: 'Ⅰ-1-① 제안 Term-sheet' → '제안 Term-sheet'
+export const short = (label: string) => label.replace(/^(Ⅰ|Ⅱ)-\d+(-[①-⑧])?\.?\s*/, '').replace(/^App\d+\.\s*/, '');
 export function SlideNames({ list }: { list: string[] }) {
   const names = [...new Set(list.map(short))];
   return (

@@ -2,7 +2,8 @@
 
 // 흐름도: 사용자 입력 → 제안서 Agent(의도 해석 → 실행 계획 → Sub-agent) → Output.
 // Agent 아래에 암묵지(Skill)·도구(Tool)·데이터·기억(Memory)을 나란히. 상자를 누르면 아래에 짧게 열린다.
-// 암묵지·도구·데이터·기억의 상세는 모두 같은 줄 모양(태그 + 한 문장)으로 보이고, 암묵지 중 장표별 노하우는 여기서 바로 고치고 더한다.
+// 넷의 상세는 같은 나무 모양(왼쪽 묶음 | 태그 + 한 문장): 암묵지·데이터는 장표별, 도구는 하는 일별, 기억은 범위별(공통·이 에이전트·업무).
+// 암묵지 중 장표별 노하우는 여기서 바로 고치고 더한다.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ACTION_TYPES, type ActionType } from '@/lib/deck/agent';
 import { PARTS, SECTIONS, TEMPLATES } from '@/lib/deck/catalog';
@@ -10,7 +11,7 @@ import { KINDS, KIND_LABEL, SLIDES as TIP_SLIDES, forGrade, type Knowledge, type
 import type { DataReport } from '@/lib/deck/sources';
 import type { Slide } from '@/lib/deck/model';
 import type { DeckData } from '@/lib/deck/types';
-import { rowsOf } from './DataView';
+import { rowsOf, short, type DataRow } from './DataView';
 
 type Node = 'entry' | 'agent' | 'out' | 'tacit' | 'tool' | 'data' | 'memory';
 
@@ -64,12 +65,98 @@ function tocAtoms(): Fixed[] {
   ];
 }
 
-// 기억 예시: 회사·담당자 메모는 정책이 정해지면 붙인다 (지금은 보여 주기만, Agent 에는 보내지 않음)
-const MEMORY_SAMPLES: [string, string][] = [
-  ['담당자', 'Term-sheet는 2년·3년 두 트랜치안을 먼저 보여 주길 선호'],
-  ['담당자', '수요예측 사례는 같은 등급만(등급군 전체 X)'],
-  ['회사', '재무팀은 납입일을 월초로 잡길 원함 (지난 미팅)'],
+// 기억(개인): 공통(모든 에이전트) / 이 에이전트 / 업무. 팀 단위로 쓰는 것은 암묵지.
+// 예시만 보여 준다(정책이 정해지면 붙임). Agent 에는 보내지 않는다.
+const MEMORY: { head: string; items: [tag: string, body: string][] }[] = [
+  { head: '공통', items: [['프로필', '위승종 대리, Technology Industry부 RA'], ['선호', '보고 문구는 개조식, 명사형으로 끝낸다.']] },
+  {
+    head: '제안서 Agent',
+    items: [['승인', 'DM 자료를 바꿀 때는 나에게 승인 요청을 보낸다.'], ['선호', 'Term-sheet는 2년·3년 두 트랜치안을 먼저 보여 준다.'], ['선호', '초안이 나오면 확인할 곳부터 채팅으로 알려 준다.']],
+  },
+  { head: '업무', items: [['담당', 'IT·반도체 섹터, A급 이상 발행사'], ['메모', '이 회사 재무팀은 납입일을 월초로 잡길 원한다.']] },
 ];
+
+// 도구: 무슨 일을 하는지(입력 → 결과). 코드 도구는 지금 쓰는 것, AI 도구 중 '예시'는 고안한 것.
+type Tool = { key: string; ai?: boolean; sample?: boolean; name: string; does: string };
+function toolGroups(checks: number): { head: string; items: Tool[] }[] {
+  return [
+    {
+      head: '조회',
+      items: [
+        { key: 'dart', name: '공시 조회', does: '회사 코드로 증권신고서·정정신고서·발행실적을 불러온다' },
+        { key: 'ecos', name: '금리 조회', does: '국고채·회사채·기준금리 시계열을 불러온다' },
+        { key: 'peer', name: '발행 사례 조회', does: '등급·기간 조건으로 공모 회사채 발행 결과를 찾는다' },
+        { key: 'cal', name: '일정 조회', does: '공휴일·금통위·FOMC·정기보고서 기한을 불러온다' },
+      ],
+    },
+    {
+      head: '계산',
+      items: [
+        { key: 'bday', name: '영업일 계산', does: '기준일에서 N영업일 뒤 날짜를 구한다(주말·공휴일 제외)' },
+        { key: 'mult', name: '증액 배율 계산', does: '회차별 신고 금액 대비 최종 발행 금액 배율을 구한다' },
+        { key: 'band', name: '밴드 계산', does: '기준 금리에 ±bp를 더해 밴드 상·하단을 구한다' },
+      ],
+    },
+    {
+      head: '생성',
+      items: [
+        { key: 'draft', ai: true, name: '문안 초안', does: '사실 묶음과 암묵지로 장표 문안을 쓴다(지금은 Sales 전략)' },
+        { key: 'sum', ai: true, sample: true, name: '공시 요약', does: '신고서 본문에서 발행 조건·수요예측 결과를 뽑아 요약한다' },
+        { key: 'view', ai: true, sample: true, name: '리포트 요약', does: '증권사 리포트·DM 판의 금리 의견을 장표 문구로 줄인다' },
+      ],
+    },
+    {
+      head: '판단',
+      items: [
+        { key: 'fb', ai: true, sample: true, name: '내용 피드백', does: '암묵지 기준으로 초안의 빠진 점·어긋난 점을 짚는다' },
+        { key: 'pick', ai: true, sample: true, name: '비교 사례 추천', does: '같은 등급·업종 발행 중 비교할 회차를 고르고 이유를 붙인다' },
+        { key: 'point', ai: true, sample: true, name: 'Sales 포인트 찾기', does: '투자자 구분별 수요예측 참여에서 강조할 점 후보를 뽑는다' },
+      ],
+    },
+    {
+      head: '검수',
+      items: [
+        { key: 'num', name: '숫자 대조', does: '문장 속 숫자가 수집한 데이터에 있는지 확인한다' },
+        { key: 'fcst', name: '전망 표현 찾기', does: '출처 없는 전망·단정 표현이 든 문장을 찾는다' },
+        { key: 'mark', name: '확인할 곳 표시', does: `입력·판단이 필요한 곳을 장표에 표시한다${checks ? `(지금 ${checks}곳)` : ''}` },
+      ],
+    },
+    {
+      head: '산출',
+      items: [
+        { key: 'pptx', name: 'PPT 만들기', does: '장표를 편집 가능한 PowerPoint(.pptx)로 만든다' },
+        { key: 'pdf', name: 'PDF 만들기', does: '장표를 PDF로 만든다' },
+      ],
+    },
+  ];
+}
+const toolAtom = (t: Tool): Atom => ({
+  key: t.key,
+  tag: t.ai ? 'AI' : '코드',
+  tone: t.ai ? 'llm' : 'code',
+  title: t.name,
+  body: <>{t.does}{t.sample && <span className="fl-src">예시</span>}</>,
+});
+
+// 데이터: 처음 쓰이는 장표 → 데이터 (외부·내부 칩)
+function dataGroups(report: DataReport, ext: DataRow[], int: DataRow[]) {
+  const order = new Map(report.items.map((it, i) => [it.label, i]));
+  const by = new Map<string, { at: number; items: Atom[] }>();
+  const add = (r: DataRow, kind: 'ext' | 'int') => {
+    const first = [...r.slides].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999))[0] ?? '기타';
+    const head = short(first);
+    const g = by.get(head) ?? { at: order.get(first) ?? 999, items: [] };
+    g.items.push(
+      kind === 'ext'
+        ? { key: `e|${r.label}|${r.source}`, tag: '외부', tone: 'ext', body: <>{r.label}<span className="fl-src" title={r.source}>{r.source}</span></> }
+        : { key: `i|${r.label}|${r.source}`, tag: '내부', tone: 'int', body: <>{r.label}<span className="fl-src">{r.source} · <b className="dk2-unlinked">미연계</b></span></> },
+    );
+    by.set(head, g);
+  };
+  ext.forEach((r) => add(r, 'ext'));
+  int.forEach((r) => add(r, 'int'));
+  return [...by.entries()].sort((a, b) => a[1].at - b[1].at).map(([head, g]) => ({ head, items: g.items }));
+}
 
 // 도식을 칸 너비에 맞춰 줄임
 function Fit({ children }: { children: ReactNode }) {
@@ -107,6 +194,8 @@ export function FlowView({ report, data, tips, slides, checks, examples, onGo, o
   const int = rowsOf(report, 'int');
   const myTips = forGrade(tips, data.company.rating_group);
   const tacitN = myTips.length + RULES.length + tocAtoms().length;
+  const tools = toolGroups(checks).flatMap((g) => g.items);
+  const toolN = { code: tools.filter((t) => !t.ai).length, ai: tools.filter((t) => t.ai).length };
 
   const box = (id: Node, body: ReactNode, cls = '') => {
     const [x, y, w, h] = BOX[id];
@@ -162,9 +251,9 @@ export function FlowView({ report, data, tips, slides, checks, examples, onGo, o
         )}
         {box('out', <><strong>Output</strong><span>편집·저장 가능한 장표</span></>)}
         {box('tacit', <><strong>암묵지 <i className="fl-kind">Skill</i></strong><span>목차 · 규칙 · 장표별 팁 {tacitN}</span></>, 'is-tacit')}
-        {box('tool', <><strong>도구 <i className="fl-kind">Tool</i></strong><span>계산 · 조회 · 문안 · 산출 · 검수</span></>)}
+        {box('tool', <><strong>도구 <i className="fl-kind">Tool</i></strong><span>코드 {toolN.code} · AI {toolN.ai}</span></>)}
         {box('data', <><strong>데이터</strong><span>외부 {ext.length} · 내부 {int.length} <b className="dk2-unlinked">미연계</b></span></>)}
-        {box('memory', <><strong>기억 <i className="fl-kind">Memory</i></strong><span>덱 상태 · 대화 · 메모</span></>)}
+        {box('memory', <><strong>기억 <i className="fl-kind">Memory</i></strong><span>공통 · 제안서 Agent · 업무</span></>)}
       </Fit>
 
       <section className="fl-detail" aria-live="polite">
@@ -199,7 +288,7 @@ export function FlowView({ report, data, tips, slides, checks, examples, onGo, o
               <b aria-hidden>→</b>
               <div>
                 <strong>Sub-agent 호출</strong><span className="fl-tag t-llm">LLM</span>
-                <p>Sales 전략 문안</p>
+                <p>Tool · 데이터 호출</p>
               </div>
             </div>
             <Chips label={`할 수 있는 일 ${ACTION_TYPES.length}`} list={ACTION_TYPES.map((a) => ACTION_LABEL[a])} />
@@ -226,53 +315,22 @@ export function FlowView({ report, data, tips, slides, checks, examples, onGo, o
         {on === 'tool' && (
           <>
             <Head title="도구" kind="Tool" />
-            <Atoms
-              groups={[{
-                items: [
-                  { key: 'calc', tag: '코드', tone: 'code', title: '계산', body: '발행 일정 · 최대 증액 · 금리 밴드' },
-                  { key: 'look', tag: '코드', tone: 'code', title: '조회', body: '공시 · 금리 · 같은 등급 발행 사례' },
-                  { key: 'text', tag: '규칙·LLM', tone: 'llm', title: '문안', body: '장표 문안은 규칙으로, Sales 전략만 LLM' },
-                  { key: 'out', tag: '코드', tone: 'code', title: '산출', body: 'PPT · PDF' },
-                  { key: 'qa', tag: '코드', tone: 'code', title: '검수', body: checks ? `숫자 대조 · 확인할 곳 ${checks}곳` : '숫자 대조' },
-                ],
-              }]}
-            />
+            <Atoms groups={toolGroups(checks).map((g) => ({ head: g.head, items: g.items.map(toolAtom) }))} />
           </>
         )}
 
         {on === 'data' && (
           <>
             <Head title="데이터" extra={<span className="muted small tnum">{ext.length + int.length}건 · {data.asof} 기준</span>} />
-            <Atoms
-              groups={[{
-                items: [
-                  ...ext.map((r) => ({ key: `e|${r.label}|${r.source}`, tag: '외부', tone: 'ext', body: <>{r.label}<span className="fl-src">{r.source}</span></> })),
-                  ...int.map((r) => ({ key: `i|${r.label}|${r.source}`, tag: '내부', tone: 'int', body: <>{r.label}<span className="fl-src">{r.source} · <b className="dk2-unlinked">미연계</b></span></> })),
-                ],
-              }]}
-            />
+            <Atoms groups={dataGroups(report, ext, int)} />
             <button type="button" className="dk2-more" onClick={onData}>데이터 탭에서 보기</button>
           </>
         )}
 
         {on === 'memory' && (
           <>
-            <Head title="기억" kind="Memory" />
-            <Atoms
-              groups={[
-                {
-                  head: '지금 쓰는 것',
-                  items: [
-                    { key: 'deck', tag: '덱 상태', body: '조건 · 문안을 이 브라우저에 저장' },
-                    { key: 'chat', tag: '대화', body: '최근 6개 메시지를 요청과 함께 보냄' },
-                  ],
-                },
-                {
-                  head: '메모 (예시)',
-                  items: MEMORY_SAMPLES.map(([who, body], i) => ({ key: `m${i}`, tag: who, tone: 'sample', body })),
-                },
-              ]}
-            />
+            <Head title="기억" kind="Memory" extra={<span className="muted small">개인 · 예시</span>} />
+            <Atoms groups={MEMORY.map((g) => ({ head: g.head, items: g.items.map(([tag, body], i) => ({ key: `${g.head}${i}`, tag, tone: 'fixed', body })) }))} />
           </>
         )}
       </section>
