@@ -7453,7 +7453,13 @@ a.cta-sm:hover {
 }
 
 .fl-src {
+  display: inline-block;
+  max-width: 340px;
   margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
   font-size: var(--s-1);
   color: var(--muted);
 }

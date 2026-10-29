@@ -2,7 +2,8 @@
 
 // 흐름도: 사용자 입력 → 제안서 Agent(의도 해석 → 실행 계획 → Sub-agent) → Output.
 // Agent 아래에 암묵지(Skill)·도구(Tool)·데이터·기억(Memory)을 나란히. 상자를 누르면 아래에 짧게 열린다.
-// 암묵지·도구·데이터·기억의 상세는 모두 같은 줄 모양(태그 + 한 문장)으로 보이고, 암묵지 중 장표별 노하우는 여기서 바로 고치고 더한다.
+// 넷의 상세는 같은 나무 모양(왼쪽 묶음 | 태그 + 한 문장): 암묵지·데이터는 장표별, 도구는 기능별, 기억은 주제별.
+// 암묵지 중 장표별 노하우는 여기서 바로 고치고 더한다.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ACTION_TYPES, type ActionType } from '@/lib/deck/agent';
 import { PARTS, SECTIONS, TEMPLATES } from '@/lib/deck/catalog';
@@ -10,7 +11,7 @@ import { KINDS, KIND_LABEL, SLIDES as TIP_SLIDES, forGrade, type Knowledge, type
 import type { DataReport } from '@/lib/deck/sources';
 import type { Slide } from '@/lib/deck/model';
 import type { DeckData } from '@/lib/deck/types';
-import { rowsOf } from './DataView';
+import { rowsOf, short, type DataRow } from './DataView';
 
 type Node = 'entry' | 'agent' | 'out' | 'tacit' | 'tool' | 'data' | 'memory';
 
@@ -64,12 +65,44 @@ function tocAtoms(): Fixed[] {
   ];
 }
 
-// 기억 예시: 회사·담당자 메모는 정책이 정해지면 붙인다 (지금은 보여 주기만, Agent 에는 보내지 않음)
-const MEMORY_SAMPLES: [string, string][] = [
-  ['담당자', 'Term-sheet는 2년·3년 두 트랜치안을 먼저 보여 주길 선호'],
-  ['담당자', '수요예측 사례는 같은 등급만(등급군 전체 X)'],
-  ['회사', '재무팀은 납입일을 월초로 잡길 원함 (지난 미팅)'],
+// 기억 예시: 개인·팀·회사 메모 (정책이 정해지면 붙인다. 지금은 보여 주기만, Agent 에는 보내지 않음)
+const MEMORY: { head: string; items: [scope: string, body: string][] }[] = [
+  { head: '승인', items: [['개인', 'DM 자료를 바꿀 때는 나에게 승인 요청을 보낸다.'], ['팀', '최종 PPT는 팀장 확인 뒤에 고객에게 보낸다.']] },
+  { head: '제안 방식', items: [['개인', 'Term-sheet는 2년·3년 두 트랜치안을 먼저 보여 준다.'], ['개인', '수요예측 사례는 같은 등급만 쓴다.']] },
+  { head: '회사', items: [['회사', '재무팀은 납입일을 월초로 잡길 원한다.']] },
 ];
+
+// 도구: 기능 → 도구 (태그: 코드 / AI)
+function toolGroups(checks: number) {
+  const code = (key: string, body: string) => ({ key, tag: '코드', tone: 'code', body });
+  return [
+    { head: '계산', items: [code('sch', '발행 일정: 기준일 + 25영업일, 기존 만기·연말 피함'), code('max', '최대 증액: 최근 4회 증액 배율 × 신고 금액'), code('band', '금리 밴드: 개별민평 ±30bp')] },
+    { head: '조회', items: [code('dart', '공시: 증권신고서 · 정정신고서 · 발행실적'), code('ecos', '금리: 국고채 · 회사채 · 기준금리'), code('peer', '같은 등급 최근 1년 발행 사례')] },
+    { head: '판단', items: [{ key: 'judge', tag: 'AI', tone: 'llm', body: 'Skill 기반 내용 피드백' }] },
+    { head: '산출', items: [code('pptx', 'PowerPoint(.pptx)'), code('pdf', 'PDF')] },
+    { head: '검수', items: [code('num', '데이터에 없는 숫자가 든 문장 빼기'), code('view', '출처 없는 전망·단정 표현 빼기'), code('mark', checks ? `확인할 곳 표시 · 지금 ${checks}곳` : '확인할 곳 표시')] },
+  ];
+}
+
+// 데이터: 처음 쓰이는 장표 → 데이터 (외부·내부 칩)
+function dataGroups(report: DataReport, ext: DataRow[], int: DataRow[]) {
+  const order = new Map(report.items.map((it, i) => [it.label, i]));
+  const by = new Map<string, { at: number; items: Atom[] }>();
+  const add = (r: DataRow, kind: 'ext' | 'int') => {
+    const first = [...r.slides].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999))[0] ?? '기타';
+    const head = short(first);
+    const g = by.get(head) ?? { at: order.get(first) ?? 999, items: [] };
+    g.items.push(
+      kind === 'ext'
+        ? { key: `e|${r.label}|${r.source}`, tag: '외부', tone: 'ext', body: <>{r.label}<span className="fl-src" title={r.source}>{r.source}</span></> }
+        : { key: `i|${r.label}|${r.source}`, tag: '내부', tone: 'int', body: <>{r.label}<span className="fl-src">{r.source} · <b className="dk2-unlinked">미연계</b></span></> },
+    );
+    by.set(head, g);
+  };
+  ext.forEach((r) => add(r, 'ext'));
+  int.forEach((r) => add(r, 'int'));
+  return [...by.entries()].sort((a, b) => a[1].at - b[1].at).map(([head, g]) => ({ head, items: g.items }));
+}
 
 // 도식을 칸 너비에 맞춰 줄임
 function Fit({ children }: { children: ReactNode }) {
@@ -162,9 +195,9 @@ export function FlowView({ report, data, tips, slides, checks, examples, onGo, o
         )}
         {box('out', <><strong>Output</strong><span>편집·저장 가능한 장표</span></>)}
         {box('tacit', <><strong>암묵지 <i className="fl-kind">Skill</i></strong><span>목차 · 규칙 · 장표별 팁 {tacitN}</span></>, 'is-tacit')}
-        {box('tool', <><strong>도구 <i className="fl-kind">Tool</i></strong><span>계산 · 조회 · 문안 · 산출 · 검수</span></>)}
+        {box('tool', <><strong>도구 <i className="fl-kind">Tool</i></strong><span>계산 · 조회 · 판단 · 산출 · 검수</span></>)}
         {box('data', <><strong>데이터</strong><span>외부 {ext.length} · 내부 {int.length} <b className="dk2-unlinked">미연계</b></span></>)}
-        {box('memory', <><strong>기억 <i className="fl-kind">Memory</i></strong><span>덱 상태 · 대화 · 메모</span></>)}
+        {box('memory', <><strong>기억 <i className="fl-kind">Memory</i></strong><span>개인 · 팀 · 회사 메모</span></>)}
       </Fit>
 
       <section className="fl-detail" aria-live="polite">
@@ -199,7 +232,7 @@ export function FlowView({ report, data, tips, slides, checks, examples, onGo, o
               <b aria-hidden>→</b>
               <div>
                 <strong>Sub-agent 호출</strong><span className="fl-tag t-llm">LLM</span>
-                <p>Sales 전략 문안</p>
+                <p>Tool · 데이터 호출</p>
               </div>
             </div>
             <Chips label={`할 수 있는 일 ${ACTION_TYPES.length}`} list={ACTION_TYPES.map((a) => ACTION_LABEL[a])} />
@@ -226,53 +259,22 @@ export function FlowView({ report, data, tips, slides, checks, examples, onGo, o
         {on === 'tool' && (
           <>
             <Head title="도구" kind="Tool" />
-            <Atoms
-              groups={[{
-                items: [
-                  { key: 'calc', tag: '코드', tone: 'code', title: '계산', body: '발행 일정 · 최대 증액 · 금리 밴드' },
-                  { key: 'look', tag: '코드', tone: 'code', title: '조회', body: '공시 · 금리 · 같은 등급 발행 사례' },
-                  { key: 'text', tag: '규칙·LLM', tone: 'llm', title: '문안', body: '장표 문안은 규칙으로, Sales 전략만 LLM' },
-                  { key: 'out', tag: '코드', tone: 'code', title: '산출', body: 'PPT · PDF' },
-                  { key: 'qa', tag: '코드', tone: 'code', title: '검수', body: checks ? `숫자 대조 · 확인할 곳 ${checks}곳` : '숫자 대조' },
-                ],
-              }]}
-            />
+            <Atoms groups={toolGroups(checks)} />
           </>
         )}
 
         {on === 'data' && (
           <>
             <Head title="데이터" extra={<span className="muted small tnum">{ext.length + int.length}건 · {data.asof} 기준</span>} />
-            <Atoms
-              groups={[{
-                items: [
-                  ...ext.map((r) => ({ key: `e|${r.label}|${r.source}`, tag: '외부', tone: 'ext', body: <>{r.label}<span className="fl-src">{r.source}</span></> })),
-                  ...int.map((r) => ({ key: `i|${r.label}|${r.source}`, tag: '내부', tone: 'int', body: <>{r.label}<span className="fl-src">{r.source} · <b className="dk2-unlinked">미연계</b></span></> })),
-                ],
-              }]}
-            />
+            <Atoms groups={dataGroups(report, ext, int)} />
             <button type="button" className="dk2-more" onClick={onData}>데이터 탭에서 보기</button>
           </>
         )}
 
         {on === 'memory' && (
           <>
-            <Head title="기억" kind="Memory" />
-            <Atoms
-              groups={[
-                {
-                  head: '지금 쓰는 것',
-                  items: [
-                    { key: 'deck', tag: '덱 상태', body: '조건 · 문안을 이 브라우저에 저장' },
-                    { key: 'chat', tag: '대화', body: '최근 6개 메시지를 요청과 함께 보냄' },
-                  ],
-                },
-                {
-                  head: '메모 (예시)',
-                  items: MEMORY_SAMPLES.map(([who, body], i) => ({ key: `m${i}`, tag: who, tone: 'sample', body })),
-                },
-              ]}
-            />
+            <Head title="기억" kind="Memory" extra={<span className="muted small">예시</span>} />
+            <Atoms groups={MEMORY.map((g) => ({ head: g.head, items: g.items.map(([scope, body], i) => ({ key: `${g.head}${i}`, tag: scope, tone: 'fixed', body })) }))} />
           </>
         )}
       </section>
