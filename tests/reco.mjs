@@ -27,38 +27,40 @@ const mat = (corp, dt, amt, extra = {}) => ({
   amount_krw: amt, tenor_months: 36, coupon_pct: null, yield_pct: null, ytm_pct: null, rating: 'AA-', rating_group: 'AA',
   lead_managers: null, nh_involved: false, nh_lead: false, dart_url: null, refi_signal: false, ...extra,
 });
-const iss = (corp, dt, leads, nh_lead, nh_involved = nh_lead) => ({ corp_code: corp, deal_dt: dt, lead_managers: leads, nh_lead, nh_involved });
+const iss = (corp, dt, leads, nh_lead, nh_involved = nh_lead, rating = null, rating_group = null) => ({ corp_code: corp, deal_dt: dt, lead_managers: leads, nh_lead, nh_involved, rating, rating_group });
 
 const mats = [
-  mat('KEEP', '2027-01-20', 3e11),
-  mat('WIN', '2027-01-20', 3e11),
-  mat('CO', '2027-01-20', 3e11),
-  mat('NEW', '2027-01-20', 3e11),
-  mat('SOON', '2026-11-10', 3e11),
+  mat('BIG', '2027-01-20', 5e11),
+  mat('SMALL', '2027-01-20', 3e10),
+  mat('SOON', '2026-11-10', 5e11),
   mat('FIN', '2027-01-20', 3e11, { sub_type: '금융채' }),
   mat('PAST', '2026-10-01', 3e11),
   mat('FAR', '2027-06-30', 3e11),
   mat('REFI', '2027-01-05', 1e11, { refi_signal: true }),
+  mat('NORATE', '2027-01-20', 3e11, { rating: null, rating_group: null }),
+  mat('OLDRATE', '2027-01-20', 3e11, { rating: 'A+', rating_group: 'A' }),
 ];
 const hist = [
-  iss('KEEP', '2025-01-10', 'KB증권, NH투자증권', true), iss('KEEP', '2024-01-10', 'KB증권', false),
-  iss('WIN', '2025-01-10', 'KB증권, 한국투자증권', false), iss('WIN', '2023-01-10', 'NH투자증권', true),
-  iss('CO', '2025-01-10', 'KB증권', false, true),
-  iss('NEW', '2025-01-10', 'KB증권', false),
-  iss('KEEP', '2027-01-01', 'NH투자증권', true), // 오늘 뒤 날짜는 무시
+  iss('BIG', '2025-01-10', 'KB증권, NH투자증권', true, true, 'AA-', 'AA'), iss('BIG', '2024-01-10', 'KB증권', false),
+  iss('SMALL', '2025-01-10', 'KB증권, 한국투자증권', false),
+  iss('BIG', '2027-01-01', 'NH투자증권', true), // 오늘 뒤 날짜는 무시
+  iss('OLDRATE', '2025-06-10', '삼성증권', false, false, 'BBB+', 'BBB'), iss('OLDRATE', '2022-06-10', '삼성증권', false, false, 'A0', 'A'),
 ];
 const r = m.buildReco(mats, hist, today);
 const by = Object.fromEntries(r.map((x) => [x.corp_code, x]));
 
 eq('금융채·지난 만기·구간 밖 제외', ['FIN', 'PAST', 'FAR'].map((c) => c in by), [false, false, false]);
-eq('관계 구분', ['KEEP', 'WIN', 'CO', 'NEW'].map((c) => by[c].rel), ['keep', 'win', 'co', 'new']);
-eq('직전 회차 주관사', by.WIN.last_leads, ['KB증권', '한국투자증권']);
-eq('이력 건수(오늘 뒤 제외)', by.KEEP.issues, 2);
-eq('주관 빈도 상위', by.KEEP.top_leads.map((x) => x.firm), ['KB증권', 'NH투자증권']);
-eq('관계 점수 순서', by.KEEP.score > by.WIN.score && by.WIN.score > by.CO.score && by.CO.score > by.NEW.score, true);
-eq('D-12 는 제안 적기보다 낮음', by.SOON.score < by.KEEP.score, true);
+eq('직전 회차 주관사', by.SMALL.last_leads, ['KB증권', '한국투자증권']);
+eq('이력 건수(오늘 뒤 제외)', by.BIG.issues, 2);
+eq('NH 대표 횟수', [by.BIG.nh_lead_n, by.SMALL.nh_lead_n], [1, 0]);
+eq('주관 빈도 상위', by.BIG.top_leads.map((x) => x.firm), ['KB증권', 'NH투자증권']);
+eq('금액이 크면 점수 높음', by.BIG.score > by.SMALL.score, true);
+eq('D-12 는 제안 적기보다 낮음', by.SOON.score < by.BIG.score, true);
 eq('남은 일수', by.SOON.days_left, 12);
 eq('차환 신호', by.REFI.refi, true);
+eq('등급: 최근 공모채 우선', [by.BIG.grade, by.OLDRATE.grade, by.OLDRATE.rating], ['AA', 'BBB', 'BBB+']);
+eq('등급: 이력 없으면 만기 회차, 둘 다 없으면 없음', [by.SMALL.grade, by.NORATE.grade], ['AA', null]);
+eq('등급 묶음', ['AAA', 'AA0', 'A-', 'BBB+', 'BB', '', null].map((x) => m.gradeOf(x)), ['AAA', 'AA', 'A', 'BBB', 'BBB', null, null]);
 eq('금액 점수 범위', [m.amountFit(1e10), m.amountFit(5e11), m.amountFit(1e13)], [0, 1, 1]);
 
 console.log(`reco: ${pass} passed${process.exitCode ? ', some failed' : ''}`);

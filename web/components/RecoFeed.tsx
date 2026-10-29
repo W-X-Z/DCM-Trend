@@ -5,9 +5,7 @@ import { SectionHead } from './Ui';
 import { kstToday } from '@/lib/filings';
 import { won } from '@/lib/format';
 import { getBondHistory, getMaturities } from '@/lib/queries';
-import { REL_META, RECO, buildReco, historySince, windowEnd, type RecoItem, type RecoRel } from '@/lib/reco';
-
-const RELS = Object.keys(REL_META) as RecoRel[];
+import { GRADES, RECO, buildReco, historySince, windowEnd, type Grade, type RecoItem } from '@/lib/reco';
 const SHOW = 18;
 
 const md = (d: string) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일`;
@@ -37,11 +35,10 @@ function Card({ it }: { it: RecoItem }) {
   const t = it.tranches;
   const series = t[0].series ? `제${t[0].series}회` : '회차 미상';
   return (
-    <li className={`rc r-${it.rel}`}>
+    <li className="rc">
       <div className="rc-top">
         <span className="rc-d tnum">D-{it.days_left}</span>
         <span className="rc-dt">{md(it.first_dt)} 만기</span>
-        <span className="rc-rel" title={REL_META[it.rel].desc}>{REL_META[it.rel].label}</span>
       </div>
       <div className="rc-co">
         <Link href={`/company/${it.corp_code}`} className="rc-corp">{it.corp_name}</Link>
@@ -86,7 +83,7 @@ function Card({ it }: { it: RecoItem }) {
   );
 }
 
-export async function RecoFeed({ rel }: { rel: RecoRel | null }) {
+export async function RecoFeed({ grade }: { grade: Grade | null }) {
   const today = kstToday();
   let items: RecoItem[] | null = null;
   try {
@@ -102,7 +99,7 @@ export async function RecoFeed({ rel }: { rel: RecoRel | null }) {
     <SectionHead
       id="reco-h"
       title="영업 추천"
-      info={`앞으로 ${Math.round(RECO.windowDays / 30)}개월 안에 공모 회사채(금융채 제외) 만기가 돌아오는 회사를 만기 시기(만기 ${RECO.pitchFrom}~${RECO.pitchTo}일 전이 제안 적기), 만기 금액, 최근 ${RECO.historyYears}년 공모채 발행 횟수, NH 주관 관계 순으로 점수를 매겼습니다. 이미 차환 신고서를 낸 회사는 맨 아래에 따로 둡니다.`}
+      info={`앞으로 ${Math.round(RECO.windowDays / 30)}개월 안에 공모 회사채(금융채 제외) 만기가 돌아오는 회사를 만기 시기(만기 ${RECO.pitchFrom}~${RECO.pitchTo}일 전이 제안 적기), 만기 금액, 최근 ${RECO.historyYears}년 공모채 발행 횟수로 점수를 매겼습니다. 등급은 최근 공모채 기준입니다. 이미 차환 신고서를 낸 회사는 맨 아래에 따로 둡니다.`}
       right={right}
     />
   );
@@ -118,7 +115,7 @@ export async function RecoFeed({ rel }: { rel: RecoRel | null }) {
 
   const open = items.filter((i) => !i.refi);
   const done = items.filter((i) => i.refi);
-  const shown = rel ? open.filter((i) => i.rel === rel) : open;
+  const shown = grade ? open.filter((i) => i.grade === grade) : open;
 
   return (
     <section className="section reco-sec" aria-labelledby="reco-h">
@@ -127,14 +124,14 @@ export async function RecoFeed({ rel }: { rel: RecoRel | null }) {
         companies={shown.slice(0, 10).map((i) => ({ c: i.corp_code, n: i.corp_name, sub: `D-${i.days_left} · ${won(i.amount_krw)} 만기` }))}
       />
       {head(
-        <nav className="chips" aria-label="NH 관계">
-          <Link href="/" scroll={false} aria-current={!rel ? 'true' : undefined}>
+        <nav className="chips" aria-label="신용등급">
+          <Link href="/" scroll={false} aria-current={!grade ? 'true' : undefined}>
             전체<span className="tnum">{open.length}</span>
           </Link>
-          {RELS.map((r) => (
-            <Link key={r} href={`/?rel=${r}`} scroll={false} aria-current={rel === r ? 'true' : undefined} title={REL_META[r].desc}>
-              {REL_META[r].label}
-              <span className="tnum">{open.filter((i) => i.rel === r).length}</span>
+          {GRADES.map((g) => (
+            <Link key={g.key} href={`/?g=${g.key}`} scroll={false} aria-current={grade === g.key ? 'true' : undefined}>
+              {g.label}
+              <span className="tnum">{open.filter((i) => i.grade === g.key).length}</span>
             </Link>
           ))}
         </nav>,

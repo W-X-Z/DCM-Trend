@@ -7,30 +7,35 @@ export const RECO = {
   historyYears: 7, // 주관 이력을 보는 기간
   pitchFrom: 45, // 제안 적기: 만기 전 45~150일 (이보다 가까우면 이미 주관사가 정해졌을 가능성이 큼)
   pitchTo: 150,
-  w: { timing: 35, amount: 25, freq: 20, rel: 20 }, // 점수 가중치 (합 100)
-  relValue: { keep: 1, win: 0.9, co: 0.6, new: 0.4 },
+  w: { timing: 40, amount: 35, freq: 25 }, // 점수 가중치 (합 100): 만기 시기, 만기 금액, 공모채 발행 빈도
 };
 
-// keep: 직전 공모채를 NH 가 대표주관(방어) / win: 예전에 NH 대표주관, 직전은 타사(탈환)
-// co: NH 는 인수단만(승격) / new: NH 이력 없음(신규)
-export type RecoRel = 'keep' | 'win' | 'co' | 'new';
+// 등급 묶음: 최근 공모채 등급 기준 (없으면 만기 회차 등급)
+export const GRADES = [
+  { key: 'AAA', label: 'AAA' },
+  { key: 'AA', label: 'AA' },
+  { key: 'A', label: 'A' },
+  { key: 'BBB', label: 'BBB 이하' },
+] as const;
+export type Grade = (typeof GRADES)[number]['key'];
 
-export const REL_META: Record<RecoRel, { label: string; desc: string }> = {
-  keep: { label: '방어', desc: '직전 공모채를 NH가 대표주관' },
-  win: { label: '탈환', desc: '예전에 NH가 대표주관, 직전 회차는 타사' },
-  co: { label: '승격', desc: 'NH는 인수단으로만 참여' },
-  new: { label: '신규', desc: 'NH 주관·인수 이력 없음' },
-};
+export function gradeOf(rating: string | null | undefined, group?: string | null): Grade | null {
+  const g = (group ?? rating ?? '').trim().toUpperCase().replace(/[+\-0]$/, '');
+  if (!g) return null;
+  if (g === 'AAA' || g === 'AA' || g === 'A') return g;
+  if (/^(BBB|BB|B|CCC|CC|C|D)$/.test(g)) return 'BBB';
+  return null;
+}
 
 export type RecoItem = {
-  corp_code: string; corp_name: string; market: string | null; rating: string | null;
+  corp_code: string; corp_name: string; market: string | null; rating: string | null; grade: Grade | null;
   first_dt: string; days_left: number; amount_krw: number; tranches: Maturity[]; refi: boolean;
   issues: number; nh_lead_n: number; nh_co_n: number;
   last_dt: string | null; last_leads: string[]; top_leads: { firm: string; n: number }[];
-  rel: RecoRel; score: number;
+  score: number;
 };
 
-export type HistoryRow = Pick<BondIssue, 'corp_code' | 'deal_dt' | 'lead_managers' | 'nh_lead' | 'nh_involved'>;
+export type HistoryRow = Pick<BondIssue, 'corp_code' | 'deal_dt' | 'lead_managers' | 'nh_lead' | 'nh_involved' | 'rating' | 'rating_group'>;
 
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000);
 const splitFirms = (s: string | null) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
@@ -66,9 +71,6 @@ export function buildReco(maturities: Maturity[], history: HistoryRow[], today: 
     const first = rows[0];
     const hist = (histBy.get(corp) ?? []).sort((a, b) => (b.deal_dt ?? '').localeCompare(a.deal_dt ?? ''));
     const last = hist[0];
-    const nhLead = hist.filter((h) => h.nh_lead).length;
-    const nhCo = hist.filter((h) => h.nh_involved && !h.nh_lead).length;
-    const rel: RecoRel = last?.nh_lead ? 'keep' : nhLead > 0 ? 'win' : nhCo > 0 ? 'co' : 'new';
 
     const counts = new Map<string, { n: number; last: string }>();
     for (const h of hist) {
@@ -84,22 +86,23 @@ export function buildReco(maturities: Maturity[], history: HistoryRow[], today: 
       .slice(0, 3)
       .map(([firm, c]) => ({ firm, n: c.n }));
 
+    const rated = hist.find((h) => h.rating) ?? null;
+    const matRated = rows.find((r) => r.rating) ?? null;
+    const rating = rated?.rating ?? matRated?.rating ?? null;
+    const grade = gradeOf(rating, rated ? rated.rating_group : matRated?.rating_group);
+
     const amount = rows.reduce((s, r) => s + Number(r.amount_krw ?? 0), 0);
     const days = dayDiff(first.event_dt, today);
     const score = Math.round(
-      RECO.w.timing * timingFit(days) +
-        RECO.w.amount * amountFit(amount) +
-        (RECO.w.freq * Math.min(hist.length, 6)) / 6 +
-        RECO.w.rel * RECO.relValue[rel],
+      RECO.w.timing * timingFit(days) + RECO.w.amount * amountFit(amount) + (RECO.w.freq * Math.min(hist.length, 6)) / 6,
     );
 
     out.push({
-      corp_code: corp, corp_name: first.corp_name, market: first.market,
-      rating: rows.find((r) => r.rating)?.rating ?? null,
+      corp_code: corp, corp_name: first.corp_name, market: first.market, rating, grade,
       first_dt: first.event_dt, days_left: days, amount_krw: amount, tranches: rows, refi: rows.some((r) => r.refi_signal),
-      issues: hist.length, nh_lead_n: nhLead, nh_co_n: nhCo,
+      issues: hist.length, nh_lead_n: hist.filter((h) => h.nh_lead).length, nh_co_n: hist.filter((h) => h.nh_involved && !h.nh_lead).length,
       last_dt: last?.deal_dt ?? null, last_leads: splitFirms(last?.lead_managers ?? null), top_leads,
-      rel, score,
+      score,
     });
   }
   return out.sort((a, b) => b.score - a.score || a.first_dt.localeCompare(b.first_dt));

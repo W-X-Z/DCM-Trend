@@ -207,13 +207,14 @@ export async function getExpansionEvents(): Promise<ExpansionEvent[]> {
 }
 
 // 홈 영업 추천: 회사들의 공모 회사채 주관 이력 (회사가 많아 나눠 조회)
-export async function getBondHistory(corps: string[], since: string): Promise<Pick<BondIssue, 'corp_code' | 'deal_dt' | 'lead_managers' | 'nh_lead' | 'nh_involved'>[]> {
+type BondHistory = Pick<BondIssue, 'corp_code' | 'deal_dt' | 'lead_managers' | 'nh_lead' | 'nh_involved' | 'rating' | 'rating_group'>;
+export async function getBondHistory(corps: string[], since: string): Promise<BondHistory[]> {
   const chunks: string[][] = [];
   for (let i = 0; i < corps.length; i += 120) chunks.push(corps.slice(i, i + 120));
   const parts = await Promise.all(
     chunks.map((c) =>
-      selectAll<Pick<BondIssue, 'corp_code' | 'deal_dt' | 'lead_managers' | 'nh_lead' | 'nh_involved'>>('v_bond_issues', {
-        select: 'corp_code,deal_dt,lead_managers,nh_lead,nh_involved',
+      selectAll<BondHistory>('v_bond_issues', {
+        select: 'corp_code,deal_dt,lead_managers,nh_lead,nh_involved,rating,rating_group',
         corp_code: inList(c),
         deal_dt: `gte.${since}`,
         order: 'deal_dt.desc,issue_key.asc',
