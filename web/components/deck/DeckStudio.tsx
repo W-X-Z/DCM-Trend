@@ -1,6 +1,6 @@
 'use client';
 
-// 제안서 초안: 탭은 미리보기 | 데이터 두 개, 오른쪽 위 다운로드(PPT·PDF), 오른쪽에 Agent 채팅.
+// 제안서 초안: 탭은 미리보기 | 데이터 | 흐름도, 오른쪽 위 다운로드(PPT·PDF), 오른쪽에 Agent 채팅(접기 가능).
 // 조건·목차·문안은 채팅으로 바꾼다: LLM 은 요청을 행동 목록으로 해석만 하고(/api/deck/agent), 반영은 코드(lib/deck/agent.ts)가 검사 후 한다.
 // 입력값·문안은 이 브라우저(localStorage)에만 저장한다. 서버에는 공개 데이터 조회, 채팅·Sales 문안 요청만 보낸다.
 import Link from 'next/link';
@@ -12,7 +12,7 @@ import { planOf, type ItemId } from '@/lib/deck/catalog';
 import { defaultInput, factsFor, ruleText, salesFacts } from '@/lib/deck/rules';
 import { dataReport } from '@/lib/deck/sources';
 import { qaChecks, type Qa } from '@/lib/deck/qa';
-import { MARK_LABEL, reviewMarks } from '@/lib/deck/review';
+import { reviewMarks } from '@/lib/deck/review';
 import { allowedNumbers, lineOk } from '@/lib/deck/validate';
 import { PAGE } from '@/lib/deck/theme';
 import type { Slide } from '@/lib/deck/model';
@@ -28,6 +28,7 @@ type View = 'preview' | 'data' | 'flow';
 const VIEWS: [View, string][] = [['preview', '미리보기'], ['data', '데이터'], ['flow', '흐름도']];
 type Saved = { v: 2 | 3 | 4; input: DeckInput; text: DeckText | null; mode: Mode | 'ai'; factsKey: string | null; at: string; salesAi?: string[] | null; salesKey?: string | null };
 const KEY = (corp: string) => `deck:v2:${corp}`;
+const CHAT_KEY = 'dk2.chat.v1';
 
 const SUGGESTIONS = ['Sales 전략 문안 써줘', '납입일을 일주일 뒤로 미뤄줘', '이 트랜치 구조를 제안한 근거는?'];
 
@@ -96,6 +97,25 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
   const [want, setWant] = useState<string | null>(null);
   const [greeting, setGreeting] = useState<string | null>(null);
   const [full, setFull] = useState(false);
+  // Agent 패널 접기 (이 브라우저에 기억)
+  const [chatOpen, setChatOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(CHAT_KEY) === '0') setChatOpen(false);
+    } catch {
+      /* 저장소 막힘: 펼친 채로 */
+    }
+  }, []);
+  const toggleChat = useCallback(() => {
+    setChatOpen((v) => {
+      try {
+        localStorage.setItem(CHAT_KEY, v ? '0' : '1');
+      } catch {
+        /* 무시 */
+      }
+      return !v;
+    });
+  }, []);
 
   // 현업 노하우: 검수(숫자 허용)와 Sales 문안에 쓴다
   useEffect(() => {
@@ -165,16 +185,11 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
   // 첫 인사: 처음 만든 초안 기준으로 한 번만
   useEffect(() => {
     if (greeting || !data || !input || !slides.length) return;
-    const kinds = (['input', 'judge', 'data', 'stale'] as const)
-      .map((k) => [MARK_LABEL[k].replace(/ 확인| 필요/, ''), marks.filter((m) => m.kind === k).length] as const)
-      .filter(([, n]) => n)
-      .map(([l, n]) => `${l} ${n}`);
     setGreeting(
-      `${data.company.corp_name}${input.series ? ` 제${input.series}회` : ''} 공모사채 제안서 초안 ${slides.length}장을 만들었어요.` +
-        (marks.length ? ` 확인할 곳은 ${marks.length}곳이에요(${kinds.join(', ')}).` : '') +
-        ' 바꿀 조건이나 고칠 문안을 말씀해 주세요.',
+      `${data.company.corp_name}${input.series ? ` 제${input.series}회` : ''} 공모사채 제안서 초안 ${slides.length}장을 만들었어요. ` +
+        '딜 조건이나 전략을 바꾸고 싶으시면 편하게 말씀해주세요.',
     );
-  }, [greeting, data, input, slides, marks]);
+  }, [greeting, data, input, slides]);
 
   // 채팅으로 바꾼 장표로 이동
   useEffect(() => {
@@ -331,7 +346,7 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
         <Download busy={busy} onPick={exportAs} />
       </div>
 
-      <div className="dk2-work">
+      <div className={`dk2-work${chatOpen ? '' : ' is-chat-closed'}`}>
         <div className="dk2-main">
           {view === 'preview' && (
             <div className="dk2-preview">
@@ -348,14 +363,25 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
               tips={tips}
               slides={slides}
               avail={avail}
+              checks={marks.length}
+              examples={SUGGESTIONS}
               onGo={(i) => {
                 setCur(i);
                 setView('preview');
               }}
+              onData={() => setView('data')}
             />
           )}
         </div>
-        <AgentChat enabled={aiEnabled} greeting={greeting ?? '초안을 만드는 중이에요.'} suggestions={SUGGESTIONS} state={state} apply={apply} />
+        <AgentChat
+          enabled={aiEnabled}
+          open={chatOpen}
+          onToggle={toggleChat}
+          greeting={greeting ?? '초안을 만드는 중이에요.'}
+          suggestions={SUGGESTIONS}
+          state={state}
+          apply={apply}
+        />
       </div>
       {full && <FullView slides={slides} cur={at} setCur={setCur} onClose={() => setFull(false)} />}
     </div>
