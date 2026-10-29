@@ -50,7 +50,8 @@ export async function Footer() {
           {s?.last_refresh_at ? ` 마지막 갱신 ${kstDateTime(s.last_refresh_at)}` : ''}
         </p>
         <p>
-          현업 의견을 받기 위한 테스트용 프로토타입입니다. 내부 자료는 입력하지 마세요. <NoticeLink />
+          현업 의견을 받기 위한 테스트용 프로토타입입니다. 내부 자료는 입력하지 마세요. <NoticeLink />{' '}
+          <Link href="/how">작동 방식</Link>
         </p>
       </div>
     </footer>

@@ -1,3 +1,4 @@
+import { FabContext } from '@/components/Fab';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -7,7 +8,7 @@ import { ChangeTiles } from '@/components/Insights';
 import { Seasonality } from '@/components/Seasonality';
 import { BondIssueTable, TrancheSection } from '@/components/Tranche';
 import { Info, PageHead, ProductTabs, SectionHead } from '@/components/Ui';
-import { num, pct, won } from '@/lib/format';
+import { date, num, pct, won } from '@/lib/format';
 import { DATE_BASIS } from '@/lib/labels';
 import { PERIODS, breakdown, bucketOf, feeByQuarter, inWindow, leagueOf, makeWindow, series, stats, type Period, type Slice } from '@/lib/period';
 import { getBondIssues, getMetrics, getRecentDeals, getTrend, getTrendDeals, getUiParam } from '@/lib/queries';
@@ -110,7 +111,7 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
   if (all === null) {
     return (
       <main id="main" className="wrap">
-        <PageHead title="발행 동향"><ProductTabs active={product} /></PageHead>
+        <PageHead title="발행동향"><ProductTabs active={product} /></PageHead>
         <p className="empty">발행 데이터를 불러오지 못했습니다. 잠시 뒤 새로고침하세요.</p>
       </main>
     );
@@ -137,7 +138,17 @@ export default async function TrendPage({ params, searchParams }: { params: { pr
 
   return (
     <main id="main" className="wrap">
-      <PageHead title="발행 동향" info={`${SUBS[product]} ${DATE_BASIS[product]}으로 기간을 나눕니다.`}>
+      <FabContext
+        label={`최근 ${meta.label} 발행사`}
+        companies={[
+          ...new Map(
+            (product === 'bond' ? issues.map((i) => ({ c: i.corp_code, n: i.corp_name, dt: i.deal_dt, a: i.amount_krw })) : recent.map((d) => ({ c: d.corp_code, n: d.corp_name, dt: d.deal_dt, a: d.amount_krw })))
+              .sort((x, y) => (y.dt ?? '').localeCompare(x.dt ?? ''))
+              .map((x) => [x.c, { c: x.c, n: x.n, sub: `${date(x.dt)} · ${won(x.a)}`, href: product === 'bond' ? undefined : `/proposal?corp=${x.c}${product === 'mezz' ? '&type=mezz' : ''}` }] as const),
+          ).values(),
+        ].slice(0, 10)}
+      />
+      <PageHead title="발행동향" info={`${SUBS[product]} ${DATE_BASIS[product]}으로 기간을 나눕니다.`}>
         <ProductTabs active={product} query={period !== '12' ? `?m=${period}` : ''} />
         <div className="controls">
           <span className="seg" aria-label="기간">

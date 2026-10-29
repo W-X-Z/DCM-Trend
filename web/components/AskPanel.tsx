@@ -54,7 +54,7 @@ function Answer({ text }: { text: string }) {
   return <div className="ai-answer">{blocks}</div>;
 }
 
-export function AskPanel({ enabled }: { enabled: boolean }) {
+export function AskPanel({ enabled, examples = EXAMPLES }: { enabled: boolean; examples?: string[] }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [q, setQ] = useState('');
   const busy = turns.some((t) => t.pending);
@@ -115,7 +115,7 @@ export function AskPanel({ enabled }: { enabled: boolean }) {
         <div className="ai-start">
           <p className="ai-lede">수집한 공시·발행·금리 데이터를 조회해서 답합니다.</p>
           <ul className="ai-examples" aria-label="예시 질문">
-            {EXAMPLES.map((e) => (
+            {examples.map((e) => (
               <li key={e}>
                 <button type="button" onClick={() => ask(e)} disabled={!enabled}>{e}</button>
               </li>

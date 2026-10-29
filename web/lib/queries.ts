@@ -205,3 +205,37 @@ export async function getExpansionCompanies(): Promise<ExpansionCompany[]> {
 export async function getExpansionEvents(): Promise<ExpansionEvent[]> {
   return selectAll<ExpansionEvent>('v_expansion_events', { order: 'decided_dt.desc,amount_krw.desc.nullslast' });
 }
+
+// 홈 영업 추천: 회사들의 공모 회사채 주관 이력 (회사가 많아 나눠 조회)
+type BondHistory = Pick<BondIssue, 'corp_code' | 'deal_dt' | 'lead_managers' | 'nh_lead' | 'nh_involved' | 'rating' | 'rating_group'>;
+export async function getBondHistory(corps: string[], since: string): Promise<BondHistory[]> {
+  const chunks: string[][] = [];
+  for (let i = 0; i < corps.length; i += 120) chunks.push(corps.slice(i, i + 120));
+  const parts = await Promise.all(
+    chunks.map((c) =>
+      selectAll<BondHistory>('v_bond_issues', {
+        select: 'corp_code,deal_dt,lead_managers,nh_lead,nh_involved,rating,rating_group',
+        corp_code: inList(c),
+        deal_dt: `gte.${since}`,
+        order: 'deal_dt.desc,issue_key.asc',
+      }),
+    ),
+  );
+  return parts.flat();
+}
+
+// 최근 조달(공시된 발행)과 NH 대표주관 이력: 주요공시 목록의 '최근 1년 조달'·'NH 이력' 표시용
+export type FundingDeal = Pick<Deal, 'corp_code' | 'product_type' | 'product_label' | 'sub_type' | 'amount_krw' | 'deal_dt' | 'nh_lead' | 'is_public'>;
+export async function getFundingSince(since: string): Promise<FundingDeal[]> {
+  return selectAll<FundingDeal>('v_deals', {
+    select: 'corp_code,product_type,product_label,sub_type,amount_krw,deal_dt,nh_lead,is_public',
+    deal_dt: `gte.${since}`,
+    status: 'neq.withdrawn',
+    order: 'deal_dt.desc,deal_key.asc',
+  });
+}
+
+export async function getNhLeadCorps(): Promise<string[]> {
+  const rows = await selectAll<{ corp_code: string }>('v_deals', { select: 'corp_code', nh_lead: 'is.true', order: 'corp_code.asc,deal_key.asc' });
+  return [...new Set(rows.map((r) => r.corp_code))];
+}
