@@ -6068,6 +6068,16 @@ table.data th.col-cta {
   color: var(--ink);
 }
 
+/* 만기 회차를 NH 가 대표주관 */
+.rc-nh {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
 .rc-hist {
   margin: 0;
   padding-top: 8px;
@@ -7734,9 +7744,7 @@ a.cta-sm:hover {
   font-weight: 400;
 }
 
-@media (max-width: 719px) {
-  .fm:first-child .fm-menu {
-    right: auto;
-    left: 0;
-  }
+.fm-menu.is-left {
+  right: auto;
+  left: 0;
 }

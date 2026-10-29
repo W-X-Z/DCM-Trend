@@ -30,7 +30,7 @@ const mat = (corp, dt, amt, extra = {}) => ({
 const iss = (corp, dt, leads, nh_lead, nh_involved = nh_lead, rating = null, rating_group = null) => ({ corp_code: corp, deal_dt: dt, lead_managers: leads, nh_lead, nh_involved, rating, rating_group });
 
 const mats = [
-  mat('BIG', '2027-01-20', 5e11),
+  mat('BIG', '2027-01-20', 5e11, { nh_lead: true, nh_involved: true }),
   mat('SMALL', '2027-01-20', 3e10),
   mat('SOON', '2026-11-10', 5e11),
   mat('FIN', '2027-01-20', 3e11, { sub_type: '금융채' }),
@@ -57,6 +57,7 @@ eq('만기일정 구간: 3~6개월 = 오늘+3개월 ~ 오늘+6개월', [a6, b6, 
 eq('월말 보정', [m.addMonths('2026-08-31', 6), m.addMonths('2026-10-31', 4)], ['2027-02-28', '2027-02-28']);
 eq('1~3개월 구간에 든 회사', m.buildReco(mats.filter((x) => x.event_dt >= m.periodRange(today, '3m')[0] && x.event_dt < m.periodRange(today, '3m')[1]), hist, today).map((x) => x.corp_code), ['REFI', 'BIG', 'OLDRATE', 'NORATE', 'SMALL']);
 eq('6~12개월 구간', m.buildReco(mats.filter((x) => x.event_dt >= m.periodRange(today, '12m')[0] && x.event_dt < end), hist, today).map((x) => x.corp_code), ['FAR']);
+eq('NH주관: 만기 회차 기준', [by.BIG.nh_mat, by.SOON.nh_mat], [true, false]);
 eq('상장시장 묶음', ['유가증권', '코스닥', '코넥스', '기타', null].map((x) => m.marketOf(x)), ['kospi', 'kosdaq', 'konex', 'private', 'private']);
 eq('직전 회차 주관사', by.SMALL.last_leads, ['KB증권', '한국투자증권']);
 eq('이력 건수(오늘 뒤 제외)', by.BIG.issues, 2);

@@ -55,6 +55,7 @@ function Card({ it }: { it: RecoItem }) {
           {t[0].tenor_months ? ` ${Math.round(t[0].tenor_months / 12)}년물` : ''}
           {t.length > 1 ? ` 외 ${t.length - 1}건` : ''}
         </span>
+        {it.nh_mat && <span className="rc-nh">NH 주관</span>}
       </p>
       <dl className="rc-hist">
         <div>
@@ -90,19 +91,22 @@ function Card({ it }: { it: RecoItem }) {
   );
 }
 
-type Filter = { period: Period; grade: Grade | null; market: MarketKey | null };
+// nh: NH주관만 (만기가 돌아오는 회차를 NH투자증권이 대표주관한 회사)
+type Filter = { period: Period; grade: Grade | null; market: MarketKey | null; nh: boolean };
+type Rest = Omit<Filter, 'period'>;
 
-// 기본값(3~6개월, 등급·시장 고르지 않음)은 주소에서 뺀다
+// 기본값(3~6개월, 등급·시장·주관여부 고르지 않음)은 주소에서 뺀다
 function hrefOf(f: Filter) {
   const q = new URLSearchParams();
   if (f.period !== DEFAULT_PERIOD) q.set('p', f.period);
   if (f.grade) q.set('g', f.grade);
   if (f.market) q.set('mk', f.market);
+  if (f.nh) q.set('nh', '1');
   const s = q.toString();
   return s ? `/?${s}` : '/';
 }
 
-export async function RecoFeed({ period, grade, market }: Filter) {
+export async function RecoFeed({ period, grade, market, nh }: Filter) {
   const today = kstToday();
   // 만기일정 구간별로 회사를 묶는다 (한 회사가 두 구간에 만기가 있으면 양쪽에 각각)
   let byPeriod: Record<Period, RecoItem[]> | null = null;
@@ -124,7 +128,7 @@ export async function RecoFeed({ period, grade, market }: Filter) {
     <SectionHead
       id="reco-h"
       title="영업 추천"
-      info={`공모 회사채(금융채 제외) 만기가 돌아오는 회사를 만기가 가까운 순으로 보여 줍니다(같은 날은 만기 금액이 큰 순). 만기일정 기본은 제안 적기인 3~6개월 뒤. 등급은 최근 공모채 기준, 상장시장은 만기 회차 기준, 주관 이력은 최근 ${RECO.historyYears}년 공모채입니다. 이미 차환 신고서를 낸 회사는 맨 아래에 따로 둡니다.`}
+      info={`공모 회사채(금융채 제외) 만기가 돌아오는 회사를 만기가 가까운 순으로 보여 줍니다(같은 날은 만기 금액이 큰 순). 만기일정 기본은 제안 적기인 3~6개월 뒤. 등급은 최근 공모채 기준, 상장시장은 만기 회차 기준, 주관 이력은 최근 ${RECO.historyYears}년 공모채입니다. NH주관은 만기가 돌아오는 회차를 NH투자증권이 대표주관한 회사입니다. 이미 차환 신고서를 낸 회사는 맨 아래에 따로 둡니다.`}
       right={right}
     />
   );
@@ -138,13 +142,16 @@ export async function RecoFeed({ period, grade, market }: Filter) {
     );
   }
 
-  const fit = (it: RecoItem, f: Partial<Filter>) =>
-    (!f.grade || it.grade === f.grade) && (!f.market || marketOf(it.market) === f.market);
+  const fit = (it: RecoItem, x: Rest) =>
+    (!x.grade || it.grade === x.grade) && (!x.market || marketOf(it.market) === x.market) && (!x.nh || it.nh_mat);
+  const rest: Rest = { grade, market, nh };
   const openIn = (p: Period) => byPeriod![p].filter((i) => !i.refi);
   const cur = openIn(period);
-  const shown = cur.filter((i) => fit(i, { grade, market }));
-  const done = byPeriod[period].filter((i) => i.refi && fit(i, { grade, market }));
-  const f: Filter = { period, grade, market };
+  // 드롭다운 항목별 건수: 나머지 필터는 그대로 두고 그 항목만 바꿨을 때
+  const count = (x: Partial<Rest>) => cur.filter((i) => fit(i, { ...rest, ...x })).length;
+  const shown = cur.filter((i) => fit(i, rest));
+  const done = byPeriod[period].filter((i) => i.refi && fit(i, rest));
+  const f: Filter = { period, grade, market, nh };
   const pLabel = PERIODS.find((p) => p.key === period)!.label;
   const gLabel = GRADES.find((g) => g.key === grade)?.label;
   const mLabel = MARKETS.find((m) => m.key === market)?.label;
@@ -157,7 +164,7 @@ export async function RecoFeed({ period, grade, market }: Filter) {
         active={period !== DEFAULT_PERIOD}
         options={PERIODS.map((p) => ({
           key: p.key, label: p.label, on: p.key === period, href: hrefOf({ ...f, period: p.key }),
-          count: openIn(p.key).filter((i) => fit(i, { grade, market })).length,
+          count: openIn(p.key).filter((i) => fit(i, rest)).length,
         }))}
       />
       <FilterMenu
@@ -165,10 +172,9 @@ export async function RecoFeed({ period, grade, market }: Filter) {
         value={gLabel ?? '신용등급'}
         active={!!grade}
         options={[
-          { key: 'all', label: '모든 등급', on: !grade, href: hrefOf({ ...f, grade: null }), count: cur.filter((i) => fit(i, { market })).length },
+          { key: 'all', label: '전체', on: !grade, href: hrefOf({ ...f, grade: null }), count: count({ grade: null }) },
           ...GRADES.map((g) => ({
-            key: g.key, label: g.label, on: g.key === grade, href: hrefOf({ ...f, grade: g.key }),
-            count: cur.filter((i) => fit(i, { market, grade: g.key })).length,
+            key: g.key, label: g.label, on: g.key === grade, href: hrefOf({ ...f, grade: g.key }), count: count({ grade: g.key }),
           })),
         ]}
       />
@@ -177,11 +183,19 @@ export async function RecoFeed({ period, grade, market }: Filter) {
         value={mLabel ?? '상장시장'}
         active={!!market}
         options={[
-          { key: 'all', label: '모든 시장', on: !market, href: hrefOf({ ...f, market: null }), count: cur.filter((i) => fit(i, { grade })).length },
+          { key: 'all', label: '전체', on: !market, href: hrefOf({ ...f, market: null }), count: count({ market: null }) },
           ...MARKETS.map((m) => ({
-            key: m.key, label: m.label, on: m.key === market, href: hrefOf({ ...f, market: m.key }),
-            count: cur.filter((i) => fit(i, { grade, market: m.key })).length,
+            key: m.key, label: m.label, on: m.key === market, href: hrefOf({ ...f, market: m.key }), count: count({ market: m.key }),
           })).filter((o) => o.count > 0 || o.on),
+        ]}
+      />
+      <FilterMenu
+        name="주관여부"
+        value={nh ? 'NH주관' : '주관여부'}
+        active={nh}
+        options={[
+          { key: 'all', label: '전체', on: !nh, href: hrefOf({ ...f, nh: false }), count: count({ nh: false }) },
+          { key: 'nh', label: 'NH주관', on: nh, href: hrefOf({ ...f, nh: true }), count: count({ nh: true }) },
         ]}
       />
     </div>

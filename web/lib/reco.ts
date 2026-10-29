@@ -71,7 +71,7 @@ export function gradeOf(rating: string | null | undefined, group?: string | null
 export type RecoItem = {
   corp_code: string; corp_name: string; market: string | null; rating: string | null; grade: Grade | null;
   first_dt: string; days_left: number; amount_krw: number; tranches: Maturity[]; refi: boolean;
-  issues: number; nh_lead_n: number; nh_co_n: number;
+  issues: number; nh_lead_n: number; nh_co_n: number; nh_mat: boolean; // nh_mat: 만기 회차 중 NH 대표주관이 있음
   last_dt: string | null; last_leads: string[]; top_leads: { firm: string; n: number }[];
   score: number;
 };
@@ -140,7 +140,7 @@ export function buildReco(maturities: Maturity[], history: HistoryRow[], today: 
     out.push({
       corp_code: corp, corp_name: first.corp_name, market: first.market, rating, grade,
       first_dt: first.event_dt, days_left: days, amount_krw: amount, tranches: rows, refi: rows.some((r) => r.refi_signal),
-      issues: hist.length, nh_lead_n: hist.filter((h) => h.nh_lead).length, nh_co_n: hist.filter((h) => h.nh_involved && !h.nh_lead).length,
+      issues: hist.length, nh_mat: rows.some((r) => r.nh_lead), nh_lead_n: hist.filter((h) => h.nh_lead).length, nh_co_n: hist.filter((h) => h.nh_involved && !h.nh_lead).length,
       last_dt: last?.deal_dt ?? null, last_leads: splitFirms(last?.lead_managers ?? null), top_leads,
       score,
     });

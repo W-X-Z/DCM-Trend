@@ -1,6 +1,6 @@
 'use client';
 
-// 필터 드롭다운: 버튼에는 고른 값(고르지 않았으면 필터 이름), 펼치면 항목과 건수. 고르면 주소(?p=·g=·mk=)를 바꾼다.
+// 필터 드롭다운: 버튼에는 고른 값(고르지 않았으면 필터 이름), 펼치면 항목과 건수. 고르면 주소(?p=·g=·mk=·nh=)를 바꾼다.
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
 
@@ -8,6 +8,8 @@ export type FilterOpt = { key: string; label: string; count: number; href: strin
 
 export function FilterMenu({ name, value, active, options }: { name: string; value: string; active: boolean; options: FilterOpt[] }) {
   const [open, setOpen] = useState(false);
+  // 버튼이 화면 왼쪽 절반에 있으면 목록을 왼쪽 끝에 맞춘다 (줄바꿈된 모바일 버튼이 화면 밖으로 나가지 않게)
+  const [left, setLeft] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const id = useId();
@@ -41,7 +43,11 @@ export function FilterMenu({ name, value, active, options }: { name: string; val
         aria-expanded={open}
         aria-controls={id}
         aria-label={`${name}: ${value}`}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          const r = btn.current?.getBoundingClientRect();
+          if (r) setLeft(r.left + r.width / 2 < window.innerWidth / 2);
+          setOpen((v) => !v);
+        }}
       >
         {value}
         <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
@@ -49,7 +55,7 @@ export function FilterMenu({ name, value, active, options }: { name: string; val
         </svg>
       </button>
       {open && (
-        <ul className="fm-menu" id={id} aria-label={name}>
+        <ul className={`fm-menu${left ? ' is-left' : ''}`} id={id} aria-label={name}>
           {options.map((o) => (
             <li key={o.key}>
               <Link href={o.href} scroll={false} aria-current={o.on ? 'true' : undefined} onClick={() => setOpen(false)}>
