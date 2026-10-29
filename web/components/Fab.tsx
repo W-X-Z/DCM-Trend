@@ -45,14 +45,6 @@ const EXAMPLES: { match: (p: string) => boolean; list: string[] }[] = [
     ],
   },
   {
-    match: (p) => p.startsWith('/maturities'),
-    list: [
-      '3~6개월 뒤 공모채 만기 상위 10곳과 당시 대표주관은?',
-      '6개월 안에 조기상환청구가 시작되는 메자닌 중 금액이 큰 곳은?',
-      '1년 안 만기 CP·전단채 잔액이 큰 회사는?',
-    ],
-  },
-  {
     match: (p) => p.startsWith('/trends'),
     list: [
       '최근 한 달 A급 회사채 중 증액이 컸던 발행은?',

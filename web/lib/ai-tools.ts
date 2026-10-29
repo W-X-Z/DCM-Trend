@@ -335,7 +335,7 @@ export async function runTool(name: string, args: Json): Promise<ToolResult> {
         by.set(k, e);
       }
       const list = [...by.values()].map((e) => ({ ...e, 금액_억원: Math.round(e.금액_억원) })).sort((a, b) => b.금액_억원 - a.금액_억원).slice(0, clamp(args.limit, 1, 40, 25));
-      return { data: { 회사수: by.size, 목록: list }, refs: [{ label: '만기도래', href: '/maturities' }] };
+      return { data: { 회사수: by.size, 목록: list }, refs: kind === '만기' ? [{ label: '홈 영업 추천', href: '/' }] : [] };
     }
     case 'league_table': {
       const product = PRODUCTS.includes(args.product as never) ? String(args.product) : 'bond';

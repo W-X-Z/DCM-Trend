@@ -46,10 +46,18 @@ const hist = [
   iss('BIG', '2027-01-01', 'NH투자증권', true), // 오늘 뒤 날짜는 무시
   iss('OLDRATE', '2025-06-10', '삼성증권', false, false, 'BBB+', 'BBB'), iss('OLDRATE', '2022-06-10', '삼성증권', false, false, 'A0', 'A'),
 ];
-const r = m.buildReco(mats, hist, today);
+// 홈에서는 만기일정 구간(오늘 ~ 12개월)으로 먼저 거른 만기를 넘긴다
+const [a6, b6] = m.periodRange(today, '6m');
+const end = m.windowEnd(today);
+const r = m.buildReco(mats.filter((x) => x.event_dt < end), hist, today);
 const by = Object.fromEntries(r.map((x) => [x.corp_code, x]));
 
-eq('금융채·지난 만기·구간 밖 제외', ['FIN', 'PAST', 'FAR'].map((c) => c in by), [false, false, false]);
+eq('금융채·지난 만기 제외', ['FIN', 'PAST'].map((c) => c in by), [false, false]);
+eq('만기일정 구간: 3~6개월 = 오늘+3개월 ~ 오늘+6개월', [a6, b6, end], ['2027-01-29', '2027-04-29', '2027-10-29']);
+eq('월말 보정', [m.addMonths('2026-08-31', 6), m.addMonths('2026-10-31', 4)], ['2027-02-28', '2027-02-28']);
+eq('1~3개월 구간에 든 회사', m.buildReco(mats.filter((x) => x.event_dt >= m.periodRange(today, '3m')[0] && x.event_dt < m.periodRange(today, '3m')[1]), hist, today).map((x) => x.corp_code), ['REFI', 'BIG', 'OLDRATE', 'NORATE', 'SMALL']);
+eq('6~12개월 구간', m.buildReco(mats.filter((x) => x.event_dt >= m.periodRange(today, '12m')[0] && x.event_dt < end), hist, today).map((x) => x.corp_code), ['FAR']);
+eq('상장시장 묶음', ['유가증권', '코스닥', '코넥스', '기타', null].map((x) => m.marketOf(x)), ['kospi', 'kosdaq', 'konex', 'private', 'private']);
 eq('직전 회차 주관사', by.SMALL.last_leads, ['KB증권', '한국투자증권']);
 eq('이력 건수(오늘 뒤 제외)', by.BIG.issues, 2);
 eq('NH 대표 횟수', [by.BIG.nh_lead_n, by.SMALL.nh_lead_n], [1, 0]);
@@ -57,6 +65,7 @@ eq('주관 빈도 상위', by.BIG.top_leads.map((x) => x.firm), ['KB증권', 'NH
 eq('금액이 크면 점수 높음', by.BIG.score > by.SMALL.score, true);
 eq('D-12 는 제안 적기보다 낮음', by.SOON.score < by.BIG.score, true);
 eq('남은 일수', by.SOON.days_left, 12);
+eq('만기 가까운 순, 같은 날은 금액 큰 순, 그다음 점수', r.map((x) => x.corp_code), ['SOON', 'REFI', 'BIG', 'OLDRATE', 'NORATE', 'SMALL', 'FAR']);
 eq('차환 신호', by.REFI.refi, true);
 eq('등급: 최근 공모채 우선', [by.BIG.grade, by.OLDRATE.grade, by.OLDRATE.rating], ['AA', 'BBB', 'BBB+']);
 eq('등급: 이력 없으면 만기 회차, 둘 다 없으면 없음', [by.SMALL.grade, by.NORATE.grade], ['AA', null]);
