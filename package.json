@@ -14,7 +14,8 @@
     "test:deck": "node tests/deck.mjs",
     "prompts:sync": "node scripts/sync-prompts.mjs",
     "test:prompts": "node tests/prompts.mjs",
-    "test:reco": "node tests/reco.mjs"
+    "test:reco": "node tests/reco.mjs",
+    "test:deck-agent": "node tests/deck_agent.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17",
