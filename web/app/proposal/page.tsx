@@ -196,7 +196,7 @@ export default async function ProposalPage({ searchParams }: { searchParams: SP 
           ))}
         </nav>
         <div className="pp-actions">
-          {d.type === 'bond' && <Link className="btn" href={`/proposal/deck?corp=${c.corp_code}`}>제안서 만들기 (PPTX·PDF)</Link>}
+          {d.type === 'bond' && <Link className="btn" href={`/proposal/deck?corp=${c.corp_code}`} target="_blank" rel="noopener">제안서 만들기 (PPTX·PDF)</Link>}
           <a className="btn btn-ghost" href={`/api/proposal?corp=${c.corp_code}&type=${d.type}`} download>
             초안 내려받기 (.md)
           </a>

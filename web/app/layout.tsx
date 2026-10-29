@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import './globals.css';
 import { Footer, Header } from '@/components/Chrome';
+import { ChromeGate } from '@/components/ChromeGate';
 import { Fab } from '@/components/Fab';
 import { Feedback } from '@/components/Feedback';
 import { Notice } from '@/components/Notice';
@@ -25,9 +26,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <a href="#main" className="skip">본문으로 건너뛰기</a>
-        <Header />
+        <ChromeGate>
+          <Header />
+        </ChromeGate>
         {children}
-        <Footer />
+        <ChromeGate>
+          <Footer />
+        </ChromeGate>
         <Suspense fallback={null}>
           <Fab aiEnabled={Boolean(process.env.OPENAI_API_KEY)} />
         </Suspense>

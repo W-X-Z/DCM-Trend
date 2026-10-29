@@ -1,14 +1,19 @@
-// 데이터 탭: 이 초안에 쓰려고 모은 데이터 목록. 외부(공개) 데이터는 출처·기준일·쓰인 장표, 내부 데이터는 칸만 비워 둔다.
+'use client';
+
+// 데이터 탭: 이 초안에 쓰려고 모은 데이터. 외부·내부 두 표, 각각 몇 건만 보이고 '펼치기'로 전부.
+// 외부(공개) 데이터는 출처·기준일·쓰인 장표, 회사 내부 데이터는 목록만(미연계).
+import { useState } from 'react';
 import type { DataReport, Src } from '@/lib/deck/sources';
 
-type Row = { label: string; source: string; asof: string | null; slides: string[]; status: Src['status']; note?: string };
+export type DataRow = { label: string; source: string; asof: string | null; slides: string[]; status: Src['status']; note?: string };
 
-function rowsOf(report: DataReport, kind: Src['kind']) {
-  const map = new Map<string, Row>();
+export function rowsOf(report: DataReport, kind: Src['kind']): DataRow[] {
+  const map = new Map<string, DataRow>();
   for (const it of report.items) {
     for (const s of it.srcs) {
       if (s.kind !== kind) continue;
       if (kind === 'ext' && s.status === 'missing') continue;
+      if (kind === 'int' && /템플릿 고정 장표/.test(s.label)) continue;
       const k = `${s.label}|${s.source}`;
       const r = map.get(k) ?? { label: s.label, source: s.source, asof: s.asof ?? null, slides: [], status: s.status, note: s.note };
       if (!r.slides.includes(it.label)) r.slides.push(it.label);
@@ -27,8 +32,7 @@ function rowsOf(report: DataReport, kind: Src['kind']) {
 }
 
 const short = (label: string) => label.replace(/^(Ⅰ|Ⅱ)-\d+(-[①-⑧])?\.?\s*/, '').replace(/^App\d+\.\s*/, '');
-
-function Slides({ list }: { list: string[] }) {
+export function SlideNames({ list }: { list: string[] }) {
   const names = [...new Set(list.map(short))];
   return (
     <span className="dk2-slides">
@@ -38,68 +42,64 @@ function Slides({ list }: { list: string[] }) {
   );
 }
 
+const SHOW = 6;
+
+// 표 하나: 앞의 몇 건만, '펼치기'로 전부
+function Rows({ rows, kind }: { rows: DataRow[]; kind: Src['kind'] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, SHOW);
+  return (
+    <>
+      <table className="data dk2-table">
+        <thead>
+          <tr>
+            <th>데이터</th>
+            <th>출처</th>
+            {kind === 'ext' && <th>기준일</th>}
+            <th>{kind === 'ext' ? '쓰인 장표' : '쓰일 장표'}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((r) => (
+            <tr key={`${r.label}|${r.source}`}>
+              <td>
+                {r.label}
+                {r.status === 'alt' && <span className="dk2-tag">대체</span>}
+              </td>
+              <td className="muted">{r.source}</td>
+              {kind === 'ext' && <td className="tnum">{r.asof ?? '–'}</td>}
+              <td><SlideNames list={r.slides} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > SHOW && (
+        <button type="button" className="dk2-more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+          {all ? '접기' : `펼치기 (${rows.length - SHOW}건 더)`}
+        </button>
+      )}
+    </>
+  );
+}
+
 export function DataView({ report, asof }: { report: DataReport; asof: string }) {
   const ext = rowsOf(report, 'ext');
-  const int = rowsOf(report, 'int').filter((r) => !/템플릿 고정 장표/.test(r.label));
+  const int = rowsOf(report, 'int');
+  const linked = int.some((r) => r.status === 'used');
   return (
     <div className="dk2-data">
       <section aria-labelledby="dk2-ext-h">
         <h3 id="dk2-ext-h" className="dk2-data-h">
-          수집한 데이터 <span className="muted small tnum">{ext.length}건 · {asof} 기준</span>
+          외부 데이터 <span className="muted small tnum">{ext.length}건 · {asof} 기준</span>
         </h3>
-        <div className="table-wrap">
-          <table className="data dk2-table">
-            <thead>
-              <tr>
-                <th>데이터</th>
-                <th>출처</th>
-                <th>기준일</th>
-                <th>쓰인 장표</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ext.map((r) => (
-                <tr key={`${r.label}|${r.source}`}>
-                  <td>
-                    {r.label}
-                    {r.status === 'alt' && <span className="dk2-tag">대체</span>}
-                  </td>
-                  <td className="muted">{r.source}</td>
-                  <td className="tnum nowrap">{r.asof ?? '–'}</td>
-                  <td><Slides list={r.slides} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Rows rows={ext} kind="ext" />
       </section>
-
       <section aria-labelledby="dk2-int-h">
         <h3 id="dk2-int-h" className="dk2-data-h">
-          회사 내부 데이터 <span className="muted small tnum">{int.length}건 · 사내 연계 시 채움</span>
+          내부 데이터 <span className="muted small tnum">{int.length}건</span>
+          <span className="dk2-unlinked">{linked ? '일부 미연계' : '미연계'}</span>
         </h3>
-        <div className="table-wrap">
-          <table className="data dk2-table">
-            <thead>
-              <tr>
-                <th>데이터</th>
-                <th>출처</th>
-                <th>값</th>
-                <th>쓰일 장표</th>
-              </tr>
-            </thead>
-            <tbody>
-              {int.map((r) => (
-                <tr key={`${r.label}|${r.source}`}>
-                  <td>{r.label}</td>
-                  <td className="muted">{r.source}</td>
-                  <td>{r.status === 'used' ? <span className="dk2-tag is-on">연결됨</span> : <span className="dk2-empty" aria-label="비어 있음" />}</td>
-                  <td><Slides list={r.slides} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Rows rows={int} kind="int" />
       </section>
     </div>
   );

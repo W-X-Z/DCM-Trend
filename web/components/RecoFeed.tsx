@@ -75,7 +75,7 @@ function Card({ it }: { it: RecoItem }) {
         )}
       </dl>
       <div className="rc-foot">
-        <Link href={`/proposal/deck?corp=${it.corp_code}&from=%2F`} className="cta-sm" aria-label={`${it.corp_name} 제안서 초안`}>
+        <Link href={`/proposal/deck?corp=${it.corp_code}`} target="_blank" rel="noopener" className="cta-sm" aria-label={`${it.corp_name} 제안서 초안 (새 탭)`}>
           제안서 초안
         </Link>
       </div>

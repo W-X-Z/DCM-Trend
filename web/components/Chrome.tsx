@@ -44,16 +44,12 @@ export async function Footer() {
   const s = await getDataStatus().catch(() => null);
   return (
     <footer className="site-footer">
-      <div className="wrap footer-row">
-        <p>
-          출처 DART 공시(OpenDART). 제안서에 옮기기 전에 공시 원문을 확인하세요.
-          {s?.last_refresh_at ? ` 마지막 갱신 ${kstDateTime(s.last_refresh_at)}` : ''}
-        </p>
-        <p>
-          현업 의견을 받기 위한 테스트용 프로토타입입니다. 내부 자료는 입력하지 마세요. <NoticeLink />{' '}
-          <Link href="/how">작동 방식</Link>
-        </p>
-      </div>
+      <p className="wrap footer-row">
+        <span>출처 DART·ECOS 공개 데이터{s?.last_refresh_at ? ` · 갱신 ${kstDateTime(s.last_refresh_at)}` : ''}</span>
+        <span>테스트용 프로토타입, 내부 자료 입력 금지</span>
+        <NoticeLink />
+        <Link href="/how">작동 방식</Link>
+      </p>
     </footer>
   );
 }

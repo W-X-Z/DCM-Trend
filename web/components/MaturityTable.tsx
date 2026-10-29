@@ -28,8 +28,7 @@ export function groupByCorp(rows: Maturity[]): MaturityGroup[] {
   return [...map.values()];
 }
 
-export function MaturityTable({ groups, kind, ctaLabel = '제안서 초안', from }: { groups: MaturityGroup[]; kind: 'bond' | 'mezz'; ctaLabel?: string; from?: string }) {
-  const back = from ? `&from=${encodeURIComponent(from)}` : '';
+export function MaturityTable({ groups, kind, ctaLabel = '제안서 초안' }: { groups: MaturityGroup[]; kind: 'bond' | 'mezz'; ctaLabel?: string }) {
   return (
     <div className="table-wrap">
       <table className="data mat-table">
@@ -73,7 +72,9 @@ export function MaturityTable({ groups, kind, ctaLabel = '제안서 초안', fro
               </td>
               <td className="col-cta">
                 <Link
-                  href={kind === 'bond' ? `/proposal/deck?corp=${g.corp_code}${back}` : `/proposal?corp=${g.corp_code}&type=${kind}`}
+                  href={kind === 'bond' ? `/proposal/deck?corp=${g.corp_code}` : `/proposal?corp=${g.corp_code}&type=${kind}`}
+                  target={kind === 'bond' ? '_blank' : undefined}
+                  rel={kind === 'bond' ? 'noopener' : undefined}
                   className="cta-sm"
                   aria-label={`${g.corp_name} ${ctaLabel}`}
                 >
