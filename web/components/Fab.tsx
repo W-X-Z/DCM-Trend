@@ -1,16 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AskPanel } from './AskPanel';
 import { CompanySearch } from './CompanySearch';
 
 // 화면 아래 플로팅 버튼: 제안서 작성 · AI 질문.
-// 위계: 1depth 탭(모니터링) → 플로팅 버튼(행동) → 오른쪽 패널(2depth, 같은 창).
+// 위계: 1depth 탭(모니터링) → 플로팅 버튼(행동) → 오른쪽 패널(2depth).
 //  - AI 질문: 지금 화면 위에 패널로 열고, 탭을 옮겨도 대화가 남는다. 길게 볼 때만 /ai 전체 화면.
-//  - 제안서 작성: 지금 탭의 회사 목록에서 고르고, 초안 화면은 같은 창 전체 화면(작업 공간)으로 연다.
-//    초안 화면의 '돌아가기'가 고른 탭(필터 포함)으로 되돌린다.
+//  - 제안서 작성: 지금 탭의 회사 목록에서 고르면 초안 화면을 새 탭(사이트 머리글 없는 작업 공간)으로 연다.
 
 export type FabCo = { c: string; n: string; sub?: string; href?: string };
 export type FabCtx = { label: string; companies?: FabCo[]; corp?: FabCo };
@@ -83,18 +82,17 @@ function examplesFor(path: string, ctx: FabCtx | null) {
   return EXAMPLES.find((e) => e.match(path))?.list;
 }
 
-const deckHref = (co: FabCo, from: string) => co.href ?? `/proposal/deck?corp=${co.c}&from=${encodeURIComponent(from)}`;
+// 제안서 작성은 새 탭(사이트 머리글 없는 작업 화면)으로 연다
+const deckHref = (co: FabCo) => co.href ?? `/proposal/deck?corp=${co.c}`;
 
 export function Fab({ aiEnabled }: { aiEnabled: boolean }) {
   const path = usePathname() ?? '/';
-  const sp = useSearchParams();
   const ctx = useSyncExternalStore(subscribe, () => current, () => null);
   const [menu, setMenu] = useState(false);
   const [panel, setPanel] = useState<'deck' | 'ai' | null>(null);
   const [aiMounted, setAiMounted] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
-  const from = `${path}${sp?.toString() ? `?${sp.toString()}` : ''}`;
   const hidden = path.startsWith('/proposal') || path.startsWith('/ai');
 
   // 화면을 옮기면 메뉴와 제안서 패널은 닫는다 (AI 패널은 유지)
@@ -135,7 +133,7 @@ export function Fab({ aiEnabled }: { aiEnabled: boolean }) {
           <ul className="fab-menu" id="fab-menu">
             <li>
               {ctx?.corp ? (
-                <Link href={deckHref(ctx.corp, from)} className="fab-item" onClick={() => setMenu(false)}>
+                <Link href={deckHref(ctx.corp)} target="_blank" rel="noopener" className="fab-item" onClick={() => setMenu(false)}>
                   <strong>제안서 작성</strong>
                   <span>{ctx.corp.n}</span>
                 </Link>
@@ -187,7 +185,7 @@ export function Fab({ aiEnabled }: { aiEnabled: boolean }) {
                 <ul>
                   {cos.map((co) => (
                     <li key={co.c}>
-                      <Link href={deckHref(co, from)}>
+                      <Link href={deckHref(co)} target="_blank" rel="noopener" onClick={() => setPanel(null)}>
                         <strong>{co.n}</strong>
                         {co.sub && <span>{co.sub}</span>}
                       </Link>

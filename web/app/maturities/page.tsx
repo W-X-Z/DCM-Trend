@@ -183,7 +183,7 @@ export default async function MaturitiesPage({ searchParams }: { searchParams: S
           ) : groups.length === 0 ? (
             <p className="empty">이 기간에 도래하는 건이 없습니다.</p>
           ) : (
-            <MaturityTable groups={groups} kind={tab} from={href(searchParams, {})} />
+            <MaturityTable groups={groups} kind={tab} />
           )}
         </section>
 

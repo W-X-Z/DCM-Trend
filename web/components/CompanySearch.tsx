@@ -17,6 +17,10 @@ export function CompanySearch({ mode = 'company', placeholder = '회사 이름�
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [loading, setLoading] = useState(false);
+  // 불러오기 실패(시간 초과·서버 오류)는 '없음'과 구분하고 다시 시도 버튼을 보인다
+  const [failed, setFailed] = useState(false);
+  const [nonce, setNonce] = useState(0);
+  const cache = useRef(new Map<string, Hit[]>());
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = isHeader ? 'cs-input' : 'cs-input-proposal';
   const boxRef = useRef<HTMLDivElement>(null);
@@ -26,28 +30,57 @@ export function CompanySearch({ mode = 'company', placeholder = '회사 이름�
     if (!term) {
       setHits([]);
       setLoading(false);
+      setFailed(false);
       return;
     }
+    // 글자를 넣자마자 목록을 열어 '찾는 중'을 보인다 (첫 조회가 느릴 때 빈 화면 방지)
+    setOpen(true);
+    setFailed(false);
+    const hit = cache.current.get(term);
+    if (hit) {
+      setHits(hit);
+      setActive(-1);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let timedOut = false;
     const ctrl = new AbortController();
     setLoading(true);
+    setHits([]);
     const t = setTimeout(async () => {
+      const limit = setTimeout(() => {
+        timedOut = true;
+        ctrl.abort();
+      }, 8000);
       try {
         const res = await fetch(`/api/companies?q=${encodeURIComponent(term)}`, { signal: ctrl.signal });
-        const body = res.ok ? ((await res.json()) as Hit[]) : [];
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as Hit[];
+        if (cancelled) return;
+        if (body.length) cache.current.set(term, body);
         setHits(body);
         setActive(-1);
-        setOpen(true);
       } catch {
-        /* 입력이 바뀌어 취소된 요청 */
+        // 입력이 바뀌어 취소된 요청은 무시, 시간 초과·오류만 실패로
+        if (!cancelled || timedOut) setFailed(true);
       } finally {
-        if (!ctrl.signal.aborted) setLoading(false);
+        clearTimeout(limit);
+        if (!cancelled) setLoading(false);
       }
     }, 140);
     return () => {
+      cancelled = true;
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [q]);
+  }, [q, nonce]);
+
+  const retry = () => {
+    cache.current.delete(q.trim());
+    setNonce((n) => n + 1);
+    inputRef.current?.focus();
+  };
 
   // '/' 키로 검색창 열기 (머리글만)
   useEffect(() => {
@@ -75,7 +108,9 @@ export function CompanySearch({ mode = 'company', placeholder = '회사 이름�
     setOpen(false);
     setQ('');
     inputRef.current?.blur();
-    router.push(isHeader ? `/company/${h.corp_code}` : mode === 'deck' ? `/proposal/deck?corp=${h.corp_code}` : `/proposal?corp=${h.corp_code}`);
+    if (isHeader) router.push(`/company/${h.corp_code}`);
+    // 제안서 작성은 새 탭(사이트 머리글 없는 작업 화면)으로 연다
+    else window.open(mode === 'deck' ? `/proposal/deck?corp=${h.corp_code}` : `/proposal?corp=${h.corp_code}`, '_blank', 'noopener');
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -139,7 +174,17 @@ export function CompanySearch({ mode = 'company', placeholder = '회사 이름�
       {showList && (
         <ul className="cs-list" id={listId} role="listbox" aria-label="회사 후보">
           {hits.length === 0 ? (
-            <li className="cs-empty" role="presentation">{loading ? '찾는 중' : `‘${q.trim()}’에 맞는 회사가 없습니다`}</li>
+            <li className="cs-empty" role="presentation">
+              <span>{loading ? '찾는 중…' : failed ? '회사 목록을 불러오지 못했어요' : `‘${q.trim()}’에 맞는 회사가 없어요`}</span>
+              {!loading && (
+                <button type="button" className="cs-retry" onMouseDown={(e) => e.preventDefault()} onClick={retry}>
+                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden>
+                    <path d="M13.5 8A5.5 5.5 0 1 1 11.9 4.1M13.5 2.5V5.5H10.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                  {failed ? '다시 시도' : '다시 찾기'}
+                </button>
+              )}
+            </li>
           ) : (
             hits.map((h, i) => (
               <li

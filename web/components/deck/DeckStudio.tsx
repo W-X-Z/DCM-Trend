@@ -19,11 +19,13 @@ import type { Slide } from '@/lib/deck/model';
 import type { DeckData, DeckInput, DeckText } from '@/lib/deck/types';
 import { AgentChat } from './AgentChat';
 import { DataView } from './DataView';
+import { FlowView } from './FlowView';
 import { SlideView } from './SlideView';
 
 // 문안: 규칙(로직) 그대로 또는 고친 문안. AI 는 Sales 전략 문안에만 쓰고 따로 둔다(salesAi).
 type Mode = 'rule' | 'edited';
-type View = 'preview' | 'data';
+type View = 'preview' | 'data' | 'flow';
+const VIEWS: [View, string][] = [['preview', '미리보기'], ['data', '데이터'], ['flow', '흐름도']];
 type Saved = { v: 2 | 3 | 4; input: DeckInput; text: DeckText | null; mode: Mode | 'ai'; factsKey: string | null; at: string; salesAi?: string[] | null; salesKey?: string | null };
 const KEY = (corp: string) => `deck:v2:${corp}`;
 
@@ -93,6 +95,7 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
   const [cur, setCur] = useState(0);
   const [want, setWant] = useState<string | null>(null);
   const [greeting, setGreeting] = useState<string | null>(null);
+  const [full, setFull] = useState(false);
 
   // 현업 노하우: 검수(숫자 허용)와 Sales 문안에 쓴다
   useEffect(() => {
@@ -307,17 +310,18 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
 
   return (
     <div className="dk dk2">
-      <div className="dk2-head">
-        <h2>{data.company.corp_name}</h2>
-        <span className="muted small">
-          {data.company.rating ?? '등급 미확인'} · 공모 회사채 {data.company.bond_count}회 · 데이터 {data.asof}
-        </span>
-      </div>
       <div className="dk2-bar">
+        <div className="dk2-who">
+          <Link href="/" className="dk2-home">발행시장 트렌드</Link>
+          <h1>{data.company.corp_name} <span>공모사채 제안서</span></h1>
+          <span className="dk2-meta muted small">
+            {data.company.rating ?? '등급 미확인'} · 공모 회사채 {data.company.bond_count}회 · 데이터 {data.asof}
+          </span>
+        </div>
         <div className="dk2-tabs" role="tablist" aria-label="보기">
-          {(['preview', 'data'] as View[]).map((v) => (
+          {VIEWS.map(([v, label]) => (
             <button key={v} type="button" role="tab" aria-selected={view === v} className="dk2-tab" onClick={() => setView(v)}>
-              {v === 'preview' ? '미리보기' : '데이터'}
+              {label}
             </button>
           ))}
         </div>
@@ -329,17 +333,82 @@ export function DeckStudio({ corp, aiEnabled }: { corp: string; aiEnabled: boole
 
       <div className="dk2-work">
         <div className="dk2-main">
-          {view === 'preview' ? (
+          {view === 'preview' && (
             <div className="dk2-preview">
               <Rail slides={slides} cur={at} setCur={setCur} />
-              <Stage slides={slides} cur={at} setCur={setCur} busy={busy === 'ai'} />
+              <Stage slides={slides} cur={at} setCur={setCur} busy={busy === 'ai'} onFull={() => setFull(true)} />
             </div>
-          ) : (
-            <DataView report={report} asof={data.asof} />
+          )}
+          {view === 'data' && <DataView report={report} asof={data.asof} />}
+          {view === 'flow' && (
+            <FlowView
+              report={report}
+              data={data}
+              input={input}
+              tips={tips}
+              slides={slides}
+              avail={avail}
+              onGo={(i) => {
+                setCur(i);
+                setView('preview');
+              }}
+            />
           )}
         </div>
         <AgentChat enabled={aiEnabled} greeting={greeting ?? '초안을 만드는 중이에요.'} suggestions={SUGGESTIONS} state={state} apply={apply} />
       </div>
+      {full && <FullView slides={slides} cur={at} setCur={setCur} onClose={() => setFull(false)} />}
+    </div>
+  );
+}
+
+// 전체보기: 장표를 화면 가득. ←·→ 넘기기, Esc 닫기
+function FullView({ slides, cur, setCur, onClose }: { slides: Slide[]; cur: number; setCur: (i: number) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const [w, setW] = useState(960);
+  useEffect(() => {
+    const fit = () => setW(Math.floor(Math.min(window.innerWidth - 140, ((window.innerHeight - 96) * PAGE.w) / PAGE.h)));
+    fit();
+    window.addEventListener('resize', fit);
+    ref.current?.focus();
+    // 브라우저 전체 화면도 시도 (막혀 있으면 화면 안에서만 크게)
+    ref.current?.requestFullscreen?.().catch(() => undefined);
+    const onFs = () => {
+      if (!document.fullscreenElement) close.current();
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    return () => {
+      window.removeEventListener('resize', fit);
+      document.removeEventListener('fullscreenchange', onFs);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+    };
+  }, []);
+  const n = slides.length;
+  const s = slides[cur];
+  return (
+    <div
+      ref={ref}
+      className="dk2-full"
+      role="dialog"
+      aria-modal="true"
+      aria-label="장표 전체보기"
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onClose();
+        else if ((e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') && cur < n - 1) setCur(cur + 1);
+        else if ((e.key === 'ArrowLeft' || e.key === 'PageUp') && cur > 0) setCur(cur - 1);
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      <button type="button" className="dk2-full-x" aria-label="전체보기 닫기" onClick={onClose}>×</button>
+      <button type="button" className="dk2-full-nav is-prev" aria-label="이전 장표" disabled={cur <= 0} onClick={() => setCur(cur - 1)}>‹</button>
+      <div className="dk2-full-slide" style={{ width: w }}>{s && <SlideView slide={s} width={w} />}</div>
+      <button type="button" className="dk2-full-nav is-next" aria-label="다음 장표" disabled={cur >= n - 1} onClick={() => setCur(cur + 1)}>›</button>
+      <p className="dk2-full-foot tnum">{cur + 1} / {n} · {s?.title}</p>
     </div>
   );
 }
@@ -415,7 +484,7 @@ function Rail({ slides, cur, setCur }: { slides: Slide[]; cur: number; setCur: (
 }
 
 // 가운데 큰 장표: 화면 높이에 맞춰 키우고, ←·→ 로 넘긴다
-function Stage({ slides, cur, setCur, busy }: { slides: Slide[]; cur: number; setCur: (i: number) => void; busy: boolean }) {
+function Stage({ slides, cur, setCur, busy, onFull }: { slides: Slide[]; cur: number; setCur: (i: number) => void; busy: boolean; onFull: () => void }) {
   const ref = useRef<HTMLElement>(null);
   const [w, setW] = useState(640);
   useEffect(() => {
@@ -424,7 +493,7 @@ function Stage({ slides, cur, setCur, busy }: { slides: Slide[]; cur: number; se
     const fit = () => {
       const cs = getComputedStyle(el);
       const inner = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-      const maxH = Math.max(260, window.innerHeight - 330);
+      const maxH = Math.max(260, window.innerHeight - 190);
       setW(Math.max(240, Math.floor(Math.min(inner, (maxH * PAGE.w) / PAGE.h))));
     };
     fit();
@@ -462,6 +531,12 @@ function Stage({ slides, cur, setCur, busy }: { slides: Slide[]; cur: number; se
           <button type="button" aria-label="다음 장표" disabled={cur >= n - 1} onClick={() => setCur(cur + 1)}>›</button>
           <span className="dk-stage-title">{s?.title}</span>
         </div>
+        <button type="button" className="dk2-full-btn" onClick={onFull}>
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+            <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+          전체보기
+        </button>
       </div>
     </section>
   );

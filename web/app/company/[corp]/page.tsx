@@ -102,7 +102,7 @@ export default async function CompanyPage({ params }: { params: { corp: string }
             <h1 className="page-title">{company.corp_name}</h1>
             <FabContext label={company.corp_name} corp={{ c: company.corp_code, n: company.corp_name, href: `/proposal?corp=${company.corp_code}` }} />
             <WatchButton corp={company.corp_code} name={company.corp_name} />
-            <Link href={`/proposal?corp=${company.corp_code}`} className="watch-btn">제안서 초안</Link>
+            <Link href={`/proposal?corp=${company.corp_code}`} target="_blank" rel="noopener" className="watch-btn">제안서 초안</Link>
           </div>
           <p className="company-meta">
             <span>{listed ? company.market : '비상장'}</span>
