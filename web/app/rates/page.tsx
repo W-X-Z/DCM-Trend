@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { ChangeTiles } from '@/components/Insights';
 import { PageHead, SectionHead } from '@/components/Ui';
 import { LineChart, type LineSeries } from '@/components/LineChart';
@@ -8,8 +7,8 @@ import { getPolicyEvents, getRateLatest, getRates, getSpreads } from '@/lib/quer
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '금리 추이' };
 
-const RANGES = { '1y': 1, '3y': 3, '5y': 5 } as const;
-type Range = keyof typeof RANGES;
+// 차트 기간: 최근 1년. 금리 데이터가 2025-11 부터라 3년·5년 버튼은 뺐다(ECOS 과거치를 채우면 다시 둘 수 있음).
+const YEARS = 1;
 
 // 계열 색: 같은 계열은 화면 어디서나 같은 색 (기준금리는 정책 기준선이라 무채색 점선)
 const COLOR: Record<string, string> = {
@@ -21,9 +20,8 @@ const COLOR: Record<string, string> = {
   cd91: '#eda100',
 };
 
-export default async function RatesPage({ searchParams }: { searchParams: { p?: string } }) {
-  const range: Range = (searchParams.p as Range) in RANGES ? (searchParams.p as Range) : '1y';
-  const since = new Date(Date.now() - RANGES[range] * 365.25 * 86400_000).toISOString().slice(0, 10);
+export default async function RatesPage() {
+  const since = new Date(Date.now() - YEARS * 365.25 * 86400_000).toISOString().slice(0, 10);
   const [latest, rates, spreads, events] = await Promise.all([
     getRateLatest().catch(() => []),
     getRates(since, ['base_rate', 'ktb3y', 'ktb10y', 'corp3y_aa', 'corp3y_bbb']).catch(() => []),
@@ -56,17 +54,7 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
         <PageHead
           title="금리 추이"
           info="영업일 장 마감 금리입니다. 한국은행 ECOS 값이 있으면 그것을, 없으면 마감 기사·공개 자료에서 조사한 값을 출처와 함께 씁니다. 예측은 하지 않습니다."
-        >
-          <div className="controls">
-            <span className="seg" aria-label="기간">
-              {(Object.keys(RANGES) as Range[]).map((r) => (
-                <Link key={r} href={r === '1y' ? '/rates' : `/rates?p=${r}`} aria-current={range === r}>
-                  최근 {RANGES[r]}년
-                </Link>
-              ))}
-            </span>
-          </div>
-        </PageHead>
+        />
 
         {latest.length === 0 ? (
           <p className="empty">금리 데이터를 모으고 있습니다. 영업일 저녁마다 채워집니다.</p>
@@ -112,7 +100,7 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
             <ChangeTiles scope="rates" title="최근 1개월 변화" color="var(--bond)" />
 
             <section className="section" aria-labelledby="level-h">
-              <SectionHead id="level-h" title="금리 수준" />
+              <SectionHead id="level-h" title="금리 수준" info={`최근 ${YEARS}년`} />
               <div className="chart-card">
                 <LineChart title="기준금리, 국고채, 회사채 AA- 금리" unit="%" series={level} />
               </div>
@@ -120,7 +108,7 @@ export default async function RatesPage({ searchParams }: { searchParams: { p?: 
 
             {(spread.length > 0 || gap.length > 0) && (
               <section className="section" aria-labelledby="spread-h">
-                <SectionHead id="spread-h" title="스프레드" info="단위 bp. 등급 간 차이는 크기가 달라 따로 그립니다." />
+                <SectionHead id="spread-h" title="스프레드" info={`최근 ${YEARS}년, 단위 bp. 등급 간 차이는 크기가 달라 따로 그립니다.`} />
                 <div className="chart-pair">
                   <div className="chart-card">
                     <LineChart title="AA- 스프레드와 장단기 금리차" unit="bp" series={spread} height={220} />
