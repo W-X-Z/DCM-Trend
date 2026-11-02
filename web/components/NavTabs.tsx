@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-// 1depth 탭: 모니터링 화면만 둔다. 제안서 작성·AI 질문은 화면 아래 플로팅 버튼(Fab)에서 연다.
+// 1depth 탭: 모니터링 화면 + Agent(제안서 Agent 실행·구성). 제안서 작성·AI 질문은 화면 아래 플로팅 버튼(Fab)에서도 연다.
 const TABS = [
   { href: '/', label: '홈', match: (p: string) => p === '/' },
   { href: '/trends/bond', label: '발행동향', match: (p: string) => p.startsWith('/trends') },
   { href: '/filings', label: '주요공시', match: (p: string) => p.startsWith('/filings') || p.startsWith('/expansion') },
   { href: '/rates', label: '금리', match: (p: string) => p.startsWith('/rates') },
+  { href: '/agent', label: 'Agent', match: (p: string) => p.startsWith('/agent') },
 ];
 
 export function NavTabs() {

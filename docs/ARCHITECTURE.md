@@ -97,6 +97,7 @@ Vercel (Next.js) ── RA·RM
 | 최근 공시 | OpenDART 실시간 + `v_disclosure_rules` |
 | IPO 동향 | `v_ipo_trend_monthly` |
 | 데이터 기준·캐시 | `v_data_status`, `v_data_version` |
+| Agent 탭(제안서 Agent) | 제안서 화면과 같은 데이터(`getDeckData`) + `v_deck_knowledge`, `search_companies`. 엔진은 `web/lib/deck/engine.ts` |
 
 ## 7. 수집
 
@@ -117,6 +118,7 @@ Vercel (Next.js) ── RA·RM
 
 - 공개 데이터만 적재한다. 고객 커버리지 리스트, 사내 딜 파이프라인, 수요예측 실명 데이터는 넣지 않는다.
 - OpenDART 키·Supabase service_role 키는 GitHub Actions Secrets 에만 둔다. 화면(Vercel)에는 anon 키만 둔다.
+- Agent 탭의 Claude 키(`ANTHROPIC_API_KEY`)는 Vercel 환경 변수에만 둔다. 서버는 대화·초안 상태를 저장하지 않고 Anthropic API 로만 보낸다.
 - anon 은 `mart` 만 읽을 수 있다. 로그인 필수로 바꾸려면 `20261015074609_api_grants.sql` 의 anon 권한만 회수한다.
 
 ## 9. 후속 개발 요건
