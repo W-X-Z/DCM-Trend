@@ -85,7 +85,7 @@ export function Fab({ aiEnabled }: { aiEnabled: boolean }) {
   const [aiMounted, setAiMounted] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
-  const hidden = path.startsWith('/proposal') || path.startsWith('/ai');
+  const hidden = path.startsWith('/proposal') || path.startsWith('/ai') || path.startsWith('/agent');
 
   // 화면을 옮기면 메뉴와 제안서 패널은 닫는다 (AI 패널은 유지)
   useEffect(() => {
