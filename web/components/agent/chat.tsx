@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { BUILDER_NAME, ROLE_NAME, type Msg } from '@/lib/agent/defs';
 
 export type Step = { id: string; label: string; status: 'run' | 'ok' | 'fail'; note: string };
-export type RoleRun = { role: string; status: 'run' | 'ok'; steps: Step[]; text?: string };
+export type RoleRun = { role: string; status: 'run' | 'ok' | 'fail'; steps: Step[]; text?: string };
 export type Part =
   | { k: 'text'; text: string }
   | { k: 'tool'; id: string; name: string; label: string; status: 'run' | 'ok' | 'fail'; note: string; roles?: RoleRun[] }
@@ -19,7 +19,7 @@ type Common =
   | { t: 'text'; text: string }
   | { t: 'tool'; id: string; name: string; label: string; agent: string; call?: string }
   | { t: 'tool_done'; id: string; ok: boolean; note: string }
-  | { t: 'role'; call: string; role: string; phase: 'start' | 'end'; text?: string }
+  | { t: 'role'; call: string; role: string; phase: 'start' | 'end'; text?: string; fail?: boolean }
   | { t: 'error'; message: string };
 
 // 공용 이벤트를 대화 조각에 반영한다(모르는 이벤트는 그대로)
@@ -48,7 +48,7 @@ export function applyCommon(parts: Part[], e: Common | { t: string }): Part[] {
       return parts.map((p) => {
         if (p.k !== 'tool' || p.id !== ev.call) return p;
         if (ev.phase === 'start') return { ...p, roles: [...(p.roles ?? []), { role: ev.role, status: 'run', steps: [] }] };
-        return { ...p, roles: (p.roles ?? []).map((r) => (r.role === ev.role && r.status === 'run' ? { ...r, status: 'ok', text: ev.text } : r)) };
+        return { ...p, roles: (p.roles ?? []).map((r) => (r.role === ev.role && r.status === 'run' ? { ...r, status: ev.fail ? 'fail' : 'ok', text: ev.text } : r)) };
       });
     default:
       return parts;
@@ -116,7 +116,8 @@ export function ToolRow({ p }: { p: Extract<Part, { k: 'tool' }> }) {
               {s.note && <span className="ag-tool-note">{s.note}</span>}
             </div>
           ))}
-          {r.text && (
+          {r.status === 'fail' && <p className="ag-role-err">{r.text}</p>}
+          {r.text && r.status !== 'fail' && (
             <details className="ag-sub-out">
               <summary>보고</summary>
               <pre>{r.text}</pre>

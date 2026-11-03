@@ -10,6 +10,7 @@ import {
 import { daysAgo, kstToday } from '@/lib/filings';
 import { date, num, won } from '@/lib/format';
 import { getExpansionCompanies, getExpansionEvents, getFundingSince, getKeyFilings, getNhLeadCorps } from '@/lib/queries';
+import { deckHref } from '@/lib/links';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: '주요공시' };
@@ -119,7 +120,7 @@ function Row({ r }: { r: DiscRow }) {
         </span>
         <Funding r={r} />
         <span className="xp-cta">
-          <Link href={`/proposal/deck?corp=${r.corp_code}`} target="_blank" rel="noopener" className="cta-sm" aria-label={`${r.corp_name} 제안서 초안 (새 탭)`}>제안서 초안</Link>
+          <Link href={deckHref(r.corp_code)} target="_blank" rel="noopener" className="cta-sm" aria-label={`${r.corp_name} 제안서 초안 (새 탭)`}>제안서 초안</Link>
           <span className="xp-more" aria-hidden>근거 {r.evs.length}</span>
         </span>
       </summary>

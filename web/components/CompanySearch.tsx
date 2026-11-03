@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
+import { deckHref } from '@/lib/links';
 
 type Hit = { corp_code: string; corp_name: string; market: string | null; deal_count: number; last_deal_dt: string | null };
 
@@ -110,7 +111,7 @@ export function CompanySearch({ mode = 'company', placeholder = '회사 이름�
     inputRef.current?.blur();
     if (isHeader) router.push(`/company/${h.corp_code}`);
     // 제안서 작성은 새 탭(사이트 머리글 없는 작업 화면)으로 연다
-    else window.open(mode === 'deck' ? `/proposal/deck?corp=${h.corp_code}` : `/proposal?corp=${h.corp_code}`, '_blank', 'noopener');
+    else window.open(mode === 'deck' ? deckHref(h.corp_code) : `/proposal?corp=${h.corp_code}`, '_blank', 'noopener');
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

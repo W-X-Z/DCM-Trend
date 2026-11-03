@@ -3,6 +3,7 @@
 import { build } from 'esbuild';
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +23,7 @@ const truthy = (name, v) => eq(name, !!v, true);
 // ── 가짜 Claude ──────────────────────────────────────────────────────
 const seen = [];
 let scripts = {};
+let fail429 = 0;
 let n = 0;
 const tu = (name, input) => ({ type: 'tool_use', id: `toolu_${++n}`, name, input });
 const msg = (content, stop = 'tool_use') => ({ id: `msg_${++n}`, type: 'message', role: 'assistant', model: 'mock-haiku', content, stop_reason: stop });
@@ -59,14 +61,26 @@ const server = http.createServer((req, res) => {
     const sys = body.system[0].text;
     const who = WHO.find(([, re]) => re.test(sys))?.[0] ?? '?';
     seen.push({ who, body });
+    if (fail429 > 0) {
+      fail429 -= 1;
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '1' });
+      return res.end(JSON.stringify({ error: { message: 'rate limit' } }));
+    }
     const errs = problems(body);
+    // 실제 모델처럼 thinking 블록을 붙인다. 서명은 대화 앞부분(system)에 묶여, 앞부분이 바뀐 채 돌려보내면 거절된다
+    const sig = createHash('md5').update(sys).digest('hex');
+    body.messages.forEach((mm, i) => {
+      if (Array.isArray(mm.content) && mm.content.some((x) => x.type === 'thinking' && x.signature !== sig)) errs.push(`messages.${i}.content.0: Invalid \`signature\` in \`thinking\` block. The block is bound to a different conversation.`);
+    });
     const f = scripts[who];
     if (errs.length || !f) {
       res.writeHead(400, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ error: { message: errs.join('; ') || `no script for ${who}` } }));
     }
+    const out = f(body, step(body));
+    out.content = [{ type: 'thinking', thinking: '생각 중', signature: sig }, ...out.content];
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(f(body, step(body))));
+    res.end(JSON.stringify(out));
   });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -215,6 +229,7 @@ truthy('검토 의견 저장', /RV-05/.test(S1.review));
 truthy('산출', r.ev.some((e) => e.t === 'render' && e.slides > 10));
 eq('끝', r.done.cont, false);
 eq('도구 결과 짝 오류 없음', seen.every((s) => problems(s.body).length === 0), true);
+const T1 = r.done.messages;
 
 // ── 2) 조건 변경: 딜만 → Sales 문안은 다시 써야 함 ──────────────────────
 seen.length = 0;
@@ -302,6 +317,57 @@ scripts['dcm.master'] = (body, k) => (k === 0 ? msg([tu('call_roles', { roles: [
 r = await runDcm([{ role: 'user', content: '조건 바꿔줘' }], m.emptySession());
 truthy('초안 없음: 오류 결과', r.ev.find((e) => e.t === 'tool_done' && !e.ok && /열린 초안이 없어요/.test(e.note)));
 eq('초안 없음: 끝', r.done.cont, false);
+
+// ── 6) 여러 턴: 지난 턴 기록(도구 호출 포함)을 그대로 보내도 이어진다 ─────────
+const sinceAsk = (body) => {
+  let k = 0;
+  for (let i = body.messages.length - 1; i >= 0; i--) {
+    const x = body.messages[i];
+    if (x.role === 'user' && (typeof x.content === 'string' || x.content.every((b) => b.type === 'text'))) break;
+    if (x.role === 'assistant') k += 1;
+  }
+  return k;
+};
+seen.length = 0;
+scripts['dcm.master'] = (body) => (sinceAsk(body) === 0 ? msg([tu('call_roles', { roles: ['deal'], task: '사용자 요청: 3년 단일 1,000억으로 바꿔줘' })]) : say('바꿨어요.'));
+scripts.deal = (body, k) => (k === 0 ? msg([tu('decide', { changes: [{ type: 'tranches', tranches: [{ tenor: '3년', eok: 1000 }], reason: '사용자 요청', rules: [] }] })]) : say('바꿨어요.'));
+r = await runDcm([...T1, { role: 'user', content: '3년 단일 1,000억으로 바꿔줘' }], S2);
+eq('여러 턴: 오류 없음', r.ev.filter((e) => e.t === 'error'), []);
+eq('여러 턴: 끝', r.done.cont, false);
+eq('여러 턴: 보낸 기록이 API 규칙에 맞음', seen.every((s) => problems(s.body).length === 0), true);
+const mb = seen.find((s) => s.who === 'dcm.master').body.messages;
+eq('여러 턴: 지난 턴은 말·답만', [mb.length, typeof mb[0].content, typeof mb[1].content], [3, 'string', 'string']);
+eq('여러 턴: 바뀜', r.session.state.input.tranches, [{ tenor: '3년', eok: 1000 }]);
+// 세 번째 턴: 돌려받은 기록에 다시 이어 붙여도
+seen.length = 0;
+r = await runDcm([...r.done.messages, { role: 'user', content: '3년 단일 1,000억으로 바꿔줘' }], r.session);
+eq('세 번째 턴: 말·답 2쌍 + 새 말', seen.find((s) => s.who === 'dcm.master').body.messages.length, 5);
+eq('세 번째 턴: 오류 없음', r.ev.filter((e) => e.t === 'error'), []);
+// 이번 턴 기록이 끊겨 답 없는 도구 호출·짝 없는 결과·빈 글이 남아도 거절되지 않는다
+seen.length = 0;
+const broken = [...T1, { role: 'user', content: 'Sales 다시 써줘' }, { role: 'assistant', content: [{ type: 'text', text: '' }, { type: 'tool_use', id: 'toolu_x', name: 'render', input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_y', content: 'x' }] }];
+r = await runDcm(broken, S2);
+eq('끊긴 기록: 오류 없음', r.ev.filter((e) => e.t === 'error'), []);
+eq('끊긴 기록: 규칙에 맞음', seen.every((s) => problems(s.body).length === 0), true);
+
+// 긴 작업이 요청 두 번에 걸쳐 이어질 때: 앞 요청의 thinking 블록(다른 system 에 묶임)이 남아 있어도
+seen.length = 0;
+scripts['dcm.master'] = (body) => (sinceAsk(body) <= 1 ? msg([tu('render', {})]) : say('만들었어요.'));
+const hop = [{ role: 'user', content: 'PPT로 만들어줘' }, { role: 'assistant', content: [{ type: 'thinking', thinking: '...', signature: 'other-conversation' }, { type: 'tool_use', id: 'toolu_h1', name: 'session', input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_h1', content: '{}' }] }];
+r = await runDcm(hop, S2);
+eq('이어지는 요청: 오류 없음', r.ev.filter((e) => e.t === 'error'), []);
+truthy('이어지는 요청: 산출까지', r.ev.some((e) => e.t === 'render'));
+
+// ── 7) 한도(429): retry-after 만큼 쉬고 다시, 계속이면 알기 쉬운 안내 ─────────
+scripts['dcm.master'] = () => say('네.');
+fail429 = 1;
+r = await runDcm([{ role: 'user', content: '안녕' }], S2);
+eq('429: 쉬고 다시 → 답', r.ev.filter((e) => e.t === 'text').map((e) => e.text), ['네.']);
+fail429 = 99;
+r = await runDcm([{ role: 'user', content: '안녕' }], S2);
+truthy('429: 한도 안내', r.ev.find((e) => e.t === 'error' && /사용량 한도/.test(e.message)));
+eq('429: 바로 다시 보내지 않음', r.done.cont, false);
+fail429 = 0;
 
 server.close();
 console.log(`${pass} passed${process.exitCode ? ', some failed' : ''}`);

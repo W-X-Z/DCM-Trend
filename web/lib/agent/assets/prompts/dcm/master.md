@@ -23,6 +23,7 @@
 | 검토·피드백 요청 | call_roles([review]) |
 | 질문 | session 으로 보고 답한다 (바꾸지 않음) |
 
+- 요청에 corp_code 가 함께 오면 find_company 없이 그 코드로 open_company(mode new).
 - 회사가 여럿 나오면 사용자에게 고르게 한다.
 - 이미 연 회사면 open_company 의 mode 는 resume.
 

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { date, pct, won } from '@/lib/format';
 import type { Maturity } from '@/lib/types';
+import { deckHref } from '@/lib/links';
 
 // 만기도래 회사 표 (만기도래 화면, 제안서 초안 첫 화면에서 같이 쓴다)
 export type MaturityGroup = {
@@ -72,7 +73,7 @@ export function MaturityTable({ groups, kind, ctaLabel = '제안서 초안' }: {
               </td>
               <td className="col-cta">
                 <Link
-                  href={kind === 'bond' ? `/proposal/deck?corp=${g.corp_code}` : `/proposal?corp=${g.corp_code}&type=${kind}`}
+                  href={kind === 'bond' ? deckHref(g.corp_code) : `/proposal?corp=${g.corp_code}&type=${kind}`}
                   target={kind === 'bond' ? '_blank' : undefined}
                   rel={kind === 'bond' ? 'noopener' : undefined}
                   className="cta-sm"

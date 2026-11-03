@@ -15,13 +15,14 @@ import {
   CASE_FIELDS, COND_FIELDS, FIELD_LABEL, FIELD_OWNER, FIELD_SLIDE, MODEL, ROLES, ROLE_NAME, TERM_NOTE_KEYS, emptySession, kstToday, roleOf, staleFields, textOf,
   type AssetTexts, type Block, type Msg, type RoleDef, type RoleKey, type Session, type TextField,
 } from './defs';
-import { J, ToolError, claude, clip, obj, runLoop, textOf as textOfBlocks, usesOf, type ToolDef } from './llm';
+import { J, ToolError, claude, claudeWhy, clip, obj, runLoop, textOf as textOfBlocks, tidyHistory, usesOf, type ToolDef } from './llm';
 
 export type DcmEvent =
   | { t: 'text'; text: string }
   | { t: 'tool'; id: string; name: string; label: string; agent: 'master' | RoleKey; call?: string }
   | { t: 'tool_done'; id: string; ok: boolean; note: string }
-  | { t: 'role'; call: string; role: RoleKey; phase: 'start' | 'end'; text?: string }
+  | { t: 'role'; call: string; role: RoleKey; phase: 'start' | 'end'; text?: string; fail?: boolean }
+  | { t: 'open'; resume: boolean }
   | { t: 'session'; session: Session; slide: number | null }
   | { t: 'render'; name: string; slides: number }
   | { t: 'done'; messages: Msg[]; cont: boolean; model: string }
@@ -266,25 +267,13 @@ const LABEL: Record<string, (i: Record<string, unknown>) => string> = {
 export const toolLabel = (name: string, i: Record<string, unknown>) => (LABEL[name] ?? (() => name))(i ?? {});
 
 // ── 실행 ───────────────────────────────────────────────────────────
-function trimOld(messages: Msg[]): Msg[] {
-  let lastUser = -1;
-  messages.forEach((m, i) => {
-    if (m.role === 'user' && typeof m.content === 'string') lastUser = i;
-  });
-  return messages.map((m, i) =>
-    i >= lastUser || typeof m.content === 'string'
-      ? m
-      : { role: m.role, content: m.content.map((b) => (b.type === 'tool_result' && b.content.length > 600 ? { ...b, content: `${b.content.slice(0, 600)}\n…(지난 결과 줄임)` } : b)) },
-  );
-}
-
 export async function runDcm(inp: DcmInput, emit: (e: DcmEvent) => void, budgetMs = 170_000, hardMs = 285_000) {
   const t0 = Date.now();
   const left = () => t0 + hardMs - Date.now();
   const A = inp.assets;
   const S: Session = { ...emptySession(), ...inp.session, log: [...(inp.session.log ?? [])], memos: { ...(inp.session.memos ?? {}) }, texts: { ...(inp.session.texts ?? {}) }, flags: [...(inp.session.flags ?? [])] };
   let ctx: EngineCtx | null = null;
-  const messages: Msg[] = trimOld(inp.messages);
+  const messages: Msg[] = tidyHistory(inp.messages);
   let model = MODEL;
   let calls = 0;
 
@@ -516,9 +505,9 @@ ${r.knowhow.map((k) => textOf(A, k)).join('\n\n')}
       if (r.key === 'review') S.review = out.text.slice(0, 2000);
       return { 역할: r.name, 보고: clip(out.text, 2000) };
     } catch (e) {
-      const msg = `역할 실행 실패: ${String((e as Error).message).slice(0, 200)}`;
+      const msg = `역할 실행 실패: ${claudeWhy(e)}`;
       flag(r.key, msg);
-      emit({ t: 'role', call, role: r.key, phase: 'end', text: msg });
+      emit({ t: 'role', call, role: r.key, phase: 'end', text: msg, fail: true });
       return { 역할: r.name, 보고: msg };
     }
   }
@@ -541,6 +530,7 @@ ${r.knowhow.map((k) => textOf(A, k)).join('\n\n')}
         const st = resume ? normalizeState(d, S.state) : freshState(d);
         ctx = ctxOf(d, [], st);
         S.state = st;
+        emit({ t: 'open', resume });
         emitSession(0);
         return {
           content: J({ 회사: d.company.corp_name, corp_code: corp, 등급: d.company.rating, 기준일: d.asof, 공모채발행횟수: d.company.bond_count, 직전회차: d.company.last_series, 이어서: resume, 장표수: ctx.slides.length }),
@@ -597,10 +587,11 @@ ${JSON.stringify(brief)}
     }
     let res;
     try {
-      res = await claude(MODEL, system, messages, MASTER_TOOLS, 3000, left());
+      res = await claude(MODEL, system, messages, MASTER_TOOLS, 2000, left());
     } catch (e) {
-      emit({ t: 'error', message: `Claude 응답을 받지 못했어요. (${String((e as Error).message).slice(0, 200)})` });
-      emit({ t: 'done', messages, cont: messages[messages.length - 1]?.role === 'user' && typeof messages[messages.length - 1].content !== 'string', model });
+      // 바로 다시 보내지 않는다(한도면 또 걸린다). 이미 한 일은 작업 세션에 남아 있어 다음 요청에서 이어진다.
+      emit({ t: 'error', message: claudeWhy(e) });
+      emit({ t: 'done', messages, cont: false, model });
       return;
     }
     model = res.model ?? model;

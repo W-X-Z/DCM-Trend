@@ -5,13 +5,13 @@ import {
   ASSETS, EDITABLE, MODEL, ROLE_NAME, allItems, applyEdit, assetDef, itemBlock, kstToday, nextItemId, parseItems, parseSections, textOf,
   type AssetTexts, type Block, type BuilderRoleKey, type DevRequest, type Edit, type Msg, type Proposal,
 } from './defs';
-import { J, ToolError, claude, clip, obj, runLoop, textOf as textOfBlocks, usesOf, type ToolDef } from './llm';
+import { J, ToolError, claude, claudeWhy, clip, obj, runLoop, textOf as textOfBlocks, tidyHistory, usesOf, type ToolDef } from './llm';
 
 export type BuilderEvent =
   | { t: 'text'; text: string }
   | { t: 'tool'; id: string; name: string; label: string; agent: 'master' | BuilderRoleKey; call?: string }
   | { t: 'tool_done'; id: string; ok: boolean; note: string }
-  | { t: 'role'; call: string; role: BuilderRoleKey; phase: 'start' | 'end'; text?: string }
+  | { t: 'role'; call: string; role: BuilderRoleKey; phase: 'start' | 'end'; text?: string; fail?: boolean }
   | { t: 'proposal'; proposal: Proposal }
   | { t: 'impact'; id: string; text: string }
   | { t: 'dev'; item: DevRequest }
@@ -82,7 +82,7 @@ export async function runBuilder(inp: BuilderInput, emit: (e: BuilderEvent) => v
   const t0 = Date.now();
   const left = () => t0 + hardMs - Date.now();
   const A = inp.assets;
-  const messages: Msg[] = inp.messages.slice();
+  const messages: Msg[] = tidyHistory(inp.messages);
   const proposals = new Map<string, Proposal>();
   let seq = inp.seq;
   let model = MODEL;
@@ -191,8 +191,8 @@ export async function runBuilder(inp: BuilderInput, emit: (e: BuilderEvent) => v
       emit({ t: 'role', call, role, phase: 'end', text: out.text.slice(0, 1500) });
       return out.text;
     } catch (e) {
-      const msg = `역할 실행 실패: ${String((e as Error).message).slice(0, 200)}`;
-      emit({ t: 'role', call, role, phase: 'end', text: msg });
+      const msg = `역할 실행 실패: ${claudeWhy(e)}`;
+      emit({ t: 'role', call, role, phase: 'end', text: msg, fail: true });
       return msg;
     }
   }
@@ -263,7 +263,7 @@ ${inp.memory?.trim() || '(없음)'}
     try {
       res = await claude(MODEL, system, messages, MASTER_TOOLS, 2500, left());
     } catch (e) {
-      emit({ t: 'error', message: `Claude 응답을 받지 못했어요. (${String((e as Error).message).slice(0, 200)})` });
+      emit({ t: 'error', message: claudeWhy(e) });
       emit({ t: 'done', messages, cont: false, model });
       return;
     }

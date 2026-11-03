@@ -13,6 +13,7 @@ import { PAGE } from '@/lib/deck/theme';
 import type { DeckData, DeckText } from '@/lib/deck/types';
 import { SlideView } from '../deck/SlideView';
 import { ToolRow, applyCommon, postStream, trimOld, useBox, type Part, type Turn } from './chat';
+import { WorkView, nowDoing } from './WorkView';
 
 type Saved = { v: 2; turns: Turn[]; api: Msg[]; session: Session };
 export type Handoff = { label: string; detail: string };
@@ -42,7 +43,7 @@ const keyOf = (facts: unknown) => {
 const textOfTurn = (t: Extract<Turn, { role: 'assistant' }>) => t.parts.filter((p): p is Extract<Part, { k: 'text' }> => p.k === 'text').map((p) => p.text).join('\n');
 const linesOf = (v: DeckText[keyof DeckText]) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))) : Object.entries(v).map(([k, x]) => `${k}: ${x}`));
 
-export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, rerun }: {
+export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, rerun, start }: {
   ready: boolean;
   texts: AssetTexts;
   memory: MemoryFile[];
@@ -50,6 +51,7 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   onDeck: (d: { state: EngineState | null; data: DeckData | null }) => void;
   onBuilder: (h: Handoff) => void;
   rerun: { text: string; n: number } | null;
+  start: { corp: string; name: string } | null;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [api, setApi] = useState<Msg[]>([]);
@@ -62,6 +64,11 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   const [view, setView] = useState<'slides' | 'session'>('slides');
   const [fileBusy, setFileBusy] = useState<'' | 'pptx' | 'pdf'>('');
   const [fileNote, setFileNote] = useState<string | null>(null);
+  // 일하는 동안: 첫 초안은 장표를 가리고(hold) 진행 화면을, 이후 수정은 장표 위에 진행 줄을 보인다
+  const [hold, setHold] = useState(false);
+  const [since, setSince] = useState(0);
+  const [after, setAfter] = useState('');
+  const [changed, setChanged] = useState<Set<number>>(() => new Set());
   const abort = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [stageRef, stage] = useBox();
@@ -119,16 +126,27 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
       return [...ts.slice(0, i), { ...t, parts: f(t.parts), ...extra }];
     });
 
-  async function send(text: string) {
+  // fresh: 새 대화로 시작(지난 대화·작업 세션을 비움). apiText: Agent 에게만 보낼 덧붙임(회사 코드 등)
+  async function send(text: string, opt: { fresh?: boolean; apiText?: string } = {}) {
     const q = text.trim();
     if (!q || busy || !ready) return;
     setDraft('');
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
-    let msgs: Msg[] = [...api, { role: 'user', content: q }];
-    let sNow = session;
-    setTurns((ts) => [...ts, { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
+    const s0 = opt.fresh ? emptySession() : session;
+    let msgs: Msg[] = [...(opt.fresh ? [] : api), { role: 'user', content: opt.apiText ?? q }];
+    let sNow = s0;
+    let held = !s0.state;
+    if (opt.fresh) {
+      setSession(s0);
+      setCur(0);
+    }
+    setSince(Date.now());
+    setAfter([...s0.log.map((x) => x.at), ...Object.values(s0.texts).map((m) => m?.at ?? '')].sort().pop() ?? '');
+    setChanged(new Set());
+    setHold(held);
+    setTurns((ts) => [...(opt.fresh ? [] : ts), { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
     try {
       for (let hop = 0; hop < 4; hop++) {
         let done: Extract<DcmEvent, { t: 'done' }> | null = null;
@@ -136,10 +154,27 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
           if (e.t === 'session') {
             sNow = e.session;
             setSession(e.session);
-            if (e.slide != null) setCur(e.slide);
+            if (e.slide != null) {
+              const at = e.slide;
+              if (!held) setCur(at);
+              setChanged((c) => new Set(c).add(at));
+            }
             return;
           }
-          if (e.t === 'render') return patchLast((p) => [...p, { k: 'render', name: e.name, slides: e.slides }]);
+          // 새 초안을 열 때만 장표를 가리고 진행 화면을 보인다(이어서 고칠 때는 장표를 그대로)
+          if (e.t === 'open') {
+            if (!e.resume) {
+              held = true;
+              setHold(true);
+            }
+            return;
+          }
+          if (e.t === 'render') {
+            if (held) setCur(0);
+            held = false;
+            setHold(false);
+            return patchLast((p) => [...p, { k: 'render', name: e.name, slides: e.slides }]);
+          }
           if (e.t === 'done') {
             done = e;
             return;
@@ -165,6 +200,7 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
     } finally {
       abort.current = null;
       setBusy(false);
+      setHold(false);
       setApi(msgs);
       setTurns((ts) => {
         const done = ts.map((t, i) => (i === ts.length - 1 && t.role === 'assistant' ? { ...t, done: true } : t));
@@ -173,6 +209,28 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
       });
     }
   }
+
+  // 다른 화면의 '제안서 초안' 버튼(?corp=)으로 들어오면: 그 회사 초안이 이미 열려 있으면 그대로 보이고, 아니면 새 대화로 만든다
+  const startedFor = useRef('');
+  useEffect(() => {
+    if (!start || !loaded || startedFor.current === start.corp) return;
+    startedFor.current = start.corp;
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete('corp');
+      history.replaceState(null, '', u);
+    } catch {
+      /* 무시 */
+    }
+    if (session.state?.corp === start.corp) return;
+    const text = `${start.name} 제안서 초안 만들어줘`;
+    if (!ready || busy) {
+      setDraft(text);
+      return;
+    }
+    void send(text, { fresh: true, apiText: `${text}\n(회사: ${start.name}, corp_code ${start.corp})` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, loaded]);
 
   // Builder 에서 승인 후 '다시 실행'
   const lastRerun = useRef(0);
@@ -242,6 +300,9 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   const chips = turns.length ? MORE : EXAMPLES;
   const big = Math.max(280, Math.min(stage.w - 32, ((stage.h - 64) * PAGE.w) / PAGE.h, 1100));
   const stale = staleFields(session);
+  const lastTurn = turns[turns.length - 1];
+  const liveParts = busy && lastTurn?.role === 'assistant' ? lastTurn.parts : [];
+  const working = busy && (hold || !st);
 
   return (
     <div className="ag-run">
@@ -304,7 +365,9 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
       </section>
 
       <section className="ag-stage" aria-label="제안서 미리보기">
-        {st && data ? (
+        {working ? (
+          <WorkView parts={liveParts} session={session} since={since} after={after} title={`${data?.company.corp_name ?? ''} 제안서 만드는 중`.trim()} />
+        ) : st && data ? (
           <>
             <div className="ag-stage-bar">
               <div className="ag-views" role="tablist" aria-label="보기">
@@ -322,12 +385,18 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
               </div>
             </div>
             {fileNote && <p className="ag-note is-error">{fileNote}</p>}
+            {busy && (
+              <div className="ag-strip" aria-live="polite">
+                <i aria-hidden="true" />
+                <span>{nowDoing(liveParts)}</span>
+              </div>
+            )}
             {view === 'slides' ? (
               <div className="ag-stage-body">
                 <ol className="ag-rail" aria-label="장표 목록">
                   {slides.map((s, i) => (
-                    <li key={s.id}>
-                      <button type="button" aria-current={i === at ? 'true' : undefined} onClick={() => setCur(i)} title={s.title}>
+                    <li key={s.id} className={changed.has(i) ? 'is-changed' : undefined}>
+                      <button type="button" aria-current={i === at ? 'true' : undefined} onClick={() => setCur(i)} title={changed.has(i) ? `${s.title} · 이번에 바뀜` : s.title}>
                         <span>{i + 1}</span>
                         <SlideView slide={s} width={104} />
                       </button>
