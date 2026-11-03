@@ -43,7 +43,7 @@ const keyOf = (facts: unknown) => {
 const textOfTurn = (t: Extract<Turn, { role: 'assistant' }>) => t.parts.filter((p): p is Extract<Part, { k: 'text' }> => p.k === 'text').map((p) => p.text).join('\n');
 const linesOf = (v: DeckText[keyof DeckText]) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))) : Object.entries(v).map(([k, x]) => `${k}: ${x}`));
 
-export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, rerun }: {
+export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, rerun, start }: {
   ready: boolean;
   texts: AssetTexts;
   memory: MemoryFile[];
@@ -51,6 +51,7 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   onDeck: (d: { state: EngineState | null; data: DeckData | null }) => void;
   onBuilder: (h: Handoff) => void;
   rerun: { text: string; n: number } | null;
+  start: { corp: string; name: string } | null;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [api, setApi] = useState<Msg[]>([]);
@@ -125,21 +126,27 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
       return [...ts.slice(0, i), { ...t, parts: f(t.parts), ...extra }];
     });
 
-  async function send(text: string) {
+  // fresh: 새 대화로 시작(지난 대화·작업 세션을 비움). apiText: Agent 에게만 보낼 덧붙임(회사 코드 등)
+  async function send(text: string, opt: { fresh?: boolean; apiText?: string } = {}) {
     const q = text.trim();
     if (!q || busy || !ready) return;
     setDraft('');
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
-    let msgs: Msg[] = [...api, { role: 'user', content: q }];
-    let sNow = session;
-    let held = !session.state;
+    const s0 = opt.fresh ? emptySession() : session;
+    let msgs: Msg[] = [...(opt.fresh ? [] : api), { role: 'user', content: opt.apiText ?? q }];
+    let sNow = s0;
+    let held = !s0.state;
+    if (opt.fresh) {
+      setSession(s0);
+      setCur(0);
+    }
     setSince(Date.now());
-    setAfter([...session.log.map((x) => x.at), ...Object.values(session.texts).map((m) => m?.at ?? '')].sort().pop() ?? '');
+    setAfter([...s0.log.map((x) => x.at), ...Object.values(s0.texts).map((m) => m?.at ?? '')].sort().pop() ?? '');
     setChanged(new Set());
     setHold(held);
-    setTurns((ts) => [...ts, { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
+    setTurns((ts) => [...(opt.fresh ? [] : ts), { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
     try {
       for (let hop = 0; hop < 4; hop++) {
         let done: Extract<DcmEvent, { t: 'done' }> | null = null;
@@ -202,6 +209,28 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
       });
     }
   }
+
+  // 다른 화면의 '제안서 초안' 버튼(?corp=)으로 들어오면: 그 회사 초안이 이미 열려 있으면 그대로 보이고, 아니면 새 대화로 만든다
+  const startedFor = useRef('');
+  useEffect(() => {
+    if (!start || !loaded || startedFor.current === start.corp) return;
+    startedFor.current = start.corp;
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete('corp');
+      history.replaceState(null, '', u);
+    } catch {
+      /* 무시 */
+    }
+    if (session.state?.corp === start.corp) return;
+    const text = `${start.name} 제안서 초안 만들어줘`;
+    if (!ready || busy) {
+      setDraft(text);
+      return;
+    }
+    void send(text, { fresh: true, apiText: `${text}\n(회사: ${start.name}, corp_code ${start.corp})` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, loaded]);
 
   // Builder 에서 승인 후 '다시 실행'
   const lastRerun = useRef(0);

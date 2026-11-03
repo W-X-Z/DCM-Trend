@@ -6,6 +6,7 @@ import { SectionHead } from './Ui';
 import { kstToday } from '@/lib/filings';
 import { won } from '@/lib/format';
 import { getBondHistory, getMaturities } from '@/lib/queries';
+import { deckHref } from '@/lib/links';
 import {
   DEFAULT_PERIOD, GRADES, MARKETS, PERIODS, RECO, buildReco, historySince, marketOf, periodRange, windowEnd,
   type Grade, type MarketKey, type Period, type RecoItem,
@@ -83,7 +84,7 @@ function Card({ it }: { it: RecoItem }) {
         <Link href={`/company/${it.corp_code}`} className="cta-sm is-sub" aria-label={`${it.corp_name} 자세히 보기`}>
           자세히 보기
         </Link>
-        <Link href={`/proposal/deck?corp=${it.corp_code}`} target="_blank" rel="noopener" className="cta-sm" aria-label={`${it.corp_name} 제안서 초안 (새 탭)`}>
+        <Link href={deckHref(it.corp_code)} target="_blank" rel="noopener" className="cta-sm" aria-label={`${it.corp_name} 제안서 초안 (새 탭)`}>
           제안서 초안
         </Link>
       </div>

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AskPanel } from './AskPanel';
 import { CompanySearch } from './CompanySearch';
+import { deckHref } from '@/lib/links';
 
 // 화면 아래 플로팅 버튼: 제안서 작성 · AI 질문.
 // 위계: 1depth 탭(모니터링) → 플로팅 버튼(행동) → 오른쪽 패널(2depth).
@@ -74,8 +75,8 @@ function examplesFor(path: string, ctx: FabCtx | null) {
   return EXAMPLES.find((e) => e.match(path))?.list;
 }
 
-// 제안서 작성은 새 탭(사이트 머리글 없는 작업 화면)으로 연다
-const deckHref = (co: FabCo) => co.href ?? `/proposal/deck?corp=${co.c}`;
+// 제안서 작성은 새 탭의 Agent 탭으로 연다(메자닌 등은 화면이 준 href)
+const coHref = (co: FabCo) => co.href ?? deckHref(co.c);
 
 export function Fab({ aiEnabled }: { aiEnabled: boolean }) {
   const path = usePathname() ?? '/';
@@ -125,7 +126,7 @@ export function Fab({ aiEnabled }: { aiEnabled: boolean }) {
           <ul className="fab-menu" id="fab-menu">
             <li>
               {ctx?.corp ? (
-                <Link href={deckHref(ctx.corp)} target="_blank" rel="noopener" className="fab-item" onClick={() => setMenu(false)}>
+                <Link href={coHref(ctx.corp)} target="_blank" rel="noopener" className="fab-item" onClick={() => setMenu(false)}>
                   <strong>제안서 작성</strong>
                   <span>{ctx.corp.n}</span>
                 </Link>
@@ -177,7 +178,7 @@ export function Fab({ aiEnabled }: { aiEnabled: boolean }) {
                 <ul>
                   {cos.map((co) => (
                     <li key={co.c}>
-                      <Link href={deckHref(co)} target="_blank" rel="noopener" onClick={() => setPanel(null)}>
+                      <Link href={coHref(co)} target="_blank" rel="noopener" onClick={() => setPanel(null)}>
                         <strong>{co.n}</strong>
                         {co.sub && <span>{co.sub}</span>}
                       </Link>

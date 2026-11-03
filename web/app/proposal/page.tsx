@@ -8,6 +8,7 @@ import { DRAFT_TYPES, STATUS_LABEL, buildDraft, defaultType, needsOf, type Draft
 import { kstToday } from '@/lib/filings';
 import { date, num, won } from '@/lib/format';
 import { getCompany, getMaturities } from '@/lib/queries';
+import { deckHref } from '@/lib/links';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: '제안서 초안' };
@@ -156,11 +157,11 @@ export default async function ProposalPage({ searchParams }: { searchParams: SP 
       </main>
     );
   }
-  // 공모 회사채: 데이터 점검 화면을 거치지 않고 바로 제안서 초안(장표 + 관련 데이터)으로
-  if (type === 'bond') redirect(`/proposal/deck?corp=${corp}`);
+  // 공모 회사채: 데이터 점검 화면을 거치지 않고 바로 Agent 탭(제안서 Agent 가 초안을 만든다)으로
+  if (type === 'bond') redirect(deckHref(corp));
   if (!type) {
     const c0 = await getCompany(corp).catch(() => null);
-    if (c0 && defaultType(c0) === 'bond') redirect(`/proposal/deck?corp=${corp}`);
+    if (c0 && defaultType(c0) === 'bond') redirect(deckHref(corp));
   }
   const d = await buildDraft(corp, type).catch(() => null);
   if (!d) {
@@ -190,13 +191,13 @@ export default async function ProposalPage({ searchParams }: { searchParams: SP 
         </div>
         <nav className="seg" aria-label="딜 유형">
           {DRAFT_TYPES.map((t) => (
-            <Link key={t.key} href={t.key === 'bond' ? `/proposal/deck?corp=${c.corp_code}` : `/proposal?corp=${c.corp_code}&type=${t.key}`} aria-current={t.key === d.type ? 'true' : undefined} scroll={false}>
+            <Link key={t.key} href={t.key === 'bond' ? deckHref(c.corp_code) : `/proposal?corp=${c.corp_code}&type=${t.key}`} aria-current={t.key === d.type ? 'true' : undefined} scroll={false}>
               {t.label}
             </Link>
           ))}
         </nav>
         <div className="pp-actions">
-          {d.type === 'bond' && <Link className="btn" href={`/proposal/deck?corp=${c.corp_code}`} target="_blank" rel="noopener">제안서 만들기 (PPTX·PDF)</Link>}
+          {d.type === 'bond' && <Link className="btn" href={deckHref(c.corp_code)} target="_blank" rel="noopener">제안서 만들기 (PPTX·PDF)</Link>}
           <a className="btn btn-ghost" href={`/api/proposal?corp=${c.corp_code}&type=${d.type}`} download>
             초안 내려받기 (.md)
           </a>
