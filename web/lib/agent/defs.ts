@@ -86,8 +86,10 @@ export type Session = {
   flags: Flag[];
   review: string | null;
   used: Record<string, number>; // 마지막 실행에 쓴 자산 판 번호
+  refs?: RefPick[]; // 참고 자료(드라이브 파일): 사용자가 붙였거나 Master 가 고른 것. 역할이 구성 · 표현을 참고한다
 };
-export const emptySession = (): Session => ({ v: 1, state: null, log: [], memos: {}, texts: {}, flags: [], review: null, used: {} });
+export type RefPick = { id: number; name: string; why: string; by: 'user' | 'agent' };
+export const emptySession = (): Session => ({ v: 1, state: null, log: [], memos: {}, texts: {}, flags: [], review: null, used: {}, refs: [] });
 export const staleFields = (s: Session) => (Object.entries(s.texts) as [TextField, TextMark][]).filter(([, m]) => m?.stale).map(([f]) => f);
 
 // ── 노하우 항목 ──────────────────────────────────────────────────────

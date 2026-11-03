@@ -119,6 +119,7 @@ Vercel (Next.js) ── RA·RM
 - 공개 데이터만 적재한다. 고객 커버리지 리스트, 사내 딜 파이프라인, 수요예측 실명 데이터는 넣지 않는다.
 - OpenDART 키·Supabase service_role 키는 GitHub Actions Secrets 에만 둔다. 화면(Vercel)에는 anon 키만 둔다.
 - Agent 탭의 Claude 키(`ANTHROPIC_API_KEY`)는 Vercel 환경 변수에만 둔다. 서버는 대화·초안 상태를 저장하지 않고 Anthropic API 로만 보낸다.
+- 드라이브(`ops.drive_files`)는 `mart.drive_*` 함수로만 읽고 쓰며, API 는 드라이브 키(`DRIVE_KEY`, Vercel 환경 변수)가 맞을 때만 연다. Agent 는 요청에 같은 키가 있을 때만 드라이브 파일을 읽는다.
 - anon 은 `mart` 만 읽을 수 있다. 로그인 필수로 바꾸려면 `20261015074609_api_grants.sql` 의 anon 권한만 회수한다.
 
 ## 9. 후속 개발 요건

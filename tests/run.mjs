@@ -274,6 +274,38 @@ await db.exec('reset role');
 await check('시장 자료 팩: 수급 이슈(만기 집중·정책 자금)는 section=supply',
   `select string_agg(topic, ',' order by topic) from mart.v_market_issues where section = 'supply'`, 'IMA · 발행어음,연초 만기 집중 · 크레딧 수급', one);
 
+// 10. 드라이브: 올리기(버전), 목록(최신만), DM 최신 판, 레퍼런스 카드, 지우기 ------------------
+await db.exec('set role anon');
+const put = (folder, name, meta, status = 'ready', area = 'dept', owner = 'dcm') =>
+  db.query(`select * from mart.drive_put($1, $2, $3, $4, 'pptx', $5, '글', null, $6::jsonb, $7, '김하늘', 'c1')`, [area, owner, folder, name, Buffer.from('PK').toString('base64'), JSON.stringify(meta), status]);
+await put('DM', 'DM_0317.pptx', { edition: { edition: '2026-03-17', title: 'A급' } });
+await put('DM', 'DM_0728.pptx', { edition: { edition: '2026-07-28', title: 'A급' } });
+await put('DM', 'DM_0728.pptx', { edition: { edition: '2026-07-28', title: 'A급 v2' } });
+await put('DM', 'DM_1201.pptx', { edition: { edition: '2026-12-01', title: '미래' } });
+await put('DM', 'DM_err.pptx', {}, 'error');
+await put('레퍼런스', 'CJ.pptx', { card: { summary: 'CJ 제안서', slides: [], tags: ['식품'] } });
+await put('레퍼런스', '처리중.pptx', {}, 'processing');
+await put('올린 자료', '메모.md', {}, 'ready', 'mine', 'u-kim');
+await check('드라이브: 같은 이름은 새 버전', `select max(ver)::int from mart.drive_list('dept', 'dcm', 'DM') where name = 'DM_0728.pptx'`, 2, one);
+await check('드라이브: 목록은 이름마다 최신 하나', `select count(*)::int from mart.drive_list('dept', 'dcm', 'DM')`, 4, one);
+await check('드라이브: 목록에 버전 수', `select versions::int from mart.drive_list('dept', 'dcm', 'DM') where name = 'DM_0728.pptx'`, 2, one);
+await check('드라이브: 목록은 판 본문(edition)을 빼고', `select meta ? 'edition' from mart.drive_list('dept', 'dcm', 'DM') limit 1`, false, one);
+await check('드라이브: DM 은 기준일 이전 가장 최근 판(같은 판이면 최신 버전)', `select edition->>'title' from mart.drive_dm_latest('2026-11-03')`, 'A급 v2', one);
+await check('드라이브: 기준일 이전 판이 없으면 없음', `select count(*)::int from mart.drive_dm_latest('2026-01-01')`, 0, one);
+await check('드라이브: 레퍼런스 카드는 처리가 끝난 것만', `select string_agg(name, ',') from mart.drive_refs('dcm')`, 'CJ.pptx', one);
+await check('드라이브: 내 폴더는 따로', `select count(*)::int from mart.drive_list('mine', 'u-kim', null)`, 1, one);
+await check('드라이브: 원본(base64)', `select body_b64 from mart.drive_body((select id from mart.drive_list('mine', 'u-kim', null) limit 1))`, Buffer.from('PK').toString('base64'), one);
+await db.query(`select mart.drive_set((select id from mart.drive_list('dept', 'dcm', '레퍼런스') where name = '처리중.pptx'), '{"card":{"summary":"x"}}', 'ready')`);
+await check('드라이브: 처리 결과 넣기(메타 합치기 · 상태)', `select count(*)::int from mart.drive_refs('dcm')`, 2, one);
+await db.query(`select mart.drive_delete((select id from mart.drive_list('dept', 'dcm', 'DM') where name = 'DM_0728.pptx'), 'c1')`);
+await check('드라이브: 지우면 모든 버전이 빠지고 DM 은 그 전 판', `select edition->>'edition' from mart.drive_dm_latest('2026-11-03')`, '2026-03-17', one);
+await check('드라이브: 같은 브라우저 1분 20건 넘으면 거절',
+  `select count(*) from generate_series(1, 20) g, lateral mart.drive_put('mine', 'u-kim', '올린 자료', 'f' || g || '.md', 'md', '', null, null, '{}', 'ready', null, 'c1')`, 'ERROR: too many');
+await check('드라이브: anon 은 원본 테이블 직접 읽기 불가', `select count(*) from ops.drive_files`, 'permission denied', () => 'allowed');
+results[results.length - 1].ok = String(results[results.length - 1].actual).includes('permission denied');
+if (results[results.length - 1].ok) failed--;
+await db.exec('reset role');
+
 // 결과 출력 -------------------------------------------------------------
 for (const r of results) {
   const mark = r.ok ? 'PASS' : 'FAIL';

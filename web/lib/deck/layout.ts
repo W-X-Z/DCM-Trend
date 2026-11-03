@@ -15,7 +15,7 @@ import { parseTsv } from './tsv';
 import { WD, korDate, md, weekday } from './schedule';
 import { C, PAGE, textW } from './theme';
 import { dateTicks } from './chart';
-import type { DmChart, DmMeeting } from './dm';
+import type { DmChart, DmImage, DmMeeting } from './dm';
 import type { DeckData, DeckInput, DeckText, MeetingPanel, PeerIssue } from './types';
 
 const X0 = 47;
@@ -647,6 +647,28 @@ function squareChart(ch: DmChart, x: number, y: number, w: number, h: number): P
     ...(ch.src ? [{ k: 'text', x, y: y + h - 9, w, h: 9, paras: [P(ch.src)], size: 6, color: C.muted, pad: 0, valign: 'm' } as Prim] : []),
   ];
 }
+// 금색 제목 + DM 그림(올린 DM 의 주요 이슈 그림)
+function goldImage(im: DmImage, x0: number, x1: number, y: number, bottom: number): Prim[] {
+  const out: Prim[] = im.title ? goldTitle(y, im.title, x0, x1) : [];
+  const w = x1 - x0;
+  const h = bottom - y - 22;
+  const ar = im.ar && im.ar > 0 ? im.ar : w / h;
+  const iw = Math.min(w, h * ar);
+  out.push({ k: 'img', x: x0 + (w - iw) / 2, y: y + 22, w: iw, h: iw / ar, src: im.src });
+  return out;
+}
+// '■ 제목' + DM 그림(올린 DM 의 회의 장표 그림을 비율 그대로, 칸 가운데)
+function squareImage(im: DmImage, x: number, y: number, w: number, h: number): Prim[] {
+  const out: Prim[] = [];
+  if (im.title) out.push({ k: 'text', x, y, w, h: 13, paras: [P(`■ ${im.title}`)], size: 8.5, color: C.ink, bold: true, pad: 0, valign: 'm' });
+  const top = y + (im.title ? 16 : 0);
+  const bh = h - (im.title ? 16 : 0);
+  const ar = im.ar && im.ar > 0 ? im.ar : w / bh;
+  const iw = Math.min(w, bh * ar);
+  const ih = iw / ar;
+  out.push({ k: 'img', x: x + (w - iw) / 2, y: top, w: iw, h: ih, src: im.src });
+  return out;
+}
 const srcLine = (xs: (string | undefined)[]) => xs.filter(Boolean).map((x) => x!.replace(/^자료\s*:\s*/, '')).join(' / ');
 
 // II-1 ① 금리 동향
@@ -760,7 +782,8 @@ function meetingDm({ d, tx }: Ctx, n: Numbered, kind: 'bok' | 'fomc', m: DmMeeti
   const py = y + h + 14;
   const gap = 14;
   const pw = (CW - gap * 2) / 3;
-  m.charts.slice(0, 3).forEach((ch, i) => prims.push(...squareChart(ch, X0 + i * (pw + gap), py, pw, BOTTOM + 6 - py)));
+  if (m.charts.length) m.charts.slice(0, 3).forEach((ch, i) => prims.push(...squareChart(ch, X0 + i * (pw + gap), py, pw, BOTTOM + 6 - py)));
+  else (m.images ?? []).slice(0, 3).forEach((im, i) => prims.push(...squareImage(im, X0 + i * (pw + gap), py, pw, BOTTOM + 6 - py)));
   prims.push(...footnote([kind === 'bok' ? dmNote(d, 'bok') : dmNote(d, 'fomc')].filter(Boolean), 508));
   return { id: kind, title: `${n.head}_${sub}`, prims };
 }
@@ -807,7 +830,7 @@ function meeting(ctx: Ctx, n: Numbered, kind: 'bok' | 'fomc'): Body {
       prims.push(...panelPrims(p, px, py, w, BOTTOM - py - 6));
     });
   }
-  prims.push(...footnote([`자료: ${m.sources.map((s) => `${s.title}${s.date ? ` ${yymmdd(s.date)}` : ''}`).join('; ')}`, kind === 'bok' ? dmNote(d, 'bok') : ''].filter(Boolean)));
+  prims.push(...footnote([`자료: ${m.sources.map((s) => `${s.title}${s.date ? ` ${yymmdd(s.date)}` : ''}`).join('; ')}`, kind === 'bok' && !d.dm?.meetings?.bok ? dmNote(d, 'bok') : ''].filter(Boolean)));
   return { id: kind, title: n.title, prims };
 }
 
@@ -1206,6 +1229,7 @@ function issuesSlides({ d }: Ctx, n: Numbered): Body[] {
       const top = box.bottom + 14;
       const half = (CW - 20) / 2;
       pg.charts.slice(0, 2).forEach((ch, i) => prims.push(...goldChart(ch, X0 + i * (half + 20), X0 + i * (half + 20) + half, top, BOTTOM)));
+      if (!pg.charts.length) (pg.images ?? []).slice(0, 2).forEach((im, i) => prims.push(...goldImage(im, X0 + i * (half + 20), X0 + i * (half + 20) + half, top, BOTTOM)));
       prims.push(...footnote([`자료: ${srcLine(pg.charts.map((c) => c.src))}`, dmNote(d, 'rates').replace('문구', '문구·차트')].filter(Boolean)));
       return { id: `issues-${pi}`, title: pi ? `${n.title} (계속)` : n.title, prims };
     });

@@ -94,6 +94,7 @@ const stub = {
     b.onResolve({ filter: /^\.\.\/db$/ }, () => ({ path: 'db', namespace: 'stub' }));
     b.onResolve({ filter: /^\.\.\/queries$/ }, () => ({ path: 'queries', namespace: 'stub' }));
     b.onResolve({ filter: /^\.\.\/deck\/data$/ }, () => ({ path: 'data', namespace: 'stub' }));
+    b.onResolve({ filter: /^\.\.\/drive\/store$/ }, () => ({ path: 'drive', namespace: 'stub' }));
     b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({
       loader: 'js',
       contents: {
@@ -101,6 +102,13 @@ const stub = {
         db: 'export const selectFresh = async () => [];',
         queries: `export const searchCompanies = async (q) => q.includes('이랜드') ? [{ corp_code: '00207108', corp_name: '이랜드월드', market: '기타', deal_count: 30, last_deal_dt: '2026-09-01' }] : [];`,
         data: `const D = ${fixture}; export const getDeckData = async (c) => (c === '00207108' ? JSON.parse(JSON.stringify(D)) : null);`,
+        drive: `const F = {
+          11: { id: 11, name: 'CJ프레시웨이 제안.pptx', folder: '레퍼런스', content: '## 4. Sales 전략\\n- 우량 투자자 선제 마케팅으로 오버부킹 유도\\n- 2,700억 증액 검토', meta: { card: { corp: 'CJ프레시웨이', industry: '식품 유통', rating: 'A+', summary: '차환 공모채', slides: ['Sales 전략'], strengths: ['투자자군별 마케팅'], tags: ['차환'] } } },
+          21: { id: 21, name: '내 메모.md', folder: '올린 자료', content: '메모: 기관별 접촉 순서', meta: {} },
+        };
+        export const driveRead = async (id) => F[id] ?? null;
+        export const driveRefs = async () => [{ id: 11, name: F[11].name, kind: 'pptx', card: F[11].meta.card, created_at: '2026-11-03' }];
+        export const driveList = async () => [{ id: 21, folder: '올린 자료', name: '내 메모.md', status: 'ready', created_at: '2026-11-03T00:00:00Z' }];`,
       }[a.path],
     }));
   },
@@ -113,9 +121,9 @@ const out = await build({
 const m = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`);
 const assets = { ...m.DEFAULT_ASSETS };
 
-async function runDcm(messages, session) {
+async function runDcm(messages, session, extra = {}) {
   const ev = [];
-  await m.runDcm({ messages, session, assets, memory: '- 위승종' }, (e) => ev.push(e));
+  await m.runDcm({ messages, session, assets, memory: '- 위승종', ...extra }, (e) => ev.push(e));
   const last = [...ev].reverse().find((e) => e.t === 'session');
   return { ev, done: ev.find((e) => e.t === 'done'), session: last?.session ?? session };
 }
@@ -399,6 +407,46 @@ eq('잘린 답: 한도를 올려 다시', dealCalls.slice(0, 2).map((x) => x.bod
 truthy('빈 답: 재촉 뒤 이어감', dealCalls.some((x) => nudgedIn(x.body)));
 eq('사용자가 준 숫자: 두 안 문안 반영', r.session.state.edits.sizing, ['안 A: 2년 500억원 + 3년 800억원, 총 1,300억원 (현행 구조)', '안 B: 3년 단일 1,600억원 (3년 확대)']);
 eq('역할 보고가 빈 답이 아님', r.ev.filter((e) => e.t === 'role' && e.phase === 'end').map((e) => e.text), ['두 안을 트랜치 검토 문안에 넣었어요.']);
+
+// ── 9) 드라이브 자료: 붙인 파일 + Master 가 고른 레퍼런스 → 역할이 읽고 문안(숫자는 사실 묶음 값만) ─────
+const toolsOf = (who) => seen.filter((x) => x.who === who).map((x) => x.body.tools.map((t) => t.name));
+seen.length = 0;
+scripts['dcm.master'] = (body, k) => {
+  if (k === 0) return msg([tu('refs', {})]);
+  if (k === 1) {
+    const j = resJson(body);
+    eq('드라이브: 레퍼런스 카드 · 내 자료 · 지금 참고', [j.레퍼런스.map((x) => x.corp), j.내자료.map((x) => x.id), j.지금참고.map((x) => x.id)], [['CJ프레시웨이'], [21], [21]]);
+    return msg([tu('use_refs', { ids: [11, 21], why: '같은 차환 공모채' })]);
+  }
+  if (k === 2) {
+    eq('드라이브: 붙인 자료는 남기고 고른 것을 더함', resJson(body).참고자료.map((x) => [x.id, x.by]), [[21, 'user'], [11, 'agent']]);
+    return msg([tu('call_roles', { roles: ['sales'], task: '참고 자료의 구성 · 표현을 따라 Sales 문안 다시' })]);
+  }
+  return say('참고 자료를 반영했어요.');
+};
+scripts.sales = (body, k) => {
+  if (k === 0) {
+    truthy('드라이브: 역할 프롬프트에 참고 자료', /# 참고 자료[\s\S]*CJ프레시웨이 제안\.pptx/.test(body.system[0].text));
+    return msg([tu('refs', {})]);
+  }
+  if (k === 1) {
+    const j = resJson(body);
+    eq('드라이브: 역할이 참고 자료 글을 읽음', j.자료.map((x) => x.자료), ['내 메모.md', 'CJ프레시웨이 제안.pptx']);
+    return msg([tu('write', { field: 'sales', lines: ['우량 투자자 선제 마케팅으로 수요 기반 확보', '2,700억 증액 검토'] })]);
+  }
+  return say('Sales 문안을 참고 자료 구성으로 고쳤어요.');
+};
+r = await runDcm([{ role: 'user', content: '이거 참고해서 Sales 고쳐줘' }], S2, { drive: true, attach: [{ id: 21, name: '내 메모.md', why: '사용자가 붙임', by: 'user' }] });
+truthy('드라이브: Master 에게 드라이브 도구', toolsOf('dcm.master')[0].includes('use_refs'));
+truthy('드라이브: Master 프롬프트에 붙인 자료', /이번 요청에 붙인 자료[^\n]*내 메모\.md/.test(seen.find((x) => x.who === 'dcm.master').body.system[0].text));
+eq('드라이브: 세션에 참고 자료', r.session.refs.map((x) => x.id), [21, 11]);
+eq('드라이브: 참고 자료의 숫자는 문안에서 빠짐', r.session.state.edits.sales, ['우량 투자자 선제 마케팅으로 수요 기반 확보']);
+// 키가 없으면 드라이브 도구도 참고 자료도 없다
+seen.length = 0;
+scripts['dcm.master'] = () => say('드라이브 키를 넣으면 자료를 참고할 수 있어요.');
+r = await runDcm([{ role: 'user', content: '레퍼런스 참고해줘' }], r.session, { drive: false, attach: [{ id: 21, name: '내 메모.md', why: '', by: 'user' }] });
+eq('드라이브 키 없음: 도구 없음', toolsOf('dcm.master')[0].filter((t) => ['refs', 'use_refs', 'read_file'].includes(t)), []);
+truthy('드라이브 키 없음: 안내', /드라이브 키가 없어/.test(seen[0].body.system[0].text));
 
 server.close();
 console.log(`${pass} passed${process.exitCode ? ', some failed' : ''}`);

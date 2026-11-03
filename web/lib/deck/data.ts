@@ -1,6 +1,7 @@
 // 제안서 데이터 조립 (서버). 공개 공시·시장 데이터만 담는다. 회사별 제안 조건(금액·일정 등)은 받지 않는다.
-import { dmFor, dmView } from './dm';
 import 'server-only';
+import { driveDmLatest } from '../drive/store';
+import { dmFor, dmView, type DmEdition } from './dm';
 import { select, selectAll } from '../db';
 import { kstToday } from '../filings';
 import { leagueOf, TREND_DEAL_COLS, type TrendDeal } from '../period';
@@ -85,6 +86,14 @@ function monthly(pts: { dt: string; value: number }[]) {
   return [...map.values()];
 }
 
+// DM 판: 드라이브(부서 공용 'DM' 폴더)에 올린 판 중 기준일 이전 가장 최근 것. 올린 게 없으면 들어 있는 판(공개 자료로 만든 기본 판).
+// 올린 판에 없는 시장 지표 · 이슈 목록(DB 가 비었을 때 쓰는 대체값)은 기본 판 것을 쓴다.
+async function dmLatest(today: string): Promise<DmEdition | null> {
+  const [up, base] = [await driveDmLatest(today), dmFor(today)];
+  if (!up) return base;
+  return { ...up.edition, issues: up.edition.issues?.length ? up.edition.issues : base?.issues ?? [], market: up.edition.market?.length ? up.edition.market : base?.market ?? [] };
+}
+
 export async function getDeckData(corp: string): Promise<DeckData | null> {
   const c = await getCompany(corp);
   if (!c) return null;
@@ -160,7 +169,7 @@ export async function getDeckData(corp: string): Promise<DeckData | null> {
   const recent6 = peerRows.filter((p) => (p.deal_dt ?? '') >= shiftMonths(today, -6) && (p.sub_type ?? '일반회사채') === '일반회사채');
 
   // 전망표: 가장 최근 발표 하나
-  const dm = dmFor(today);
+  const dm = await dmLatest(today);
   const fcHouse = fc[0];
   const fcRows = fcHouse ? fc.filter((r) => r.house === fcHouse.house && r.published_dt === fcHouse.published_dt) : [];
   const keys = [...new Set(fcRows.map((r) => r.series_key))];

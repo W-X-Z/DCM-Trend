@@ -1,6 +1,6 @@
 // Agent API 공용: 요청 검사, 속도 제한, NDJSON 스트림 (서버 전용)
 import 'server-only';
-import { ASSETS, emptySession, type AssetTexts, type Msg, type Session } from './defs';
+import { ASSETS, emptySession, type AssetTexts, type Msg, type RefPick, type Session } from './defs';
 import type { EngineState } from '../deck/engine';
 
 const hits = new Map<string, number[]>();
@@ -56,8 +56,18 @@ export function cleanSession(raw: unknown): Session {
     flags: Array.isArray(s.flags) ? s.flags.slice(-50) : [],
     review: isStr(s.review) ? s.review : null,
     used: s.used && typeof s.used === 'object' ? s.used : {},
+    refs: cleanRefs(s.refs),
   };
 }
+// 참고 자료 · 붙인 자료: 드라이브 파일 id 와 이름만
+function cleanRefs(raw: unknown): RefPick[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((x): x is RefPick => !!x && Number.isInteger((x as RefPick).id) && (x as RefPick).id > 0 && isStr((x as RefPick).name))
+    .slice(0, 5)
+    .map((x) => ({ id: x.id, name: x.name.slice(0, 200), why: isStr(x.why) ? x.why.slice(0, 200) : '', by: x.by === 'agent' ? 'agent' : 'user' }));
+}
+export const cleanAttach = (raw: unknown) => cleanRefs(Array.isArray(raw) ? raw.map((x) => ({ why: '사용자가 붙임', ...(x as object), by: 'user' })) : []);
 
 export async function readBody(req: Request): Promise<Record<string, unknown> | Response> {
   const text = await req.text();

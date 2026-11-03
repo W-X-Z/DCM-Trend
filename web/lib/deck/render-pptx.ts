@@ -93,10 +93,13 @@ function addPrim(pptx: Pptx, s: PSlide, p: Prim, logos: Record<string, string>) 
     case 'line':
       s.addShape(pptx.ShapeType.line, { x: IN(Math.min(p.x1, p.x2)), y: IN(Math.min(p.y1, p.y2)), w: IN(Math.abs(p.x2 - p.x1)), h: IN(Math.abs(p.y2 - p.y1)), line: { color: p.color, width: p.w } });
       return;
-    case 'img':
-      if (!logos[p.src]) return;
-      s.addImage({ data: logos[p.src], x: IN(p.x), y: IN(p.y), w: IN(p.w), h: IN(p.h) });
+    case 'img': {
+      // 로고, 또는 올린 DM 의 그림(data URL)
+      const data = logos[p.src] ?? (p.src.startsWith('data:image/') ? p.src.slice(5) : '');
+      if (!data) return;
+      s.addImage({ data, x: IN(p.x), y: IN(p.y), w: IN(p.w), h: IN(p.h) });
       return;
+    }
     case 'text':
       addText(s, p);
       return;

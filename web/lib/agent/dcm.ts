@@ -11,9 +11,10 @@ import { comboCounts, fullUnder, marketCrowd, maxPlan, payPlan, peerPool, pipeli
 import { allowedNumbers, lineOk } from '../deck/validate';
 import type { DeckData, DeckInput, DeckText, PeerIssue } from '../deck/types';
 import { searchCompanies } from '../queries';
+import { driveList, driveRead, driveRefs } from '../drive/store';
 import {
   CASE_FIELDS, COND_FIELDS, FIELD_LABEL, FIELD_OWNER, FIELD_SLIDE, MODEL, ROLES, ROLE_NAME, TERM_NOTE_KEYS, emptySession, kstToday, roleOf, staleFields, textOf,
-  type AssetTexts, type Block, type Msg, type RoleDef, type RoleKey, type Session, type TextField,
+  type AssetTexts, type Block, type Msg, type RefPick, type RoleDef, type RoleKey, type Session, type TextField,
 } from './defs';
 import { EMPTY_NUDGE, J, ToolError, claude, claudeWhy, clip, emptyNote, obj, runLoop, textOf as textOfBlocks, tidyHistory, usesOf, type ToolDef } from './llm';
 
@@ -27,7 +28,8 @@ export type DcmEvent =
   | { t: 'render'; name: string; slides: number }
   | { t: 'done'; messages: Msg[]; cont: boolean; model: string }
   | { t: 'error'; message: string };
-export type DcmInput = { messages: Msg[]; session: Session; assets: AssetTexts; memory: string | null };
+// drive: 드라이브 키가 맞는 요청일 때만 드라이브 자료(레퍼런스 · 붙인 자료)를 Agent 가 읽는다. attach: 이번 요청에 붙인 파일
+export type DcmInput = { messages: Msg[]; session: Session; assets: AssetTexts; memory: string | null; drive?: boolean; attach?: RefPick[] };
 
 // ── 데이터 캐시 (같은 서버 인스턴스 안에서 1분) ──────────────────────────
 const dataCache = new Map<string, { at: number; d: DeckData }>();
@@ -217,8 +219,9 @@ const DECIDE_HELP: Record<string, string> = {
   slides: 'items=[{id:"compare", on:true}]', template: 'text="basic"|"lite"',
 };
 
-function roleTools(r: RoleDef): ToolDef[] {
+function roleTools(r: RoleDef, refs = false): ToolDef[] {
   const t: ToolDef[] = [{ name: 'facts', description: '이 역할이 볼 사실 묶음(숫자·사례·메모·지금 조건). 결정·문장의 근거는 여기 있는 값만.', input_schema: obj({}) }];
+  if (refs && r.key !== 'review') t.push({ name: 'refs', description: '참고 자료(사용자가 붙였거나 Master 가 고른 제안서 · 자료)의 글. 구성 · 흐름 · 표현만 참고하고, 그 안의 숫자 · 회사 이름은 쓰지 않는다.', input_schema: obj({}) });
   if (r.decide.length)
     t.push({
       name: 'decide',
@@ -252,7 +255,21 @@ const MASTER_TOOLS: ToolDef[] = [
   { name: 'render', description: '지금 상태로 PPTX·PDF 를 만든다. 사용자는 화면에서 바로 내려받는다.', input_schema: obj({}) },
 ];
 
+// 드라이브 키가 맞을 때만 Master 에게 준다
+const DRIVE_TOOLS: ToolDef[] = [
+  { name: 'refs', description: '부서 레퍼런스 제안서 카드 목록(회사 · 업종 · 등급 · 딜 · 장표 구성 · 꼬리표)과 내 폴더에 올린 자료 목록. 비슷한 레퍼런스를 고를 때 본다.', input_schema: obj({}) },
+  {
+    name: 'use_refs',
+    description: '역할들이 참고할 자료를 정한다(최대 3개, 지금 목록을 바꿈). 사용자가 붙인 자료는 이미 들어 있으니 빼지 말 것.',
+    input_schema: obj({ ids: { type: 'array', items: { type: 'integer' }, maxItems: 3 }, why: { type: 'string', description: '고른 이유(업종 · 등급 · 딜 구조가 비슷한 점)' } }, ['ids', 'why']),
+  },
+  { name: 'read_file', description: '드라이브 파일 글을 읽는다(8,000자씩, from 으로 이어 읽기).', input_schema: obj({ id: { type: 'integer' }, from: { type: 'integer' } }, ['id']) },
+];
+
 const LABEL: Record<string, (i: Record<string, unknown>) => string> = {
+  refs: () => '참고 자료 목록 보기',
+  use_refs: (i) => `참고 자료 정하기 · ${((i.ids as number[]) ?? []).length}개`,
+  read_file: () => '자료 읽기',
   find_company: (i) => `회사 찾기 · ${i.query}`,
   open_company: (i) => `데이터 받기·초안 열기${i.mode === 'resume' ? ' (이어서)' : ''}`,
   call_roles: (i) => `역할 호출 · ${((i.roles as string[]) ?? []).map((k) => ROLE_NAME[k] ?? k).join(', ')}`,
@@ -272,12 +289,15 @@ export async function runDcm(inp: DcmInput, emit: (e: DcmEvent) => void, budgetM
   const left = () => t0 + hardMs - Date.now();
   const A = inp.assets;
   const S: Session = { ...emptySession(), ...inp.session, log: [...(inp.session.log ?? [])], memos: { ...(inp.session.memos ?? {}) }, texts: { ...(inp.session.texts ?? {}) }, flags: [...(inp.session.flags ?? [])] };
+  // 이번 요청에 붙인 자료는 참고 자료 맨 앞에(같은 파일은 한 번, 최대 3개)
+  S.refs = inp.drive ? [...(inp.attach ?? []), ...(S.refs ?? []).filter((x) => !(inp.attach ?? []).some((a) => a.id === x.id))].slice(0, 3) : [];
   let ctx: EngineCtx | null = null;
   const messages: Msg[] = tidyHistory(inp.messages);
   let model = MODEL;
   let calls = 0;
 
   const emitSession = (slide: number | null = null) => emit({ t: 'session', session: S, slide });
+  if (inp.attach?.length) emitSession();
   async function ensureCtx(): Promise<EngineCtx> {
     if (ctx) return ctx;
     if (!S.state) throw new ToolError('열린 초안이 없어요. 먼저 open_company 로 회사를 여세요.');
@@ -307,6 +327,14 @@ export async function runDcm(inp: DcmInput, emit: (e: DcmEvent) => void, budgetM
     switch (name) {
       case 'facts':
         return { content: J(roleFacts(r, c, S)), note: '' };
+      case 'refs': {
+        const out = [];
+        for (const x of (S.refs ?? []).slice(0, 2)) {
+          const it = await driveRead(x.id).catch(() => null);
+          if (it) out.push({ 자료: it.name, 고른이유: x.why, 카드: it.meta?.card ?? null, 글: clip(it.content ?? '', 9000) });
+        }
+        return { content: J({ 안내: '구성 · 흐름 · 표현만 참고. 이 자료의 숫자 · 회사 이름은 쓰지 않는다(사실 묶음 값만).', 자료: out }), note: `${out.length}개` };
+      }
       case 'session':
         return { content: J(sessionView(c, S, true)), note: '' };
       case 'checks': {
@@ -482,12 +510,16 @@ ${r.knowhow.map((k) => textOf(A, k)).join('\n\n')}
 # 지금
 - 회사: ${c.data.company.corp_name} (${c.data.company.rating ?? '등급 없음'})
 - 데이터 기준일: ${c.data.asof}
-- 오늘: ${kstToday()}`;
+- 오늘: ${kstToday()}${S.refs?.length && r.key !== 'review' ? `
+
+# 참고 자료
+${S.refs.map((x) => `- ${x.name}${x.why ? ` (${x.why})` : ''}`).join('\n')}
+문안을 쓰기 전에 refs 로 읽고 구성 · 표현을 참고한다. 숫자 · 다른 회사 이름은 옮기지 않는다.` : ''}`;
     const tries = new Map<string, number>();
     let k = 0;
     try {
       const out = await runLoop({
-        model: MODEL, system, first: `요청: ${task}`, tools: roleTools(r), maxRounds: 10, maxTokens: 8000, left,
+        model: MODEL, system, first: `요청: ${task}`, tools: roleTools(r, !!S.refs?.length), maxRounds: 10, maxTokens: 8000, left,
         onTool: async (name, input) => {
           const id = `${call}:${r.key}:${k++}`;
           emit({ t: 'tool', id, name, label: toolLabel(name, input), agent: r.key, call });
@@ -560,6 +592,40 @@ ${r.knowhow.map((k) => textOf(A, k)).join('\n\n')}
       }
       case 'session':
         return { content: J(sessionView(S.state ? await ensureCtx() : null, S, false)), note: '' };
+      case 'refs': {
+        const [cards, mine] = await Promise.all([driveRefs(), driveList('mine')]);
+        return {
+          content: J({
+            레퍼런스: cards.map((x) => ({ id: x.id, 파일: x.name, ...x.card })),
+            내자료: mine.filter((x) => x.status === 'ready').map((x) => ({ id: x.id, 파일: x.name, 폴더: x.folder, 올린날: x.created_at.slice(0, 10) })),
+            지금참고: S.refs ?? [],
+          }),
+          note: `레퍼런스 ${cards.length}개`,
+        };
+      }
+      case 'use_refs': {
+        const ids = [...new Set((Array.isArray(i.ids) ? i.ids : []).map(Number).filter((x) => Number.isInteger(x) && x > 0))].slice(0, 3);
+        const why = String(i.why ?? '').slice(0, 200);
+        const keep = (S.refs ?? []).filter((x) => x.by === 'user');
+        const picked = [];
+        for (const fid of ids) {
+          if (keep.some((x) => x.id === fid)) continue;
+          const it = await driveRead(fid).catch(() => null);
+          if (!it) throw new ToolError(`자료 ${fid} 를 찾지 못했어요. refs 로 id 를 확인하세요.`);
+          picked.push({ id: fid, name: it.name, why, by: 'agent' as const });
+        }
+        S.refs = [...keep, ...picked].slice(0, 3);
+        emitSession();
+        return { content: J({ 참고자료: S.refs }), note: S.refs.map((x) => x.name).join(', ').slice(0, 80) };
+      }
+      case 'read_file': {
+        const fid = Number(i.id);
+        const from = Math.max(0, Number(i.from) || 0);
+        const it = Number.isInteger(fid) && fid > 0 ? await driveRead(fid).catch(() => null) : null;
+        if (!it) throw new ToolError('파일을 찾지 못했어요. refs 로 id 를 확인하세요.');
+        const text = it.content ?? '';
+        return { content: J({ 파일: it.name, 폴더: it.folder, 전체: text.length, from, 글: text.slice(from, from + 8000), 다음: from + 8000 < text.length ? from + 8000 : null, 카드: it.meta?.card ?? null }), note: it.name.slice(0, 60) };
+      }
       case 'render': {
         const c = await ensureCtx();
         const nm = fileBase(c.st.input);
@@ -579,7 +645,10 @@ ${inp.memory?.trim() || '(없음)'}
 
 ## 지금 작업 세션
 ${JSON.stringify(brief)}
-오늘: ${kstToday()}`;
+오늘: ${kstToday()}
+
+## 드라이브 자료
+${inp.drive ? `${inp.attach?.length ? `이번 요청에 붙인 자료(참고 자료로 걸어 둠): ${inp.attach.map((x) => `${x.name}(id ${x.id})`).join(', ')}\n` : ''}지금 참고 자료: ${S.refs?.length ? S.refs.map((x) => `${x.name}(id ${x.id})`).join(', ') : '없음'}` : '드라이브 키가 없어 드라이브 자료를 볼 수 없어요(레퍼런스 · 붙인 자료 요청이면 그렇게 안내).'}`;
 
   let nudged = false;
   for (let round = 0; round < 14; round++) {
@@ -589,7 +658,7 @@ ${JSON.stringify(brief)}
     }
     let res;
     try {
-      res = await claude(MODEL, system, messages, MASTER_TOOLS, 4000, left());
+      res = await claude(MODEL, system, messages, inp.drive ? [...MASTER_TOOLS, ...DRIVE_TOOLS] : MASTER_TOOLS, 4000, left());
     } catch (e) {
       // 바로 다시 보내지 않는다(한도면 또 걸린다). 이미 한 일은 작업 세션에 남아 있어 다음 요청에서 이어진다.
       emit({ t: 'error', message: claudeWhy(e) });

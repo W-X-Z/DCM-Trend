@@ -16,7 +16,8 @@
     "test:prompts": "node tests/prompts.mjs",
     "test:reco": "node tests/reco.mjs",
     "test:deck-agent": "node tests/deck_agent.mjs",
-    "test:agent": "node tests/agent_run.mjs"
+    "test:agent": "node tests/agent_run.mjs",
+    "test:drive": "node tests/drive.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17",

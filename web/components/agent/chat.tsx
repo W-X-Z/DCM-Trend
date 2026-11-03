@@ -56,8 +56,8 @@ export function applyCommon(parts: Part[], e: Common | { t: string }): Part[] {
 }
 
 // 한 번 요청: NDJSON 을 읽으며 이벤트를 넘긴다
-export async function postStream<E extends { t: string }>(url: string, body: unknown, signal: AbortSignal, onEvent: (e: E) => void) {
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+export async function postStream<E extends { t: string }>(url: string, body: unknown, signal: AbortSignal, onEvent: (e: E) => void, headers: Record<string, string> = {}) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal });
   if (!r.ok || !r.body) {
     const j = await r.json().catch(() => ({}));
     throw new Error((j as { error?: string }).error ?? `요청이 실패했어요 (${r.status})`);

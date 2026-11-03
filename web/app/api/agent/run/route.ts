@@ -2,7 +2,8 @@
 // 보내는 것: 대화, 작업 세션(공개 데이터 기반 초안 상태·결정 기록), 지금 쓰는 프롬프트·노하우 판, 개인 기억. 서버는 저장하지 않는다.
 import { runDcm, type DcmEvent } from '@/lib/agent/dcm';
 import { agentReady } from '@/lib/agent/llm';
-import { cleanAssets, cleanMessages, cleanSession, limited, ndjson, readBody, sameOrigin } from '@/lib/agent/request';
+import { cleanAssets, cleanAttach, cleanMessages, cleanSession, limited, ndjson, readBody, sameOrigin } from '@/lib/agent/request';
+import { driveKeyOk } from '@/lib/drive/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,5 +20,8 @@ export async function POST(req: Request) {
   if (!messages || !assets) return Response.json({ error: 'bad request' }, { status: 400 });
   const session = cleanSession(body.session);
   const memory = typeof body.memory === 'string' ? body.memory.slice(0, 8000) : null;
-  return ndjson<DcmEvent>((emit) => runDcm({ messages, session, assets, memory }, emit, 170_000, (maxDuration - 15) * 1000), (message) => ({ t: 'error', message }));
+  // 드라이브 자료(레퍼런스 · 붙인 파일)는 드라이브 키가 맞을 때만 Agent 가 읽는다
+  const drive = driveKeyOk(req);
+  const attach = drive ? cleanAttach(body.attach) : [];
+  return ndjson<DcmEvent>((emit) => runDcm({ messages, session, assets, memory, drive, attach }, emit, 170_000, (maxDuration - 15) * 1000), (message) => ({ t: 'error', message }));
 }

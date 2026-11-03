@@ -514,9 +514,15 @@ export function ruleText(d: DeckData, inp: DeckInput): DeckText {
   // 시장 장표는 Discussion Material 판 문구를 그대로 쓴다(현업 방식). 판이 없으면 위의 규칙 문구
   const dmp = d.dm?.pages;
   const use = (x: string[] | undefined, fb: string[]) => (x?.length ? [...x] : fb);
+  // 회의 문구는 회의 장표가 DM 판 회의일 때만(DB 에 더 최근 회의가 있으면 그 회의 문구로)
+  const dmMeet = (k: 'bok' | 'fomc') => {
+    const dmm = d.dm?.meetings?.[k];
+    const m = d.policy[k];
+    return !dmm || !m || dmm.meeting_dt >= m.meeting_dt;
+  };
   return {
     lead, peers, compare, schedule, structure, structureRows, strengths,
-    rates: use(dmp?.rates, rates), corp, views: use(dmp?.views, views), sizing, pipeline, bok: use(dmp?.bok, bok), fomc: use(dmp?.fomc, fomc), usviews: use(dmp?.usviews, usviews),
+    rates: use(dmp?.rates, rates), corp, views: use(dmp?.views, views), sizing, pipeline, bok: use(dmMeet('bok') ? dmp?.bok : undefined, bok), fomc: use(dmMeet('fomc') ? dmp?.fomc : undefined, fomc), usviews: use(dmp?.usviews, usviews),
     forecast: use(dmp?.forecast, forecast), league, maturity, sales, termNotes,
   };
 }

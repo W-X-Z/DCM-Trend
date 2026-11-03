@@ -6745,6 +6745,206 @@ a.cta-sm:hover {
   cursor: default;
 }
 
+/* 대화에 붙인 드라이브 자료(참고 중 · 이번에 붙일 것)와 고르기 창 */
+.ag-attach {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ag-att {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 0.75rem;
+}
+
+.ag-att.is-ref {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.ag-att > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ag-att button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.875rem;
+  line-height: 1;
+  padding: 0 3px;
+  cursor: pointer;
+}
+
+.ag-attach-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 3px 9px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.ag-attach-btn:hover:not(:disabled),
+.ag-attach-btn[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.dp {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgba(20, 33, 61, 0.16);
+  font-size: 0.8125rem;
+}
+
+.dp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dp-x {
+  border: 0;
+  background: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dp-key,
+.dp-up {
+  display: flex;
+  gap: 6px;
+}
+
+.dp-key input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 9px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+}
+
+.dp-key button,
+.dp-up button {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.dp-key button:disabled,
+.dp-up button:disabled {
+  background: var(--rule-strong);
+  cursor: default;
+}
+
+.dp-up select {
+  font: inherit;
+  padding: 5px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.dp-dm {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.dp-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.dp-list h4 {
+  margin: 4px 0 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.dp-list ul {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.dp-list label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+
+.dp-list label.is-off {
+  color: var(--muted);
+  cursor: default;
+}
+
+.dp-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dp-meta,
+.dp-empty {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.dp-empty {
+  margin: 0 0 6px;
+}
+
+.dp-note,
+.dp-err {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.dp-note {
+  color: var(--accent-ink);
+}
+
+.dp-err {
+  color: var(--alert);
+}
+
 .dk2-input {
   display: flex;
   align-items: flex-end;

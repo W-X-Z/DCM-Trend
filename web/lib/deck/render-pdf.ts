@@ -43,7 +43,10 @@ export async function toPdf(slides: Slide[], title: string): Promise<Blob> {
   await Promise.all(srcs.map(async (src) => {
     const url = imgUrl(src);
     const b = await bytes(url);
-    imgs[src] = /\.png$/i.test(url) ? await doc.embedPng(b) : await doc.embedJpg(b);
+    // PNG 는 첫 바이트(0x89 'PNG')로 가린다(올린 DM 그림은 data URL 이라 확장자가 없다)
+    const png = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+    if (!png && !(b[0] === 0xff && b[1] === 0xd8)) return; // GIF 등은 PDF 에 넣지 않는다
+    imgs[src] = png ? await doc.embedPng(b) : await doc.embedJpg(b);
   }));
 
   const clean = (s: string) => {

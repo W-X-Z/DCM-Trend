@@ -11,8 +11,9 @@ export type DmChart = {
   series: { name: string; color: string; values: (number | null)[] }[];
   min: number; max: number; step: number; digits?: number; labels?: boolean; legend?: boolean; stacked?: boolean;
 };
-// 회의 장표: 핵심 포인트(✓ 소제목 + 글머리) + 아래 차트 3개
-export type DmMeeting = { meeting_dt: string; title: string; points: string[]; charts: DmChart[] };
+// 회의 장표: 핵심 포인트(✓ 소제목 + 글머리) + 아래 차트 3개. 올린 DM 에서 만든 판은 차트 대신 DM 의 그림(images, src 는 data URL)
+export type DmImage = { title: string; src: string; ar?: number };
+export type DmMeeting = { meeting_dt: string; title: string; points: string[]; charts: DmChart[]; images?: DmImage[] };
 export type DmTable = { title: string; head: string[]; rows: string[][]; src?: string };
 
 export type DmEdition = {
@@ -25,7 +26,7 @@ export type DmEdition = {
   };
   charts?: { rates?: DmChart[] };
   meetings?: { bok?: DmMeeting; fomc?: DmMeeting };
-  issuePages?: { lines: string[]; charts: DmChart[] }[];
+  issuePages?: { lines: string[]; charts: DmChart[]; images?: DmImage[] }[];
   forecastTable?: {
     title: string; unit: string; years: string[]; periods: string[];
     rows: { group: string; tenor: string | null; cells: string[] }[]; notes: string[];

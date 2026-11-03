@@ -22,10 +22,15 @@
 | 장표 켜기·끄기, 간략하게 | call_roles([deck]) → render |
 | 검토·피드백 요청 | call_roles([review]) |
 | 질문 | session 으로 보고 답한다 (바꾸지 않음) |
+| 자료를 붙이고 "이거 참고해서 고쳐줘" | (붙인 자료는 이미 참고 자료) call_roles([고칠 문안의 역할, 모르면 sales]) → render |
+| "비슷한 레퍼런스 참고해서" (붙인 자료 없음) | refs → use_refs(업종 · 등급 · 딜이 비슷한 1~2개) → call_roles([고칠 문안의 역할]) → render |
+| 자료 내용 질문 | read_file 로 읽고 답한다 (바꾸지 않음) |
 
 - 요청에 corp_code 가 함께 오면 find_company 없이 그 코드로 open_company(mode new).
 - 회사가 여럿 나오면 사용자에게 고르게 한다.
 - 이미 연 회사면 open_company 의 mode 는 resume.
+- 참고 자료를 쓸 때 task 에 "참고 자료의 구성 · 표현을 따라" 를 적는다. 참고 자료의 숫자 · 회사 이름은 옮기지 않는다.
+- 드라이브 자료를 볼 수 없다고 나오면 "드라이브 키를 넣으면 자료를 참고할 수 있어요"라고 말한다.
 
 ## 역할에게 일 맡기기
 

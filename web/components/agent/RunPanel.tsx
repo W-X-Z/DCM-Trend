@@ -14,6 +14,8 @@ import type { DeckData, DeckText } from '@/lib/deck/types';
 import { SlideView } from '../deck/SlideView';
 import { ToolRow, applyCommon, postStream, trimOld, useBox, type Part, type Turn } from './chat';
 import { WorkView, nowDoing } from './WorkView';
+import { DrivePicker, type FilePick } from './DrivePicker';
+import { keyHeader } from '@/lib/drive/client';
 
 type Saved = { v: 2; turns: Turn[]; api: Msg[]; session: Session };
 export type Handoff = { label: string; detail: string };
@@ -70,6 +72,8 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   const [since, setSince] = useState(0);
   const [after, setAfter] = useState('');
   const [changed, setChanged] = useState<Set<number>>(() => new Set());
+  const [picks, setPicks] = useState<FilePick[]>([]);
+  const [pickOpen, setPickOpen] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [stageRef, stage] = useBox();
@@ -109,6 +113,14 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
     };
   }, [corp, data]);
 
+  // DM 을 새로 올리면 장표 데이터를 다시 받는다(브라우저 캐시 건너뜀)
+  const reloadData = useCallback(() => {
+    if (!corp) return;
+    fetch(`/api/deck/data?corp=${encodeURIComponent(corp)}`, { cache: 'reload' })
+      .then((r) => (r.ok ? (r.json() as Promise<DeckData>) : null))
+      .then((d) => d && setData(d))
+      .catch(() => null);
+  }, [corp]);
   const st = useMemo(() => (data && state && data.company.corp_code === state.corp ? normalizeState(data, state) : null), [data, state]);
   const shown = useMemo(() => (data && st ? shownText(data, st) : null), [data, st]);
   const slides = useMemo(() => (data && st && shown ? buildSlides(data, st.input, shown) : []), [data, st, shown]);
@@ -132,6 +144,9 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
     const q = text.trim();
     if (!q || busy || !ready) return;
     setDraft('');
+    const attach = picks;
+    setPicks([]);
+    setPickOpen(false);
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
@@ -147,11 +162,11 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
     setAfter([...s0.log.map((x) => x.at), ...Object.values(s0.texts).map((m) => m?.at ?? '')].sort().pop() ?? '');
     setChanged(new Set());
     setHold(held);
-    setTurns((ts) => [...(opt.fresh ? [] : ts), { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
+    setTurns((ts) => [...(opt.fresh ? [] : ts), { role: 'user', text: attach.length ? `${q}\n📎 ${attach.map((a) => a.name).join(', ')}` : q }, { role: 'assistant', parts: [] }]);
     try {
       for (let hop = 0; hop < 4; hop++) {
         let done: Extract<DcmEvent, { t: 'done' }> | null = null;
-        await postStream<DcmEvent>('/api/agent/run', { messages: trimOld(msgs), session: sNow, assets: texts, memory: memoryText(memory) }, ac.signal, (e) => {
+        await postStream<DcmEvent>('/api/agent/run', { messages: trimOld(msgs), session: sNow, assets: texts, memory: memoryText(memory), attach: hop ? [] : attach }, ac.signal, (e) => {
           if (e.t === 'session') {
             sNow = e.session;
             setSession(e.session);
@@ -181,7 +196,7 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
             return;
           }
           patchLast((p) => applyCommon(p, e));
-        });
+        }, keyHeader());
         const d = done as Extract<DcmEvent, { t: 'done' }> | null;
         if (!d) throw new Error('응답이 중간에 끊겼어요.');
         msgs = d.messages;
@@ -355,6 +370,29 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
               </li>
             ))}
           </ul>
+          <div className="ag-attach">
+            {(session.refs ?? []).map((r) => (
+              <span key={`r${r.id}`} className="ag-att is-ref" title={r.why || undefined}>
+                <span>{r.name}</span>
+                <button type="button" aria-label={`${r.name} 참고 그만`} disabled={busy} onClick={() => setSession((s) => ({ ...s, refs: (s.refs ?? []).filter((x) => x.id !== r.id) }))}>×</button>
+              </span>
+            ))}
+            {picks.map((f) => (
+              <span key={`p${f.id}`} className="ag-att">
+                <span>{f.name}</span>
+                <button type="button" aria-label={`${f.name} 빼기`} onClick={() => setPicks((ps) => ps.filter((x) => x.id !== f.id))}>×</button>
+              </span>
+            ))}
+            <button type="button" className="ag-attach-btn" aria-expanded={pickOpen} disabled={!ready} onClick={() => setPickOpen((v) => !v)}>+ 자료</button>
+            {pickOpen && (
+              <DrivePicker
+                picked={picks}
+                onToggle={(f) => setPicks((ps) => (ps.some((x) => x.id === f.id) ? ps.filter((x) => x.id !== f.id) : [...ps, f].slice(-3)))}
+                onDm={reloadData}
+                onClose={() => setPickOpen(false)}
+              />
+            )}
+          </div>
           <form
             className="dk2-input"
             onSubmit={(e) => {
@@ -458,7 +496,7 @@ function AssistantTurn({ t, live, onFile, fileBusy, canFile, onBuilder }: {
         if (p.k === 'error') return <div key={i} className="dk2-msg is-assistant is-error">{p.text}</div>;
         if (p.k === 'render')
           return (
-            <div key={i} className="ag-file">
+            <div key={i} className="ag-att">
               <span>{p.name} · {p.slides}장</span>
               <button type="button" disabled={!canFile || !!fileBusy} onClick={() => onFile('pptx')}>PPTX</button>
               <button type="button" disabled={!canFile || !!fileBusy} onClick={() => onFile('pdf')}>PDF</button>
