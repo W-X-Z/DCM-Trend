@@ -33,7 +33,7 @@ export function stagesOf(parts: Part[], s: Session, after: string): Stage[][] {
     const d = dec(key);
     const t = txt(key);
     const meta = [d ? `결정 ${d}` : '', t.length ? `문안 ${t.length}` : '', key === 'review' && r?.status === 'ok' ? '의견' : ''].filter(Boolean).join(' · ');
-    return { key, name: ROLE_NAME[key], status: r ? (r.status === 'run' ? 'run' : 'ok') : 'wait', now: r?.status === 'run' ? lastStep(r) : r ? (r.text ?? '').split('\n')[0].slice(0, 80) : '', meta };
+    return { key, name: ROLE_NAME[key], status: r ? r.status : 'wait', now: r?.status === 'run' ? lastStep(r) : r ? (r.text ?? '').split('\n')[0].slice(0, 80) : '', meta };
   };
   return [
     [{ key: 'data', name: '데이터 받기', status: dataStatus, now: fetch[fetch.length - 1]?.note ?? '', meta: '' }],

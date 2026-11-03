@@ -154,9 +154,13 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
             }
             return;
           }
-          if (e.t === 'tool' && e.agent === 'master' && e.name === 'open_company' && !/이어서/.test(e.label)) {
-            held = true;
-            setHold(true);
+          // 새 초안을 열 때만 장표를 가리고 진행 화면을 보인다(이어서 고칠 때는 장표를 그대로)
+          if (e.t === 'open') {
+            if (!e.resume) {
+              held = true;
+              setHold(true);
+            }
+            return;
           }
           if (e.t === 'render') {
             if (held) setCur(0);

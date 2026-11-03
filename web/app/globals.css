@@ -8950,6 +8950,15 @@ a.cta-sm:hover {
   color: var(--muted);
 }
 
+.ag-role-run.is-fail .ag-sub-name {
+  color: var(--alert);
+}
+
+.ag-role-run.is-fail .ag-sub-name::after {
+  content: ' · 실패';
+  font-weight: 400;
+}
+
 /* 미리보기 위 보기 바꾸기: 장표 | 작업 세션 */
 .ag-views {
   display: flex;
@@ -9679,4 +9688,10 @@ a.cta-sm:hover {
 
 .ag-newconv .ag-live {
   flex: 1;
+}
+
+.ag-role-err {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  color: var(--alert);
 }
