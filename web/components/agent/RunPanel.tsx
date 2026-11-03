@@ -43,7 +43,7 @@ const keyOf = (facts: unknown) => {
 const textOfTurn = (t: Extract<Turn, { role: 'assistant' }>) => t.parts.filter((p): p is Extract<Part, { k: 'text' }> => p.k === 'text').map((p) => p.text).join('\n');
 const linesOf = (v: DeckText[keyof DeckText]) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))) : Object.entries(v).map(([k, x]) => `${k}: ${x}`));
 
-export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, rerun, start }: {
+export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, rerun, start, ask }: {
   ready: boolean;
   texts: AssetTexts;
   memory: MemoryFile[];
@@ -52,6 +52,7 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   onBuilder: (h: Handoff) => void;
   rerun: { text: string; n: number } | null;
   start: { corp: string; name: string } | null;
+  ask: string | null;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [api, setApi] = useState<Msg[]>([]);
@@ -231,6 +232,26 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
     void send(text, { fresh: true, apiText: `${text}\n(회사: ${start.name}, corp_code ${start.corp})` });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, loaded]);
+
+  // 다른 서비스(AX 플랫폼 4안)에서 넘긴 문장(?q=): 지금 대화에 이어서 보낸다. 다른 회사면 Master 가 새 초안으로 연다
+  const askedFor = useRef('');
+  useEffect(() => {
+    if (!ask || start || !loaded || askedFor.current === ask) return;
+    askedFor.current = ask;
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete('q');
+      history.replaceState(null, '', u);
+    } catch {
+      /* 무시 */
+    }
+    if (!ready || busy) {
+      setDraft(ask);
+      return;
+    }
+    void send(ask);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, loaded]);
 
   // Builder 에서 승인 후 '다시 실행'
   const lastRerun = useRef(0);

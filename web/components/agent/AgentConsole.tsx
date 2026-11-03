@@ -13,7 +13,7 @@ import { RunPanel, type Handoff } from './RunPanel';
 
 type Tab = 'run' | 'builder' | 'config';
 
-export function AgentConsole({ ready, start }: { ready: boolean; start: { corp: string; name: string } | null }) {
+export function AgentConsole({ ready, start, ask }: { ready: boolean; start: { corp: string; name: string } | null; ask: string | null }) {
   const [tab, setTab] = useState<Tab>('run');
   const [store, setStoreRaw] = useState<AssetStore>({});
   const [memory, setMemoryRaw] = useState<MemoryFile[]>(() => resolveMemory(null));
@@ -29,7 +29,7 @@ export function AgentConsole({ ready, start }: { ready: boolean; start: { corp: 
     setDevRaw(readLS<DevRequest[]>(DEV_KEY) ?? []);
     try {
       const t = new URLSearchParams(location.search).get('tab');
-      if (!start && (t === 'builder' || t === 'config')) setTab(t);
+      if (!start && !ask && (t === 'builder' || t === 'config')) setTab(t);
     } catch {
       /* 무시 */
     }
@@ -123,6 +123,7 @@ export function AgentConsole({ ready, start }: { ready: boolean; start: { corp: 
           }}
           rerun={rerun}
           start={start}
+          ask={ask}
         />
       </div>
       <div hidden={tab !== 'builder'}>
