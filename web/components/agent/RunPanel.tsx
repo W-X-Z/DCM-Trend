@@ -1,42 +1,24 @@
 'use client';
 
-// 실행: 채팅으로 제안서 Agent(Master + Sub-agent)를 돌린다. 도구 호출이 일어나는 대로 보여 주고,
-// 엔진 상태가 바뀌면 오른쪽 미리보기를 그 장표로 옮긴다. PPTX·PDF 는 이 브라우저에서 만든다(웹 제안서 화면과 같은 렌더러).
+// 실행: 채팅으로 제안서 Agent(Master + 역할 6개)를 돌린다. 역할 호출·도구 결과가 일어나는 대로 보여 주고,
+// 작업 세션(초안 상태·결정 기록)이 바뀌면 오른쪽 미리보기를 그 장표로 옮긴다. PPTX·PDF 는 이 브라우저에서 만든다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EXAMPLES, type AgentKey } from '@/lib/agent/config';
-import { RUN_KEY, memoryText, readLS, writeLS, type MemoryFile, type Skill } from '@/lib/agent/store';
-import type { Msg, RunEvent } from '@/lib/agent/run';
-import { normalizeState, shownText, type EngineState } from '@/lib/deck/engine';
+import { FIELD_LABEL, FIELD_SLIDE, ROLE_NAME, emptySession, staleFields, type AssetTexts, type Msg, type Session, type TextField } from '@/lib/agent/defs';
+import type { DcmEvent } from '@/lib/agent/dcm';
+import { RUN_KEY, memoryText, readLS, when, writeLS, type MemoryFile } from '@/lib/agent/store';
+import { baseId, normalizeState, shownText, type EngineState } from '@/lib/deck/engine';
 import { buildSlides, fileBase, staticSubs } from '@/lib/deck/layout';
 import { factsFor, ruleText } from '@/lib/deck/rules';
 import { PAGE } from '@/lib/deck/theme';
-import type { DeckData } from '@/lib/deck/types';
+import type { DeckData, DeckText } from '@/lib/deck/types';
 import { SlideView } from '../deck/SlideView';
+import { ToolRow, applyCommon, postStream, trimOld, useBox, type Part, type Turn } from './chat';
 
-type Step = { id: string; label: string; status: 'run' | 'ok' | 'fail'; note: string };
-type Part =
-  | { k: 'text'; text: string }
-  | { k: 'tool'; id: string; name: string; label: string; status: 'run' | 'ok' | 'fail'; note: string; sub?: { agent: AgentKey; steps: Step[]; text?: string } }
-  | { k: 'render'; name: string; slides: number }
-  | { k: 'error'; text: string };
-type Turn = { role: 'user'; text: string } | { role: 'assistant'; parts: Part[]; model?: string; done?: boolean };
-type Saved = { v: 1; turns: Turn[]; api: Msg[]; state: EngineState | null };
+type Saved = { v: 2; turns: Turn[]; api: Msg[]; session: Session };
+export type Handoff = { label: string; detail: string };
 
-const AGENT_NAME: Record<AgentKey, string> = { master: 'Master', sales_writer: 'Sales Writer', reviewer: 'Reviewer' };
-const MORE = ['확인할 곳 알려줘', 'Sales 전략 문안 써줘', '이 초안 검토해줘', 'PPT로 만들어줘'];
-
-// 지난 턴의 긴 도구 결과는 줄여서 둔다(저장 공간·보내는 양)
-function trimOld(api: Msg[]): Msg[] {
-  let last = -1;
-  api.forEach((m, i) => {
-    if (m.role === 'user' && typeof m.content === 'string') last = i;
-  });
-  return api.map((m, i) =>
-    i >= last || typeof m.content === 'string'
-      ? m
-      : { ...m, content: m.content.map((b) => (b.type === 'tool_result' && b.content.length > 600 ? { ...b, content: `${b.content.slice(0, 600)}\n…(지난 결과 줄임)` } : b)) },
-  );
-}
+const EXAMPLES = ['이랜드월드 제안서 초안 만들어줘', '3년 단일 1,500억으로 바꿔줘', '비교 사례에 미매각 사례 넣어줘', '이 초안 검토해줘'];
+const MORE = ['검토해줘', 'Sales 문안 다시 써줘', '간략 목차로 바꿔줘', 'PPT로 만들어줘'];
 
 function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
@@ -48,8 +30,6 @@ function download(blob: Blob, name: string) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
-
-// 제안서 화면(DeckStudio)과 같은 저장 형식(v4)
 function hash(s: string) {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
@@ -59,56 +39,46 @@ const keyOf = (facts: unknown) => {
   const s = JSON.stringify(facts);
   return `${s.length}:${hash(s)}`;
 };
+const textOfTurn = (t: Extract<Turn, { role: 'assistant' }>) => t.parts.filter((p): p is Extract<Part, { k: 'text' }> => p.k === 'text').map((p) => p.text).join('\n');
+const linesOf = (v: DeckText[keyof DeckText]) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))) : Object.entries(v).map(([k, x]) => `${k}: ${x}`));
 
-// 칸 크기 재기: 칸이 바뀌어도(빈 화면 → 장표) 다시 붙도록 콜백 ref 로
-function useBox() {
-  const [el, setEl] = useState<HTMLElement | null>(null);
-  const [box, setBox] = useState({ w: 0, h: 0 });
-  useEffect(() => {
-    if (!el) return;
-    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [el]);
-  return [setEl, box] as const;
-}
-
-export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
+export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, rerun }: {
   ready: boolean;
-  skills: Skill[];
+  texts: AssetTexts;
   memory: MemoryFile[];
   loaded: boolean;
   onDeck: (d: { state: EngineState | null; data: DeckData | null }) => void;
-  onConfig: () => void;
+  onBuilder: (h: Handoff) => void;
+  rerun: { text: string; n: number } | null;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [api, setApi] = useState<Msg[]>([]);
-  const [state, setState] = useState<EngineState | null>(null);
+  const [session, setSession] = useState<Session>(emptySession);
   const [data, setData] = useState<DeckData | null>(null);
   const [dataErr, setDataErr] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [cur, setCur] = useState(0);
+  const [view, setView] = useState<'slides' | 'session'>('slides');
   const [fileBusy, setFileBusy] = useState<'' | 'pptx' | 'pdf'>('');
   const [fileNote, setFileNote] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [stageRef, stage] = useBox();
 
-  // 지난 대화 불러오기
   useEffect(() => {
     const s = readLS<Saved>(RUN_KEY);
-    if (s?.v === 1) {
+    if (s?.v === 2) {
       setTurns(s.turns.map((t) => (t.role === 'assistant' ? { ...t, done: true } : t)));
       setApi(s.api);
-      setState(s.state);
+      setSession({ ...emptySession(), ...s.session });
     }
   }, []);
-  const persist = useCallback((t: Turn[], a: Msg[], st: EngineState | null) => {
-    writeLS(RUN_KEY, { v: 1, turns: t.slice(-60), api: trimOld(a), state: st } satisfies Saved);
+  const persist = useCallback((t: Turn[], a: Msg[], s: Session) => {
+    writeLS(RUN_KEY, { v: 2, turns: t.slice(-60), api: trimOld(a), session: s } satisfies Saved);
   }, []);
 
-  // 연 회사의 공개 데이터(미리보기·파일용)
+  const state = session.state;
   const corp = state?.corp ?? null;
   useEffect(() => {
     if (!corp) {
@@ -132,7 +102,8 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
   }, [corp, data]);
 
   const st = useMemo(() => (data && state && data.company.corp_code === state.corp ? normalizeState(data, state) : null), [data, state]);
-  const slides = useMemo(() => (data && st ? buildSlides(data, st.input, shownText(data, st)) : []), [data, st]);
+  const shown = useMemo(() => (data && st ? shownText(data, st) : null), [data, st]);
+  const slides = useMemo(() => (data && st && shown ? buildSlides(data, st.input, shown) : []), [data, st, shown]);
   useEffect(() => onDeck({ state: st, data: st ? data : null }), [st, data, onDeck]);
   const at = Math.min(cur, Math.max(slides.length - 1, 0));
 
@@ -140,7 +111,6 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns]);
 
-  // 스트림 이벤트 → 마지막 assistant 턴에 반영
   const patchLast = (f: (parts: Part[]) => Part[], extra?: Partial<Extract<Turn, { role: 'assistant' }>>) =>
     setTurns((ts) => {
       const i = ts.length - 1;
@@ -148,97 +118,6 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
       if (!t || t.role !== 'assistant') return ts;
       return [...ts.slice(0, i), { ...t, parts: f(t.parts), ...extra }];
     });
-
-  function onEvent(e: RunEvent) {
-    switch (e.t) {
-      case 'text':
-        patchLast((p) => [...p, { k: 'text', text: e.text }]);
-        break;
-      case 'tool':
-        if (e.agent === 'master') patchLast((p) => [...p, { k: 'tool', id: e.id, name: e.name, label: e.label, status: 'run', note: '' }]);
-        else
-          patchLast((p) =>
-            p.map((x) => (x.k === 'tool' && x.sub && x.sub.agent === e.agent && x.status === 'run' ? { ...x, sub: { ...x.sub, steps: [...x.sub.steps, { id: e.id, label: e.label, status: 'run', note: '' }] } } : x)),
-          );
-        break;
-      case 'tool_done':
-        patchLast((p) =>
-          p.map((x) => {
-            if (x.k !== 'tool') return x;
-            if (x.id === e.id) return { ...x, status: e.ok ? 'ok' : 'fail', note: e.note };
-            if (x.sub?.steps.some((s) => s.id === e.id)) return { ...x, sub: { ...x.sub, steps: x.sub.steps.map((s) => (s.id === e.id ? { ...s, status: e.ok ? 'ok' : 'fail', note: e.note } : s)) } };
-            return x;
-          }),
-        );
-        break;
-      case 'sub':
-        patchLast((p) => {
-          const i = p.map((x) => x.k === 'tool' && x.name === 'call_subagent' && x.status === 'run').lastIndexOf(true);
-          if (i < 0) return p;
-          const x = p[i] as Extract<Part, { k: 'tool' }>;
-          const sub = e.phase === 'start' ? { agent: e.agent, steps: [] } : { ...(x.sub ?? { agent: e.agent, steps: [] }), text: e.text };
-          return [...p.slice(0, i), { ...x, sub }, ...p.slice(i + 1)];
-        });
-        break;
-      case 'state':
-        setState(e.state);
-        if (e.slide != null) setCur(e.slide);
-        break;
-      case 'render':
-        patchLast((p) => [...p, { k: 'render', name: e.name, slides: e.slides }]);
-        break;
-      case 'error':
-        patchLast((p) => [...p, { k: 'error', text: e.message }]);
-        break;
-      case 'done':
-        break;
-    }
-  }
-
-  // 한 번 요청: NDJSON 을 읽으며 이벤트 처리. 끝 이벤트(done)를 돌려준다.
-  async function stream(messages: Msg[], stNow: EngineState | null, signal: AbortSignal) {
-    const r = await fetch('/api/agent/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: trimOld(messages),
-        state: stNow,
-        skills: skills.map((s) => ({ name: s.name, files: s.files, agents: s.agents })),
-        memory: memoryText(memory),
-      }),
-      signal,
-    });
-    if (!r.ok || !r.body) {
-      const j = await r.json().catch(() => ({}));
-      throw new Error((j as { error?: string }).error ?? `요청이 실패했어요 (${r.status})`);
-    }
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    let done: Extract<RunEvent, { t: 'done' }> | null = null;
-    let latest = stNow;
-    for (;;) {
-      const { value, done: end } = await reader.read();
-      if (value) buf += dec.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let e: RunEvent;
-        try {
-          e = JSON.parse(line) as RunEvent;
-        } catch {
-          continue;
-        }
-        if (e.t === 'state') latest = e.state;
-        if (e.t === 'done') done = e;
-        onEvent(e);
-      }
-      if (end) break;
-    }
-    return { done, state: latest };
-  }
 
   async function send(text: string) {
     const q = text.trim();
@@ -248,18 +127,31 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
     const ac = new AbortController();
     abort.current = ac;
     let msgs: Msg[] = [...api, { role: 'user', content: q }];
-    let stNow = state;
-    setTurns([...turns, { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
+    let sNow = session;
+    setTurns((ts) => [...ts, { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
     try {
       for (let hop = 0; hop < 4; hop++) {
-        const res = await stream(msgs, stNow, ac.signal);
-        stNow = res.state;
-        if (!res.done) throw new Error('응답이 중간에 끊겼어요.');
-        msgs = res.done.messages;
-        patchLast((p) => p, { model: res.done.model });
-        if (!res.done.cont) break;
+        let done: Extract<DcmEvent, { t: 'done' }> | null = null;
+        await postStream<DcmEvent>('/api/agent/run', { messages: trimOld(msgs), session: sNow, assets: texts, memory: memoryText(memory) }, ac.signal, (e) => {
+          if (e.t === 'session') {
+            sNow = e.session;
+            setSession(e.session);
+            if (e.slide != null) setCur(e.slide);
+            return;
+          }
+          if (e.t === 'render') return patchLast((p) => [...p, { k: 'render', name: e.name, slides: e.slides }]);
+          if (e.t === 'done') {
+            done = e;
+            return;
+          }
+          patchLast((p) => applyCommon(p, e));
+        });
+        const d = done as Extract<DcmEvent, { t: 'done' }> | null;
+        if (!d) throw new Error('응답이 중간에 끊겼어요.');
+        msgs = d.messages;
+        patchLast((p) => p, { model: d.model });
+        if (!d.cont) break;
       }
-      // 첫 호출부터 실패해 사용자 글만 남았으면 빼서 다음 요청과 짝이 맞게
       const last = msgs[msgs.length - 1];
       if (last?.role === 'user' && typeof last.content === 'string') {
         msgs = msgs.slice(0, -1);
@@ -276,19 +168,28 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
       setApi(msgs);
       setTurns((ts) => {
         const done = ts.map((t, i) => (i === ts.length - 1 && t.role === 'assistant' ? { ...t, done: true } : t));
-        persist(done, msgs, stNow);
+        persist(done, msgs, sNow);
         return done;
       });
     }
   }
 
+  // Builder 에서 승인 후 '다시 실행'
+  const lastRerun = useRef(0);
+  useEffect(() => {
+    if (!rerun || rerun.n === lastRerun.current || !loaded) return;
+    lastRerun.current = rerun.n;
+    void send(rerun.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rerun, loaded]);
+
   function reset() {
     abort.current?.abort();
     setTurns([]);
     setApi([]);
-    setState(null);
+    setSession(emptySession());
     setCur(0);
-    persist([], [], null);
+    persist([], [], emptySession());
   }
 
   async function exportAs(kind: 'pptx' | 'pdf') {
@@ -311,55 +212,56 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
     }
   }
 
-  // 제안서 화면으로 넘기기: 같은 브라우저 저장소에 그 화면 형식으로 써 두고 연다
   function openInStudio() {
     if (!data || !st) return;
     const edited = Object.keys(st.edits).length > 0;
     const k = keyOf(factsFor(data, st.input));
-    const saved = {
-      v: 4,
-      input: st.input,
-      text: edited ? { ...ruleText(data, st.input), ...st.edits } : null,
-      mode: edited ? 'edited' : 'rule',
-      factsKey: edited ? k : null,
-      salesAi: st.salesAi,
-      salesKey: st.salesAi ? k : null,
-      at: new Date().toISOString(),
-    };
-    writeLS(`deck:v2:${st.corp}`, saved);
+    writeLS(`deck:v2:${st.corp}`, {
+      v: 4, input: st.input, text: edited ? { ...ruleText(data, st.input), ...st.edits } : null, mode: edited ? 'edited' : 'rule',
+      factsKey: edited ? k : null, salesAi: st.salesAi, salesKey: st.salesAi ? k : null, at: new Date().toISOString(),
+    });
     window.open(`/proposal/deck?corp=${encodeURIComponent(st.corp)}`, '_blank', 'noopener');
   }
 
+  // Builder 로 넘기기: 답변 또는 지금 장표
+  function sendAnswer(t: Extract<Turn, { role: 'assistant' }>, i: number) {
+    const q = [...turns.slice(0, i)].reverse().find((x) => x.role === 'user') as Extract<Turn, { role: 'user' }> | undefined;
+    const roles = t.parts.flatMap((p) => (p.k === 'tool' ? p.roles ?? [] : [])).filter((r) => r.text).map((r) => `- ${ROLE_NAME[r.role] ?? r.role}: ${r.text?.split('\n')[0]}`);
+    onBuilder({ label: '답변', detail: [`요청: ${q?.text ?? ''}`, `답: ${textOfTurn(t).slice(0, 600)}`, roles.length ? `역할 보고:\n${roles.join('\n')}` : ''].filter(Boolean).join('\n') });
+  }
+  function sendSlide() {
+    const s = slides[at];
+    if (!s || !shown) return;
+    const id = baseId(s.id);
+    const fields = (Object.keys(FIELD_SLIDE) as TextField[]).filter((f) => FIELD_SLIDE[f] === id);
+    const body = fields.map((f) => `${FIELD_LABEL[f]}${session.texts[f] ? ` (${ROLE_NAME[session.texts[f]!.role]})` : ' (규칙)'}:\n${linesOf(shown[f as keyof DeckText]).map((l) => `  ${l}`).join('\n')}`);
+    const dec = session.log.filter((x) => (id === 'terms' || id === 'sizing' || id === 'schedule' ? x.role === 'deal' : id === 'peers' || id === 'compare' ? x.role === 'market' : false)).slice(-4).map((x) => `- ${x.what} (${x.rules.join(', ') || '항목 없음'})`);
+    onBuilder({ label: `장표 · ${s.title}`, detail: [`장표: ${at + 1}쪽 ${s.title}`, ...body, dec.length ? `관련 결정:\n${dec.join('\n')}` : ''].filter(Boolean).join('\n') });
+  }
+
   const chips = turns.length ? MORE : EXAMPLES;
-  // 칸에 맞춤: 너비와 높이(아래 쪽 표시 줄 몫을 뺀) 중 작은 쪽
   const big = Math.max(280, Math.min(stage.w - 32, ((stage.h - 64) * PAGE.w) / PAGE.h, 1100));
+  const stale = staleFields(session);
 
   return (
     <div className="ag-run">
       <section className="ag-chat" aria-label="Agent 대화">
         <div className="ag-chat-top">
-          <span className="ag-skills-on" title={skills.map((s) => s.name).join(', ')}>
-            스킬 {skills.length}개 켬
-            <button type="button" className="ag-link" onClick={onConfig}>구성</button>
-          </span>
+          <span>제안서 Agent · 역할 6</span>
           <button type="button" className="ag-link" onClick={reset} disabled={!turns.length && !state}>새 대화</button>
         </div>
         <div className="dk2-chat-log ag-log" ref={logRef} aria-live="polite">
           {!ready && (
             <div className="dk2-msg is-assistant is-error">
-              서버에 Claude API 키가 없어 Agent 를 실행할 수 없어요. Vercel 환경 변수 <code>ANTHROPIC_API_KEY</code> 를 넣으면 켜져요. 구성은 지금도 볼 수 있어요.
+              서버에 Claude API 키가 없어 Agent 를 실행할 수 없어요. Vercel 환경 변수 <code>ANTHROPIC_API_KEY</code> 를 넣으면 켜져요.
             </div>
           )}
-          {ready && loaded && !turns.length && (
-            <div className="dk2-msg is-assistant">
-              회사 이름과 함께 말씀해 주시면 공모 회사채 제안서 초안을 만들고, 대화로 조건·문안을 고쳐 PPT로 드려요.
-            </div>
-          )}
+          {ready && loaded && !turns.length && <div className="dk2-msg is-assistant">회사 이름과 함께 말씀해 주시면 역할들이 나눠 판단해 공모 회사채 제안서 초안을 만들어요.</div>}
           {turns.map((t, i) =>
             t.role === 'user' ? (
               <div key={i} className="dk2-msg is-user">{t.text}</div>
             ) : (
-              <AssistantTurn key={i} t={t} live={busy && i === turns.length - 1} onFile={exportAs} fileBusy={fileBusy} canFile={!!slides.length} />
+              <AssistantTurn key={i} t={t} live={busy && i === turns.length - 1} onFile={exportAs} fileBusy={fileBusy} canFile={!!slides.length} onBuilder={() => sendAnswer(t, i)} />
             ),
           )}
         </div>
@@ -381,7 +283,7 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
             <textarea
               rows={2}
               value={draft}
-              placeholder={ready ? '예: 현대트랜시스 제안서 초안 만들어줘' : 'API 키가 없어 실행할 수 없어요'}
+              placeholder={ready ? '예: 이랜드월드 제안서 초안 만들어줘' : 'API 키가 없어 실행할 수 없어요'}
               disabled={!ready}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -405,41 +307,49 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
         {st && data ? (
           <>
             <div className="ag-stage-bar">
-              <div className="ag-stage-title">
-                <strong>{fileBase(st.input)}</strong>
-                <span>{slides.length}장</span>
+              <div className="ag-views" role="tablist" aria-label="보기">
+                <button type="button" role="tab" aria-selected={view === 'slides'} onClick={() => setView('slides')}>장표 <span>{slides.length}</span></button>
+                <button type="button" role="tab" aria-selected={view === 'session'} onClick={() => setView('session')}>
+                  작업 세션 <span>{session.log.length}</span>
+                  {(stale.length > 0 || session.flags.length > 0) && <em aria-label="확인할 것 있음" />}
+                </button>
               </div>
               <div className="ag-stage-actions">
+                {view === 'slides' && <button type="button" className="ag-link" onClick={sendSlide} disabled={!slides[at]}>이 장표 피드백</button>}
                 <button type="button" className="btn" disabled={!!fileBusy || !slides.length} onClick={() => exportAs('pptx')}>{fileBusy === 'pptx' ? '만드는 중…' : 'PPTX 받기'}</button>
                 <button type="button" className="btn btn-ghost" disabled={!!fileBusy || !slides.length} onClick={() => exportAs('pdf')}>{fileBusy === 'pdf' ? '만드는 중…' : 'PDF'}</button>
-                <button type="button" className="btn btn-ghost" onClick={openInStudio}>제안서 화면에서 열기</button>
+                <button type="button" className="btn btn-ghost" onClick={openInStudio}>제안서 화면</button>
               </div>
             </div>
             {fileNote && <p className="ag-note is-error">{fileNote}</p>}
-            <div className="ag-stage-body">
-              <ol className="ag-rail" aria-label="장표 목록">
-                {slides.map((s, i) => (
-                  <li key={s.id}>
-                    <button type="button" aria-current={i === at ? 'true' : undefined} onClick={() => setCur(i)} title={s.title}>
-                      <span>{i + 1}</span>
-                      <SlideView slide={s} width={104} />
-                    </button>
-                  </li>
-                ))}
-              </ol>
-              <div className="ag-big" ref={stageRef}>
-                {slides[at] && (
-                  <>
-                    <SlideView slide={slides[at]} width={big} />
-                    <p className="ag-cap">{at + 1} / {slides.length} · {slides[at].title}</p>
-                  </>
-                )}
+            {view === 'slides' ? (
+              <div className="ag-stage-body">
+                <ol className="ag-rail" aria-label="장표 목록">
+                  {slides.map((s, i) => (
+                    <li key={s.id}>
+                      <button type="button" aria-current={i === at ? 'true' : undefined} onClick={() => setCur(i)} title={s.title}>
+                        <span>{i + 1}</span>
+                        <SlideView slide={s} width={104} />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+                <div className="ag-big" ref={stageRef}>
+                  {slides[at] && (
+                    <>
+                      <SlideView slide={slides[at]} width={big} />
+                      <p className="ag-cap">{at + 1} / {slides.length} · {slides[at].title}</p>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <SessionView s={session} name={fileBase(st.input)} />
+            )}
           </>
         ) : (
           <div className="ag-empty">
-            {dataErr ? <p>{dataErr}</p> : corp ? <p>데이터를 불러오는 중…</p> : <p>초안이 만들어지면 여기에 장표가 보여요.</p>}
+            {dataErr ? <p>{dataErr}</p> : corp ? <p>데이터를 불러오는 중…</p> : <p>초안이 만들어지면 여기에 장표와 작업 세션이 보여요.</p>}
           </div>
         )}
       </section>
@@ -447,7 +357,9 @@ export function RunPanel({ ready, skills, memory, loaded, onDeck, onConfig }: {
   );
 }
 
-function AssistantTurn({ t, live, onFile, fileBusy, canFile }: { t: Extract<Turn, { role: 'assistant' }>; live: boolean; onFile: (k: 'pptx' | 'pdf') => void; fileBusy: string; canFile: boolean }) {
+function AssistantTurn({ t, live, onFile, fileBusy, canFile, onBuilder }: {
+  t: Extract<Turn, { role: 'assistant' }>; live: boolean; onFile: (k: 'pptx' | 'pdf') => void; fileBusy: string; canFile: boolean; onBuilder: () => void;
+}) {
   const tools = t.parts.filter((p) => p.k === 'tool').length;
   return (
     <div className="ag-turn">
@@ -462,38 +374,82 @@ function AssistantTurn({ t, live, onFile, fileBusy, canFile }: { t: Extract<Turn
               <button type="button" disabled={!canFile || !!fileBusy} onClick={() => onFile('pdf')}>PDF</button>
             </div>
           );
-        return <ToolRow key={p.id} p={p} />;
+        if (p.k === 'tool') return <ToolRow key={p.id} p={p} />;
+        return null;
       })}
       {live && <p className="ag-live">{tools ? '진행 중…' : '생각하는 중…'}</p>}
-      {!live && t.done && t.model && tools > 0 && <p className="ag-meta">도구 {tools}번 · {t.model}</p>}
+      {!live && t.done && (
+        <p className="ag-meta">
+          {tools > 0 && t.model ? `도구 ${tools}번 · ${t.model}` : ''}
+          <button type="button" className="ag-link" onClick={onBuilder}>Builder로 보내기</button>
+        </p>
+      )}
     </div>
   );
 }
 
-function ToolRow({ p }: { p: Extract<Part, { k: 'tool' }> }) {
+// 작업 세션: 결정 기록(최근 것부터), 다시 써야 할 문안, 확인 필요, 검토 의견, 역할 메모
+function SessionView({ s, name }: { s: Session; name: string }) {
+  const stale = staleFields(s);
+  const log = [...s.log].reverse();
   return (
-    <div className={`ag-tool is-${p.status}`}>
-      <div className="ag-tool-row">
-        <i aria-hidden="true" />
-        <span className="ag-tool-label">{p.label}</span>
-        {p.note && <span className="ag-tool-note">{p.note}</span>}
-      </div>
-      {p.sub && (
-        <div className="ag-sub">
-          <span className="ag-sub-name">{AGENT_NAME[p.sub.agent]}</span>
-          {p.sub.steps.map((s) => (
-            <div key={s.id} className={`ag-tool-row is-${s.status}`}>
-              <i aria-hidden="true" />
-              <span className="ag-tool-label">{s.label}</span>
-            </div>
+    <div className="ag-sess">
+      <h2 className="ag-h2">{name}</h2>
+      {(stale.length > 0 || s.flags.length > 0) && (
+        <section className="ag-sess-warn">
+          {stale.length > 0 && <p>조건이 바뀌어 다시 써야 할 문안: {stale.map((f) => `${FIELD_LABEL[f]}(${ROLE_NAME[s.texts[f]!.role]})`).join(', ')}</p>}
+          {s.flags.slice(-6).reverse().map((f, i) => (
+            <p key={i}>{ROLE_NAME[f.role]} · {f.text}</p>
           ))}
-          {p.sub.text && (
-            <details className="ag-sub-out">
-              <summary>돌려준 내용</summary>
-              <pre>{p.sub.text}</pre>
+        </section>
+      )}
+      {s.review && (
+        <section>
+          <h3>검토 의견</h3>
+          <pre className="ag-sess-review">{s.review}</pre>
+        </section>
+      )}
+      <section>
+        <h3>결정 기록 <span>{s.log.length}</span></h3>
+        {log.length ? (
+          <ol className="ag-decisions">
+            {log.map((d, i) => (
+              <li key={`${d.at}-${i}`}>
+                <div className="ag-dec-head">
+                  <span className={`ag-role-chip is-${d.role}`}>{ROLE_NAME[d.role] ?? d.role}</span>
+                  <strong>{d.what}</strong>
+                  <time>{when(d.at)}</time>
+                </div>
+                {d.reason && <p>{d.reason}</p>}
+                {d.rules.length > 0 && <div className="ag-tags">{d.rules.map((r) => <code key={r} className="ag-tag">{r}</code>)}</div>}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="ag-muted">아직 결정이 없어요.</p>
+        )}
+      </section>
+      <section>
+        <h3>AI가 쓴 문안</h3>
+        <ul className="ag-sess-texts">
+          {(Object.keys(s.texts) as TextField[]).map((f) => (
+            <li key={f}>
+              {FIELD_LABEL[f]} <span className="ag-muted">· {ROLE_NAME[s.texts[f]!.role]}{s.texts[f]!.dropped ? ` · ${s.texts[f]!.dropped}줄 뺌` : ''}{s.texts[f]!.stale ? ' · 다시 써야 함' : ''}</span>
+            </li>
+          ))}
+          {!Object.keys(s.texts).length && <li className="ag-muted">없음(규칙 문안)</li>}
+        </ul>
+      </section>
+      {Object.keys(s.memos).length > 0 && (
+        <section>
+          <h3>역할 메모</h3>
+          {Object.entries(s.memos).map(([k, v]) => (
+            <details key={k} className="ag-sess-memo">
+              <summary>{ROLE_NAME[k]} · {v?.length ?? 0}줄</summary>
+              <ul>{v?.map((x, i) => <li key={i}>{x}</li>)}</ul>
             </details>
-          )}
-        </div>
+          ))}
+        </section>
       )}
     </div>
   );
