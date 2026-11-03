@@ -47,6 +47,16 @@ export function BuilderPanel({ ready, texts, versions, onApprove, memory, onMemo
   }, []);
   const save = (t: Turn[], a: Msg[], p: Proposal[], n: number) => writeLS(BUILDER_KEY, { v: 1, turns: t.slice(-60), api: trimOld(a), proposals: p.slice(-80), seq: n } satisfies Saved);
   useEffect(() => {
+    if (!handoff || busy || !turns.length) return;
+    const left = turns.some((t) => t.role === 'assistant' && t.parts.some((p) => p.k === 'proposal' && props.find((x) => x.id === p.id)?.status === 'open'));
+    if (!left) {
+      setTurns([]);
+      setApi([]);
+      save([], [], props, seq);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoff]);
+  useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns]);
 
@@ -71,6 +81,7 @@ export function BuilderPanel({ ready, texts, versions, onApprove, memory, onMemo
     let m: Msg[] = [...api, { role: 'user', content }];
     let pNow = props;
     let n = seq;
+    const made: string[] = [];
     setTurns((ts) => [...ts, { role: 'user', text: q, ctx: ctx?.label }, { role: 'assistant', parts: [] }]);
     try {
       let done: Extract<BuilderEvent, { t: 'done' }> | null = null;
@@ -81,7 +92,7 @@ export function BuilderPanel({ ready, texts, versions, onApprove, memory, onMemo
             n = Math.max(n, Number(e.proposal.id.slice(1)) || n);
             setProps(pNow);
             setSeq(n);
-            patchLast((p) => [...p, { k: 'proposal', id: e.proposal.id }]);
+            made.push(e.proposal.id);
             return;
           case 'impact':
             pNow = pNow.map((p) => (p.id === e.id ? { ...p, impact: e.text } : p));
@@ -115,8 +126,11 @@ export function BuilderPanel({ ready, texts, versions, onApprove, memory, onMemo
       abort.current = null;
       setBusy(false);
       setApi(m);
+      // 승인(사람 확인)은 Agent 가 일을 다 마친 뒤 맨 아래에 보인다
       setTurns((ts) => {
-        const done = ts.map((t, i) => (i === ts.length - 1 && t.role === 'assistant' ? { ...t, done: true } : t));
+        const done = ts.map((t, i) =>
+          i === ts.length - 1 && t.role === 'assistant' ? { ...t, parts: [...t.parts, ...made.map((id) => ({ k: 'proposal' as const, id }))], done: true } : t,
+        );
         save(done, m, pNow, n);
         return done;
       });
@@ -148,6 +162,9 @@ export function BuilderPanel({ ready, texts, versions, onApprove, memory, onMemo
   }
 
   const byId = new Map(props.map((p) => [p.id, p]));
+  const inConv = turns.flatMap((t) => (t.role === 'assistant' ? t.parts.filter((p): p is Extract<Part, { k: 'proposal' }> => p.k === 'proposal').map((p) => p.id) : []));
+  const openLeft = inConv.filter((id) => byId.get(id)?.status === 'open').length;
+  const finished = turns.length > 0 && !busy;
   const openDev = dev.filter((d) => d.status === 'open');
   const applied = props.filter((p) => p.status === 'approved').slice(-8).reverse();
 
@@ -156,7 +173,7 @@ export function BuilderPanel({ ready, texts, versions, onApprove, memory, onMemo
       <section className="ag-chat" aria-label="Agent Builder 대화">
         <div className="ag-chat-top">
           <span>Agent Builder · 편집 2 + 영향 점검</span>
-          <button type="button" className="ag-link" onClick={reset} disabled={!turns.length}>새 대화</button>
+          <button type="button" className="ag-link" onClick={reset} disabled={!turns.length || busy || openLeft > 0}>새 대화</button>
         </div>
         <div className="dk2-chat-log ag-log" ref={logRef} aria-live="polite">
           {!ready && <div className="dk2-msg is-assistant is-error">서버에 Claude API 키가 없어 Builder 를 실행할 수 없어요.</div>}
@@ -180,59 +197,66 @@ export function BuilderPanel({ ready, texts, versions, onApprove, memory, onMemo
                   }
                   return null;
                 })}
-                {busy && i === turns.length - 1 && <p className="ag-live">진행 중…</p>}
               </div>
             ),
           )}
         </div>
         <div className="dk2-chat-foot">
-          {!turns.length && (
-            <ul className="dk2-chips">
-              {EXAMPLES.map((c) => (
-                <li key={c}>
-                  <button type="button" disabled={busy || !ready} onClick={() => send(c)}>{c}</button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {handoff && (
-            <div className="ag-handoff">
-              <span className="ag-ctx-chip">{handoff.label}</span>
-              <span className="ag-muted">함께 보내요</span>
-              <button type="button" className="ag-link" onClick={clearHandoff}>빼기</button>
-              <details>
-                <summary>내용</summary>
-                <pre>{handoff.detail}</pre>
-              </details>
+          {finished ? (
+            <div className="ag-newconv">
+              <button type="button" className="btn" onClick={reset} disabled={openLeft > 0}>새 대화로</button>
+              {openLeft > 0 && <span className="ag-muted">승인 대기 {openLeft}</span>}
             </div>
-          )}
-          <form
-            className="dk2-input"
-            onSubmit={(e) => {
-              e.preventDefault();
-              send(draft);
-            }}
-          >
-            <textarea
-              rows={2}
-              value={draft}
-              placeholder="예: A급은 3년물 위주로 잡아줘"
-              disabled={!ready}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+          ) : busy ? (
+            <div className="ag-newconv">
+              <span className="ag-live">진행 중…</span>
+              <button type="button" className="btn btn-ghost ag-stop-btn" onClick={() => abort.current?.abort()}>멈춤</button>
+            </div>
+          ) : (
+            <>
+              <ul className="dk2-chips">
+                {EXAMPLES.map((c) => (
+                  <li key={c}>
+                    <button type="button" disabled={!ready} onClick={() => send(c)}>{c}</button>
+                  </li>
+                ))}
+              </ul>
+              {handoff && (
+                <div className="ag-handoff">
+                  <span className="ag-ctx-chip">{handoff.label}</span>
+                  <span className="ag-muted">함께 보내요</span>
+                  <button type="button" className="ag-link" onClick={clearHandoff}>빼기</button>
+                  <details>
+                    <summary>내용</summary>
+                    <pre>{handoff.detail}</pre>
+                  </details>
+                </div>
+              )}
+              <form
+                className="dk2-input"
+                onSubmit={(e) => {
                   e.preventDefault();
                   send(draft);
-                }
-              }}
-              aria-label="Builder 에게 보낼 피드백"
-            />
-            {busy ? (
-              <button type="button" className="ag-stop" onClick={() => abort.current?.abort()}>멈춤</button>
-            ) : (
-              <button type="submit" disabled={!draft.trim() || !ready}>보내기</button>
-            )}
-          </form>
+                }}
+              >
+                <textarea
+                  rows={2}
+                  value={draft}
+                  placeholder="예: A급은 3년물 위주로 잡아줘"
+                  disabled={!ready}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      send(draft);
+                    }
+                  }}
+                  aria-label="Builder 에게 보낼 피드백"
+                />
+                <button type="submit" disabled={!draft.trim() || !ready}>보내기</button>
+              </form>
+            </>
+          )}
         </div>
       </section>
 

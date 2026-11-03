@@ -13,6 +13,7 @@ import { PAGE } from '@/lib/deck/theme';
 import type { DeckData, DeckText } from '@/lib/deck/types';
 import { SlideView } from '../deck/SlideView';
 import { ToolRow, applyCommon, postStream, trimOld, useBox, type Part, type Turn } from './chat';
+import { WorkView, nowDoing } from './WorkView';
 
 type Saved = { v: 2; turns: Turn[]; api: Msg[]; session: Session };
 export type Handoff = { label: string; detail: string };
@@ -62,6 +63,11 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   const [view, setView] = useState<'slides' | 'session'>('slides');
   const [fileBusy, setFileBusy] = useState<'' | 'pptx' | 'pdf'>('');
   const [fileNote, setFileNote] = useState<string | null>(null);
+  // 일하는 동안: 첫 초안은 장표를 가리고(hold) 진행 화면을, 이후 수정은 장표 위에 진행 줄을 보인다
+  const [hold, setHold] = useState(false);
+  const [since, setSince] = useState(0);
+  const [after, setAfter] = useState('');
+  const [changed, setChanged] = useState<Set<number>>(() => new Set());
   const abort = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [stageRef, stage] = useBox();
@@ -128,6 +134,11 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
     abort.current = ac;
     let msgs: Msg[] = [...api, { role: 'user', content: q }];
     let sNow = session;
+    let held = !session.state;
+    setSince(Date.now());
+    setAfter([...session.log.map((x) => x.at), ...Object.values(session.texts).map((m) => m?.at ?? '')].sort().pop() ?? '');
+    setChanged(new Set());
+    setHold(held);
     setTurns((ts) => [...ts, { role: 'user', text: q }, { role: 'assistant', parts: [] }]);
     try {
       for (let hop = 0; hop < 4; hop++) {
@@ -136,10 +147,23 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
           if (e.t === 'session') {
             sNow = e.session;
             setSession(e.session);
-            if (e.slide != null) setCur(e.slide);
+            if (e.slide != null) {
+              const at = e.slide;
+              if (!held) setCur(at);
+              setChanged((c) => new Set(c).add(at));
+            }
             return;
           }
-          if (e.t === 'render') return patchLast((p) => [...p, { k: 'render', name: e.name, slides: e.slides }]);
+          if (e.t === 'tool' && e.agent === 'master' && e.name === 'open_company' && !/이어서/.test(e.label)) {
+            held = true;
+            setHold(true);
+          }
+          if (e.t === 'render') {
+            if (held) setCur(0);
+            held = false;
+            setHold(false);
+            return patchLast((p) => [...p, { k: 'render', name: e.name, slides: e.slides }]);
+          }
           if (e.t === 'done') {
             done = e;
             return;
@@ -165,6 +189,7 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
     } finally {
       abort.current = null;
       setBusy(false);
+      setHold(false);
       setApi(msgs);
       setTurns((ts) => {
         const done = ts.map((t, i) => (i === ts.length - 1 && t.role === 'assistant' ? { ...t, done: true } : t));
@@ -242,6 +267,9 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
   const chips = turns.length ? MORE : EXAMPLES;
   const big = Math.max(280, Math.min(stage.w - 32, ((stage.h - 64) * PAGE.w) / PAGE.h, 1100));
   const stale = staleFields(session);
+  const lastTurn = turns[turns.length - 1];
+  const liveParts = busy && lastTurn?.role === 'assistant' ? lastTurn.parts : [];
+  const working = busy && (hold || !st);
 
   return (
     <div className="ag-run">
@@ -304,7 +332,9 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
       </section>
 
       <section className="ag-stage" aria-label="제안서 미리보기">
-        {st && data ? (
+        {working ? (
+          <WorkView parts={liveParts} session={session} since={since} after={after} title={`${data?.company.corp_name ?? ''} 제안서 만드는 중`.trim()} />
+        ) : st && data ? (
           <>
             <div className="ag-stage-bar">
               <div className="ag-views" role="tablist" aria-label="보기">
@@ -322,12 +352,18 @@ export function RunPanel({ ready, texts, memory, loaded, onDeck, onBuilder, reru
               </div>
             </div>
             {fileNote && <p className="ag-note is-error">{fileNote}</p>}
+            {busy && (
+              <div className="ag-strip" aria-live="polite">
+                <i aria-hidden="true" />
+                <span>{nowDoing(liveParts)}</span>
+              </div>
+            )}
             {view === 'slides' ? (
               <div className="ag-stage-body">
                 <ol className="ag-rail" aria-label="장표 목록">
                   {slides.map((s, i) => (
-                    <li key={s.id}>
-                      <button type="button" aria-current={i === at ? 'true' : undefined} onClick={() => setCur(i)} title={s.title}>
+                    <li key={s.id} className={changed.has(i) ? 'is-changed' : undefined}>
+                      <button type="button" aria-current={i === at ? 'true' : undefined} onClick={() => setCur(i)} title={changed.has(i) ? `${s.title} · 이번에 바뀜` : s.title}>
                         <span>{i + 1}</span>
                         <SlideView slide={s} width={104} />
                       </button>
