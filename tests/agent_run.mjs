@@ -3,6 +3,7 @@
 import { build } from 'esbuild';
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,13 +67,20 @@ const server = http.createServer((req, res) => {
       return res.end(JSON.stringify({ error: { message: 'rate limit' } }));
     }
     const errs = problems(body);
+    // 실제 모델처럼 thinking 블록을 붙인다. 서명은 대화 앞부분(system)에 묶여, 앞부분이 바뀐 채 돌려보내면 거절된다
+    const sig = createHash('md5').update(sys).digest('hex');
+    body.messages.forEach((mm, i) => {
+      if (Array.isArray(mm.content) && mm.content.some((x) => x.type === 'thinking' && x.signature !== sig)) errs.push(`messages.${i}.content.0: Invalid \`signature\` in \`thinking\` block. The block is bound to a different conversation.`);
+    });
     const f = scripts[who];
     if (errs.length || !f) {
       res.writeHead(400, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ error: { message: errs.join('; ') || `no script for ${who}` } }));
     }
+    const out = f(body, step(body));
+    out.content = [{ type: 'thinking', thinking: '생각 중', signature: sig }, ...out.content];
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(f(body, step(body))));
+    res.end(JSON.stringify(out));
   });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -341,6 +349,14 @@ const broken = [...T1, { role: 'user', content: 'Sales 다시 써줘' }, { role:
 r = await runDcm(broken, S2);
 eq('끊긴 기록: 오류 없음', r.ev.filter((e) => e.t === 'error'), []);
 eq('끊긴 기록: 규칙에 맞음', seen.every((s) => problems(s.body).length === 0), true);
+
+// 긴 작업이 요청 두 번에 걸쳐 이어질 때: 앞 요청의 thinking 블록(다른 system 에 묶임)이 남아 있어도
+seen.length = 0;
+scripts['dcm.master'] = (body) => (sinceAsk(body) <= 1 ? msg([tu('render', {})]) : say('만들었어요.'));
+const hop = [{ role: 'user', content: 'PPT로 만들어줘' }, { role: 'assistant', content: [{ type: 'thinking', thinking: '...', signature: 'other-conversation' }, { type: 'tool_use', id: 'toolu_h1', name: 'session', input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_h1', content: '{}' }] }];
+r = await runDcm(hop, S2);
+eq('이어지는 요청: 오류 없음', r.ev.filter((e) => e.t === 'error'), []);
+truthy('이어지는 요청: 산출까지', r.ev.some((e) => e.t === 'render'));
 
 // ── 7) 한도(429): retry-after 만큼 쉬고 다시, 계속이면 알기 쉬운 안내 ─────────
 scripts['dcm.master'] = () => say('네.');
