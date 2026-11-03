@@ -28,7 +28,7 @@ export class ClaudeError extends Error {
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 // 한도(429)·과부하(529)·서버 오류는 retry-after 만큼 쉬고 다시(남은 시간 안에서 최대 3번)
-export async function claude(model: string, system: string, messages: Msg[], tools: ToolDef[], maxTokens: number, timeoutMs = 120_000): Promise<ClaudeRes> {
+async function once(model: string, system: string, messages: Msg[], tools: ToolDef[], maxTokens: number, timeoutMs = 120_000): Promise<ClaudeRes> {
   const end = Date.now() + timeoutMs;
   let last: ClaudeError | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -49,6 +49,23 @@ export async function claude(model: string, system: string, messages: Msg[], too
   }
   throw last ?? new ClaudeError('Claude 호출 실패', 0);
 }
+
+// 모델은 답하기 전에 생각(thinking)을 하고, 생각과 답을 합쳐 max_tokens 를 넘으면 도구 호출이 잘린다.
+// 잘리면(max_tokens) 한도를 두 배로 올려 같은 요청을 다시 한다(최대 OUT_MAX, 남은 시간 안에서).
+const OUT_MAX = 32_000;
+export async function claude(model: string, system: string, messages: Msg[], tools: ToolDef[], maxTokens: number, timeoutMs = 120_000): Promise<ClaudeRes> {
+  const end = Date.now() + timeoutMs;
+  let mt = maxTokens;
+  for (;;) {
+    const res = await once(model, system, messages, tools, mt, end - Date.now());
+    if (res.stop_reason !== 'max_tokens' || mt >= OUT_MAX || end - Date.now() < 30_000) return res;
+    mt = Math.min(OUT_MAX, mt * 2);
+  }
+}
+
+// 도구 호출도 글도 없는 답(생각만 하고 끝남 등): 대화에 남길 자리표시와 한 번 재촉할 말
+export const EMPTY_NUDGE = '답이 비었어요. 맡은 일을 도구로 이어서 하고, 끝나면 무엇을 했는지 1~3줄로 보고하세요.';
+export const emptyNote = (stop: string) => `(빈 답${stop && stop !== 'end_turn' ? ` · ${stop}` : ''})`;
 
 // 사용자에게 보일 이유
 export function claudeWhy(e: unknown): string {
@@ -128,14 +145,21 @@ export async function runLoop(opts: {
   onTool: (name: string, input: Record<string, unknown>, id: string) => Promise<{ content: string; note?: string }>;
 }): Promise<{ text: string; rounds: number }> {
   const msgs: Msg[] = [{ role: 'user', content: opts.first }];
+  let nudged = false;
   for (let round = 0; round < opts.maxRounds; round++) {
     if (opts.left() < 8_000) return { text: '(시간이 부족해 여기서 멈췄어요)', rounds: round };
-    const res = await claude(opts.model, opts.system, msgs, opts.tools, opts.maxTokens ?? 3000, opts.left());
+    const res = await claude(opts.model, opts.system, msgs, opts.tools, opts.maxTokens ?? 8000, opts.left());
     let content = res.content;
     if (res.stop_reason !== 'tool_use' && content.some((b) => b.type === 'tool_use')) content = content.filter((b) => b.type !== 'tool_use');
-    msgs.push({ role: 'assistant', content: content.length ? content : [{ type: 'text', text: '(빈 응답)' }] });
     const uses = usesOf(content);
-    if (!uses.length) return { text: textOf(content) || '(빈 답)', rounds: round + 1 };
+    if (!uses.length && !textOf(content)) {
+      if (nudged) return { text: emptyNote(res.stop_reason), rounds: round + 1 };
+      nudged = true;
+      msgs.push({ role: 'assistant', content: [{ type: 'text', text: '(빈 응답)' }] }, { role: 'user', content: EMPTY_NUDGE });
+      continue;
+    }
+    msgs.push({ role: 'assistant', content });
+    if (!uses.length) return { text: textOf(content), rounds: round + 1 };
     const results: Block[] = [];
     for (const u of uses) {
       try {

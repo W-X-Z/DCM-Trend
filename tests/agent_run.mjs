@@ -369,5 +369,36 @@ truthy('429: 한도 안내', r.ev.find((e) => e.t === 'error' && /사용량 한�
 eq('429: 바로 다시 보내지 않음', r.done.cont, false);
 fail429 = 0;
 
+// ── 8) 생각만 하다 잘린 답(max_tokens)·빈 답·사용자가 준 숫자 ─────────────────
+seen.length = 0;
+let cutOnce = true;
+let emptyOnce = true;
+const nudgedIn = (body) => body.messages.some((x) => (typeof x.content === 'string' ? /답이 비었어요/.test(x.content) : x.content.some((c) => c.type === 'text' && /답이 비었어요/.test(c.text))));
+scripts['dcm.master'] = (body) => (sinceAsk(body) === 0 ? msg([tu('call_roles', { roles: ['deal'], task: '사용자 요청: 둘다 장표에 반영해줘. 안 A 2년 500억+3년 800억(1,300억), 안 B 3년 1,600억' })]) : say('두 안을 트랜치 검토에 넣었어요.'));
+scripts.deal = (body, k) => {
+  // 첫 호출: 생각만 하다 한도에 걸림 → 한도를 올려 다시 와야 한다
+  if (cutOnce && body.max_tokens < 16000) {
+    cutOnce = false;
+    return msg([], 'max_tokens');
+  }
+  if (k === 0) return msg([tu('facts', {})]);
+  // facts 다음: 글도 도구도 없는 빈 답 → 한 번 재촉받아야 한다
+  if (emptyOnce) {
+    emptyOnce = false;
+    return msg([], 'end_turn');
+  }
+  if (!nudgedIn(body)) return say('재촉 없음');
+  if (!body.messages.at(-1).content.some?.((c) => c.type === 'tool_result' && /저장/.test(c.content ?? ''))) {
+    if (!body.messages.some((x) => Array.isArray(x.content) && x.content.some((c) => c.type === 'tool_use' && c.name === 'write'))) return msg([tu('write', { field: 'sizing', lines: ['안 A: 2년 500억원 + 3년 800억원, 총 1,300억원 (현행 구조)', '안 B: 3년 단일 1,600억원 (3년 확대)'] })]);
+  }
+  return say('두 안을 트랜치 검토 문안에 넣었어요.');
+};
+r = await runDcm([{ role: 'user', content: '둘다 장표에 반영해줘' }], S2);
+const dealCalls = seen.filter((x) => x.who === 'deal');
+eq('잘린 답: 한도를 올려 다시', dealCalls.slice(0, 2).map((x) => x.body.max_tokens), [8000, 16000]);
+truthy('빈 답: 재촉 뒤 이어감', dealCalls.some((x) => nudgedIn(x.body)));
+eq('사용자가 준 숫자: 두 안 문안 반영', r.session.state.edits.sizing, ['안 A: 2년 500억원 + 3년 800억원, 총 1,300억원 (현행 구조)', '안 B: 3년 단일 1,600억원 (3년 확대)']);
+eq('역할 보고가 빈 답이 아님', r.ev.filter((e) => e.t === 'role' && e.phase === 'end').map((e) => e.text), ['두 안을 트랜치 검토 문안에 넣었어요.']);
+
 server.close();
 console.log(`${pass} passed${process.exitCode ? ', some failed' : ''}`);

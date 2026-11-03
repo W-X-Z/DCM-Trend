@@ -15,7 +15,7 @@ import {
   CASE_FIELDS, COND_FIELDS, FIELD_LABEL, FIELD_OWNER, FIELD_SLIDE, MODEL, ROLES, ROLE_NAME, TERM_NOTE_KEYS, emptySession, kstToday, roleOf, staleFields, textOf,
   type AssetTexts, type Block, type Msg, type RoleDef, type RoleKey, type Session, type TextField,
 } from './defs';
-import { J, ToolError, claude, claudeWhy, clip, obj, runLoop, textOf as textOfBlocks, tidyHistory, usesOf, type ToolDef } from './llm';
+import { EMPTY_NUDGE, J, ToolError, claude, claudeWhy, clip, emptyNote, obj, runLoop, textOf as textOfBlocks, tidyHistory, usesOf, type ToolDef } from './llm';
 
 export type DcmEvent =
   | { t: 'text'; text: string }
@@ -302,7 +302,7 @@ export async function runDcm(inp: DcmInput, emit: (e: DcmEvent) => void, budgetM
   const flag = (role: RoleKey, text: string) => S.flags.push({ at: nowIso(), role, text });
 
   // ── 역할 도구 ──
-  async function roleTool(r: RoleDef, name: string, i: Record<string, unknown>, tries: Map<string, number>): Promise<{ content: string; note: string }> {
+  async function roleTool(r: RoleDef, name: string, i: Record<string, unknown>, tries: Map<string, number>, task: string): Promise<{ content: string; note: string }> {
     const c = await ensureCtx();
     switch (name) {
       case 'facts':
@@ -316,11 +316,11 @@ export async function runDcm(inp: DcmInput, emit: (e: DcmEvent) => void, budgetM
       case 'decide':
         return decide(r, i);
       case 'write':
-        return write(r, i, tries);
+        return write(r, i, tries, task);
       case 'memo': {
         const pts = (Array.isArray(i.points) ? i.points : []).filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean).slice(0, 8);
         if (!pts.length) throw new ToolError('points 에 메모를 한 줄 이상 주세요.');
-        const allowed = allowedNumbers(roleFacts(r, c, S), r.knowhow.map((k) => textOf(A, k)), c.st.input);
+        const allowed = allowedNumbers(roleFacts(r, c, S), r.knowhow.map((k) => textOf(A, k)), c.st.input, task);
         const chk = pts.map((l) => ({ l, v: lineOk(l, allowed, false) }));
         const ok = chk.filter((x) => x.v.ok || x.v.why === '너무 김').map((x) => x.l);
         S.memos[r.key] = ok;
@@ -418,13 +418,14 @@ export async function runDcm(inp: DcmInput, emit: (e: DcmEvent) => void, budgetM
     }
   }
 
-  function write(r: RoleDef, i: Record<string, unknown>, tries: Map<string, number>) {
+  // task: Master 가 넘긴 사용자 요청. 사용자가 준 숫자(예: 비교할 안의 금액)는 사실 묶음에 없어도 쓸 수 있다
+  function write(r: RoleDef, i: Record<string, unknown>, tries: Map<string, number>, task: string) {
     const c = ctx!;
     const field = String(i.field ?? '') as TextField;
     if (!r.fields.includes(field)) throw new ToolError(`${r.name} 역할이 쓸 수 있는 칸: ${r.fields.join(', ')}`);
     const n = (tries.get(field) ?? 0) + 1;
     tries.set(field, n);
-    const allowed = allowedNumbers(roleFacts(r, c, S), r.knowhow.map((k) => textOf(A, k)), c.st.input, Object.values(S.memos));
+    const allowed = allowedNumbers(roleFacts(r, c, S), r.knowhow.map((k) => textOf(A, k)), c.st.input, Object.values(S.memos), task);
     const label = FIELD_LABEL[field];
     let st: EngineState;
     let okCount = 0;
@@ -486,12 +487,12 @@ ${r.knowhow.map((k) => textOf(A, k)).join('\n\n')}
     let k = 0;
     try {
       const out = await runLoop({
-        model: MODEL, system, first: `요청: ${task}`, tools: roleTools(r), maxRounds: 10, maxTokens: 3000, left,
+        model: MODEL, system, first: `요청: ${task}`, tools: roleTools(r), maxRounds: 10, maxTokens: 8000, left,
         onTool: async (name, input) => {
           const id = `${call}:${r.key}:${k++}`;
           emit({ t: 'tool', id, name, label: toolLabel(name, input), agent: r.key, call });
           try {
-            const res = await roleTool(r, name, input, tries);
+            const res = await roleTool(r, name, input, tries, task);
             emit({ t: 'tool_done', id, ok: true, note: res.note });
             return res;
           } catch (e) {
@@ -580,6 +581,7 @@ ${inp.memory?.trim() || '(없음)'}
 ${JSON.stringify(brief)}
 오늘: ${kstToday()}`;
 
+  let nudged = false;
   for (let round = 0; round < 14; round++) {
     if (Date.now() - t0 > budgetMs) {
       emit({ t: 'done', messages, cont: true, model });
@@ -587,7 +589,7 @@ ${JSON.stringify(brief)}
     }
     let res;
     try {
-      res = await claude(MODEL, system, messages, MASTER_TOOLS, 2000, left());
+      res = await claude(MODEL, system, messages, MASTER_TOOLS, 4000, left());
     } catch (e) {
       // 바로 다시 보내지 않는다(한도면 또 걸린다). 이미 한 일은 작업 세션에 남아 있어 다음 요청에서 이어진다.
       emit({ t: 'error', message: claudeWhy(e) });
@@ -598,7 +600,15 @@ ${JSON.stringify(brief)}
     let content = res.content;
     if (res.stop_reason !== 'tool_use' && content.some((b) => b.type === 'tool_use')) {
       content = content.filter((b) => b.type !== 'tool_use');
-      if (!content.length) content = [{ type: 'text', text: '(응답이 길어 잘렸어요. 요청을 나눠 주세요.)' }];
+    }
+    if (!usesOf(content).length && !textOfBlocks(content)) {
+      // 생각만 하고 끝난 빈 답: 한 번 재촉하고, 또 비면 그렇다고 알린다
+      if (!nudged) {
+        nudged = true;
+        messages.push({ role: 'assistant', content: [{ type: 'text', text: '(빈 응답)' }] }, { role: 'user', content: [{ type: 'text', text: EMPTY_NUDGE }] });
+        continue;
+      }
+      content = [{ type: 'text', text: `답을 만들지 못했어요. 다시 보내 주세요. ${emptyNote(res.stop_reason)}` }];
     }
     messages.push({ role: 'assistant', content });
     const said = textOfBlocks(content);

@@ -5,7 +5,7 @@ import {
   ASSETS, EDITABLE, MODEL, ROLE_NAME, allItems, applyEdit, assetDef, itemBlock, kstToday, nextItemId, parseItems, parseSections, textOf,
   type AssetTexts, type Block, type BuilderRoleKey, type DevRequest, type Edit, type Msg, type Proposal,
 } from './defs';
-import { J, ToolError, claude, claudeWhy, clip, obj, runLoop, textOf as textOfBlocks, tidyHistory, usesOf, type ToolDef } from './llm';
+import { EMPTY_NUDGE, J, ToolError, claude, claudeWhy, clip, emptyNote, obj, runLoop, textOf as textOfBlocks, tidyHistory, usesOf, type ToolDef } from './llm';
 
 export type BuilderEvent =
   | { t: 'text'; text: string }
@@ -173,7 +173,7 @@ export async function runBuilder(inp: BuilderInput, emit: (e: BuilderEvent) => v
     let k = 0;
     try {
       const out = await runLoop({
-        model: MODEL, system: `${textOf(A, `builder.${role}`)}\n\n오늘: ${kstToday()}`, first, tools, maxRounds: 8, maxTokens: 3000, left,
+        model: MODEL, system: `${textOf(A, `builder.${role}`)}\n\n오늘: ${kstToday()}`, first, tools, maxRounds: 8, maxTokens: 8000, left,
         onTool: async (name, input) => {
           const id = `${call}:${role}:${k++}`;
           emit({ t: 'tool', id, name, label: toolLabel(name, input), agent: role, call });
@@ -254,6 +254,7 @@ ${inp.memory?.trim() || '(없음)'}
 
 오늘: ${kstToday()}`;
 
+  let nudged = false;
   for (let round = 0; round < 12; round++) {
     if (Date.now() - t0 > budgetMs) {
       emit({ t: 'done', messages, cont: true, model });
@@ -261,7 +262,7 @@ ${inp.memory?.trim() || '(없음)'}
     }
     let res;
     try {
-      res = await claude(MODEL, system, messages, MASTER_TOOLS, 2500, left());
+      res = await claude(MODEL, system, messages, MASTER_TOOLS, 4000, left());
     } catch (e) {
       emit({ t: 'error', message: claudeWhy(e) });
       emit({ t: 'done', messages, cont: false, model });
@@ -270,7 +271,15 @@ ${inp.memory?.trim() || '(없음)'}
     model = res.model ?? model;
     let content = res.content;
     if (res.stop_reason !== 'tool_use' && content.some((b) => b.type === 'tool_use')) content = content.filter((b) => b.type !== 'tool_use');
-    if (!content.length) content = [{ type: 'text', text: '(빈 응답)' }];
+    if (!usesOf(content).length && !textOfBlocks(content)) {
+      // 생각만 하고 끝난 빈 답: 한 번 재촉하고, 또 비면 그렇다고 알린다
+      if (!nudged) {
+        nudged = true;
+        messages.push({ role: 'assistant', content: [{ type: 'text', text: '(빈 응답)' }] }, { role: 'user', content: [{ type: 'text', text: EMPTY_NUDGE }] });
+        continue;
+      }
+      content = [{ type: 'text', text: `답을 만들지 못했어요. 다시 보내 주세요. ${emptyNote(res.stop_reason)}` }];
+    }
     messages.push({ role: 'assistant', content });
     const said = textOfBlocks(content);
     if (said) emit({ t: 'text', text: said });
