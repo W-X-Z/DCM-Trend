@@ -1,40 +1,45 @@
 'use client';
 
-// Agent 탭: 실행(채팅으로 제안서 Agent 돌리기 + 미리보기·PPT 받기) | 구성(Agent·스킬·도구·데이터·기억).
-// 스킬·기억·대화는 이 브라우저(localStorage)에 둔다. 실행할 때 켠 스킬과 기억을 서버로 함께 보내고, 서버는 저장하지 않는다.
+// Agent 탭: 실행(제안서 Agent) | Builder(피드백 → 노하우·프롬프트 수정안) | 구성(구조·프롬프트·노하우·도구·데이터·기억).
+// 프롬프트·노하우 판 이력, 작업 세션, 대화, 개발 요청, 기억은 이 브라우저(localStorage)에 둔다. 서버는 저장하지 않는다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { DevRequest } from '@/lib/agent/defs';
+import { ASSET_KEY, DEV_KEY, MEMORY_KEY, commit, currentOf, readLS, resolveMemory, textsOf, versionMap, writeLS, type AssetStore, type MemoryFile } from '@/lib/agent/store';
 import type { EngineState } from '@/lib/deck/engine';
 import type { DeckData } from '@/lib/deck/types';
-import { MEMORY_KEY, SKILLS_KEY, readLS, resolveMemory, resolveSkills, toStored, writeLS, type MemoryFile, type Skill, type StoredSkill } from '@/lib/agent/store';
+import { BuilderPanel } from './BuilderPanel';
 import { ConfigPanel } from './ConfigPanel';
-import { RunPanel } from './RunPanel';
+import { RunPanel, type Handoff } from './RunPanel';
 
-type Tab = 'run' | 'config';
-export type Models = { master: string; sub: string };
+type Tab = 'run' | 'builder' | 'config';
 
-export function AgentConsole({ ready, models }: { ready: boolean; models: Models }) {
+export function AgentConsole({ ready }: { ready: boolean }) {
   const [tab, setTab] = useState<Tab>('run');
-  const [skills, setSkillsRaw] = useState<Skill[]>(() => resolveSkills(null));
+  const [store, setStoreRaw] = useState<AssetStore>({});
   const [memory, setMemoryRaw] = useState<MemoryFile[]>(() => resolveMemory(null));
+  const [dev, setDevRaw] = useState<DevRequest[]>([]);
   const [loaded, setLoaded] = useState(false);
-  // 실행 화면에서 연 회사(구성 → 데이터에서도 쓴다)
   const [deck, setDeck] = useState<{ state: EngineState | null; data: DeckData | null }>({ state: null, data: null });
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const [rerun, setRerun] = useState<{ text: string; n: number } | null>(null);
 
   useEffect(() => {
-    setSkillsRaw(resolveSkills(readLS<StoredSkill[]>(SKILLS_KEY)));
-    setMemoryRaw(resolveMemory(readLS<MemoryFile[]>(MEMORY_KEY)));
+    setStoreRaw(readLS<AssetStore>(ASSET_KEY) ?? {});
+    setMemoryRaw(resolveMemory(readLS<{ path: string; body: string }[]>(MEMORY_KEY)));
+    setDevRaw(readLS<DevRequest[]>(DEV_KEY) ?? []);
     try {
-      if (new URLSearchParams(location.search).get('tab') === 'config') setTab('config');
+      const t = new URLSearchParams(location.search).get('tab');
+      if (t === 'builder' || t === 'config') setTab(t);
     } catch {
       /* 무시 */
     }
     setLoaded(true);
   }, []);
 
-  const setSkills = useCallback((f: (s: Skill[]) => Skill[]) => {
-    setSkillsRaw((prev) => {
+  const setStore = useCallback((f: (s: AssetStore) => AssetStore) => {
+    setStoreRaw((prev) => {
       const next = f(prev);
-      writeLS(SKILLS_KEY, toStored(next));
+      writeLS(ASSET_KEY, next);
       return next;
     });
   }, []);
@@ -42,20 +47,49 @@ export function AgentConsole({ ready, models }: { ready: boolean; models: Models
     setMemoryRaw(next);
     writeLS(MEMORY_KEY, next.map(({ path, body }) => ({ path, body })));
   }, []);
+  const onDev = useCallback((f: (d: DevRequest[]) => DevRequest[]) => {
+    setDevRaw((prev) => {
+      const next = f(prev);
+      writeLS(DEV_KEY, next);
+      return next;
+    });
+  }, []);
 
   const go = (t: Tab) => {
     setTab(t);
     try {
       const u = new URL(location.href);
-      if (t === 'config') u.searchParams.set('tab', 'config');
-      else u.searchParams.delete('tab');
+      if (t === 'run') u.searchParams.delete('tab');
+      else u.searchParams.set('tab', t);
       history.replaceState(null, '', u);
     } catch {
       /* 무시 */
     }
   };
 
-  const on = useMemo(() => skills.filter((s) => s.enabled), [skills]);
+  const texts = useMemo(() => textsOf(store), [store]);
+  const versions = useMemo(() => versionMap(store), [store]);
+
+  const approve = useCallback(
+    (asset: string, text: string, note: string) => {
+      const next = commit(store, asset, text, note, 'builder');
+      setStoreRaw(next);
+      writeLS(ASSET_KEY, next);
+      return currentOf(next, asset).v;
+    },
+    [store],
+  );
+  const addMemory = useCallback(
+    (line: string) => {
+      setMemory(memory.map((m) => (m.path === '/dcm-proposal-agent.md' ? { ...m, body: `${m.body.trim()}\n${line}`.trim() } : m)));
+    },
+    [memory, setMemory],
+  );
+
+  const builderOpen = useMemo(() => {
+    const n = dev.filter((d) => d.status === 'open').length;
+    return n ? String(n) : '';
+  }, [dev]);
 
   return (
     <div className="ag">
@@ -64,20 +98,60 @@ export function AgentConsole({ ready, models }: { ready: boolean; models: Models
         <div className="ag-tabs" role="tablist" aria-label="Agent 화면">
           {(
             [
-              ['run', '실행'],
-              ['config', '구성'],
-            ] as [Tab, string][]
-          ).map(([k, l]) => (
+              ['run', '실행', ''],
+              ['builder', 'Builder', builderOpen],
+              ['config', '구성', ''],
+            ] as [Tab, string, string][]
+          ).map(([k, l, n]) => (
             <button key={k} role="tab" type="button" className="dk2-tab" aria-selected={tab === k} onClick={() => go(k)}>
               {l}
+              {n && <span className="ag-tab-n" title="열린 개발 요청">{n}</span>}
             </button>
           ))}
         </div>
       </div>
       <div hidden={tab !== 'run'}>
-        <RunPanel ready={ready} skills={on} memory={memory} loaded={loaded} onDeck={setDeck} onConfig={() => go('config')} />
+        <RunPanel
+          ready={ready}
+          texts={texts}
+          memory={memory}
+          loaded={loaded}
+          onDeck={setDeck}
+          onBuilder={(h) => {
+            setHandoff(h);
+            go('builder');
+          }}
+          rerun={rerun}
+        />
       </div>
-      {tab === 'config' && <ConfigPanel models={models} skills={skills} setSkills={setSkills} memory={memory} setMemory={setMemory} deck={deck} />}
+      <div hidden={tab !== 'builder'}>
+        <BuilderPanel
+          ready={ready}
+          texts={texts}
+          versions={versions}
+          onApprove={approve}
+          memory={memory}
+          onMemory={addMemory}
+          dev={dev}
+          onDev={onDev}
+          handoff={handoff}
+          clearHandoff={() => setHandoff(null)}
+          onRerun={(text) => {
+            setRerun((r) => ({ text, n: (r?.n ?? 0) + 1 }));
+            go('run');
+          }}
+        />
+      </div>
+      {tab === 'config' && (
+        <ConfigPanel
+          store={store}
+          onSave={(id, text, note, by) => setStore((s) => commit(s, id, text, note, by))}
+          memory={memory}
+          setMemory={setMemory}
+          deck={deck}
+          focus={null}
+        />
+      )}
     </div>
   );
 }

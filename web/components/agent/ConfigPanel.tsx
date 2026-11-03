@@ -1,36 +1,55 @@
 'use client';
 
-// 구성: Managed Agent 패키지와 같은 단위로 보여 준다 — Agent(Master·Sub-agent), 스킬, 도구, 데이터, 기억.
-// 스킬과 기억은 여기서 고치면 바로 다음 실행부터 쓰인다(이 브라우저에 저장).
-import { useMemo, useState } from 'react';
-import { AGENTS, DEFAULT_MEMORY, TOOL_CATALOG, type AgentKey } from '@/lib/agent/config';
-import { TOOL_DEFS } from '@/lib/agent/tools';
-import type { MemoryFile, Skill } from '@/lib/agent/store';
+// 구성: 두 Agent 의 구조(Master·역할), 프롬프트·노하우(판 이력·비교·되돌리기·직접 수정), 도구, 데이터, 기억.
+// 프롬프트·노하우를 고치면 새 판으로 남고 다음 실행부터 쓰인다(이 브라우저에 저장).
+import { useEffect, useMemo, useState } from 'react';
+import { ASSETS, BUILDER_ROLES, FIELD_LABEL, MODEL, ROLES, TOOL_DOC, parseItems, parseSections, type AssetKind } from '@/lib/agent/defs';
+import { BY_LABEL, DEFAULT_MEMORY, versionsOf, when, type AssetStore, type MemoryFile } from '@/lib/agent/store';
 import type { EngineState } from '@/lib/deck/engine';
 import { available } from '@/lib/deck/layout';
 import { dataReport } from '@/lib/deck/sources';
 import type { DeckData } from '@/lib/deck/types';
-import type { Models } from './AgentConsole';
-import { SkillsView } from './SkillsView';
+import { Diff } from './Diff';
 
-type Sec = 'agents' | 'skills' | 'tools' | 'data' | 'memory';
+type Sec = 'agents' | 'prompt' | 'knowhow' | 'tools' | 'data' | 'memory';
 
-export function ConfigPanel({ models, skills, setSkills, memory, setMemory, deck }: {
-  models: Models;
-  skills: Skill[];
-  setSkills: (f: (s: Skill[]) => Skill[]) => void;
+const DECIDE_LABEL: Record<string, string> = {
+  tranches: '트랜치', max_amount: '증액 한도', band: '금리 밴드', coupon: '이자지급', pay_date: '납입일', demand_date: '수요예측일', fee: '수수료',
+  peer_scope: '사례 범위', peer_cases: '결과 표 사례', compare: '비교 사례', slides: '장표 켜고 끄기', template: '목차 템플릿',
+};
+
+export function ConfigPanel({ store, onSave, memory, setMemory, deck, focus }: {
+  store: AssetStore;
+  onSave: (id: string, text: string, note: string, by: 'manual' | 'rollback') => void;
   memory: MemoryFile[];
   setMemory: (m: MemoryFile[]) => void;
   deck: { state: EngineState | null; data: DeckData | null };
+  focus: string | null;
 }) {
   const [sec, setSec] = useState<Sec>('agents');
+  const [pick, setPick] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    const a = ASSETS.find((x) => x.id === focus);
+    if (!a) return;
+    setSec(a.kind);
+    setPick(a.id);
+  }, [focus]);
+  const edited = (k: AssetKind) => ASSETS.filter((a) => a.kind === k && versionsOf(store, a.id).length > 1).length;
   const secs: [Sec, string, string][] = [
-    ['agents', 'Agent', String(AGENTS.length)],
-    ['skills', '스킬', `${skills.filter((s) => s.enabled).length}/${skills.length}`],
-    ['tools', '도구', String(Object.keys(TOOL_DEFS).length)],
+    ['agents', '구조', '2'],
+    ['prompt', '프롬프트', `${ASSETS.filter((a) => a.kind === 'prompt').length}${edited('prompt') ? ` · 고침 ${edited('prompt')}` : ''}`],
+    ['knowhow', '노하우', `${ASSETS.filter((a) => a.kind === 'knowhow').length}${edited('knowhow') ? ` · 고침 ${edited('knowhow')}` : ''}`],
+    ['tools', '도구', String(TOOL_DOC.length)],
     ['data', '데이터', ''],
     ['memory', '기억', String(memory.length)],
   ];
+  const open = (id: string) => {
+    const a = ASSETS.find((x) => x.id === id);
+    if (!a) return;
+    setSec(a.kind);
+    setPick(id);
+  };
   return (
     <div className="ag-cfg">
       <nav className="ag-cfg-nav" aria-label="구성">
@@ -42,132 +61,230 @@ export function ConfigPanel({ models, skills, setSkills, memory, setMemory, deck
         ))}
       </nav>
       <div className="ag-cfg-body">
-        {sec === 'agents' && <AgentsView models={models} skills={skills} />}
-        {sec === 'skills' && <SkillsView skills={skills} setSkills={setSkills} />}
+        {sec === 'agents' && <AgentsView store={store} open={open} />}
+        {(sec === 'prompt' || sec === 'knowhow') && <AssetsView kind={sec} store={store} onSave={onSave} pick={pick} setPick={setPick} />}
         {sec === 'tools' && <ToolsView />}
-        {sec === 'data' && <DataView deck={deck} skills={skills} />}
+        {sec === 'data' && <DataView deck={deck} />}
         {sec === 'memory' && <MemoryView memory={memory} setMemory={setMemory} />}
       </div>
     </div>
   );
 }
 
-const modelOf = (k: AgentKey, m: Models) => (k === 'master' ? m.master : m.sub);
-
-function AgentsView({ models, skills }: { models: Models; skills: Skill[] }) {
-  const master = AGENTS[0];
-  const subs = AGENTS.slice(1);
-  const skillsOf = (k: AgentKey) => skills.filter((s) => s.enabled && s.agents.includes(k)).map((s) => s.name);
+function AgentsView({ store, open }: { store: AssetStore; open: (id: string) => void }) {
+  const v = (id: string) => versionsOf(store, id).at(-1)!.v;
+  const groups = [1, 2, 3, 4, 5].map((o) => ROLES.filter((r) => r.order === o));
   return (
     <div className="ag-agents">
-      <div className="ag-org" aria-hidden="true">
-        <div className="ag-org-node is-master">
-          <strong>{master.name}</strong>
-          <span>{modelOf('master', models)}</span>
-        </div>
-        <div className="ag-org-edge">call_subagent</div>
-        <div className="ag-org-subs">
-          {subs.map((a) => (
-            <div key={a.key} className="ag-org-node">
-              <strong>{a.name}</strong>
-              <span>{modelOf(a.key, models)}</span>
+      <h2 className="ag-h2">제안서 Agent <span className="ag-muted">· {MODEL}</span></h2>
+      <div className="ag-flow" aria-label="역할 순서">
+        <button type="button" className="ag-flow-node is-master" onClick={() => open('dcm.master')}>
+          <strong>Master</strong>
+          <span>요청 파악 · 역할 배분 · 산출 · v{v('dcm.master')}</span>
+        </button>
+        <div className="ag-flow-steps">
+          {groups.map((g, i) => (
+            <div key={i} className="ag-flow-step">
+              {g.map((r) => (
+                <button key={r.key} type="button" className="ag-flow-node" onClick={() => open(`dcm.${r.key}`)}>
+                  <strong>{r.name}</strong>
+                  <span>{r.does}</span>
+                </button>
+              ))}
             </div>
           ))}
         </div>
       </div>
-      {AGENTS.map((a) => (
-        <section key={a.key} className="ag-agent">
-          <h2>{a.name}</h2>
-          <p className="ag-agent-role">{a.role}</p>
-          <dl className="ag-dl">
-            <dt>모델</dt>
-            <dd><code>{modelOf(a.key, models)}</code></dd>
-            <dt>스킬</dt>
-            <dd className="ag-tags">{skillsOf(a.key).length ? skillsOf(a.key).map((n) => <span key={n} className="ag-tag">{n}</span>) : <span className="ag-muted">없음</span>}</dd>
-            <dt>도구</dt>
-            <dd className="ag-tags">{a.tools.map((t) => <code key={t} className="ag-tag is-tool">{t}</code>)}</dd>
-          </dl>
-          <details className="ag-prompt">
-            <summary>시스템 프롬프트 · {a.system.length.toLocaleString()}자</summary>
-            <pre>{a.system}</pre>
-          </details>
-        </section>
-      ))}
+      <table className="ag-table ag-roles">
+        <thead>
+          <tr>
+            <th scope="col">역할</th>
+            <th scope="col">읽는 노하우</th>
+            <th scope="col">정하는 것 (decide)</th>
+            <th scope="col">쓰는 문안 (write)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ROLES.map((r) => (
+            <tr key={r.key}>
+              <th scope="row">
+                <button type="button" className="ag-link" onClick={() => open(`dcm.${r.key}`)}>{r.name}</button> <span className="ag-muted">v{v(`dcm.${r.key}`)}</span>
+              </th>
+              <td>
+                {r.knowhow.map((k) => (
+                  <button key={k} type="button" className="ag-tag ag-tag-btn" onClick={() => open(k)}>
+                    {ASSETS.find((a) => a.id === k)?.title} v{v(k)}
+                  </button>
+                ))}
+              </td>
+              <td>{r.decide.map((d) => DECIDE_LABEL[d] ?? d).join(', ') || <span className="ag-muted">없음</span>}</td>
+              <td>{r.fields.map((f) => FIELD_LABEL[f]).join(', ') || <span className="ag-muted">{r.key === 'review' ? '의견만' : '없음'}</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2 className="ag-h2">Agent Builder <span className="ag-muted">· {MODEL}</span></h2>
+      <div className="ag-flow">
+        <button type="button" className="ag-flow-node is-master" onClick={() => open('builder.master')}>
+          <strong>Builder Master</strong>
+          <span>피드백 분류 · 역할 배분 · 개발 요청·기억 기록 · v{v('builder.master')}</span>
+        </button>
+        <div className="ag-flow-steps">
+          <div className="ag-flow-step">
+            {BUILDER_ROLES.map((r) => (
+              <button key={r.key} type="button" className="ag-flow-node" onClick={() => open(`builder.${r.key}`)}>
+                <strong>{r.name}</strong>
+                <span>{r.does}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssetsView({ kind, store, onSave, pick, setPick }: {
+  kind: AssetKind; store: AssetStore; onSave: (id: string, text: string, note: string, by: 'manual' | 'rollback') => void; pick: string | null; setPick: (id: string) => void;
+}) {
+  const list = ASSETS.filter((a) => a.kind === kind);
+  const id = pick && list.some((a) => a.id === pick) ? pick : list[0].id;
+  const vers = versionsOf(store, id);
+  const cur = vers[vers.length - 1];
+  const [draft, setDraft] = useState(cur.text);
+  const [cmp, setCmp] = useState<number | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  useEffect(() => {
+    setDraft(cur.text);
+    setCmp(null);
+    setSaved(null);
+  }, [id, cur.v, cur.text]);
+  const dirty = draft !== cur.text;
+  const meta = (aid: string) => {
+    const t = versionsOf(store, aid).at(-1)!.text;
+    return kind === 'knowhow' ? `항목 ${parseItems(aid, t).length}` : `부분 ${parseSections(t).length}`;
+  };
+  const cmpVer = cmp != null ? vers.find((x) => x.v === cmp) : null;
+  const prevOf = (v: number) => vers[vers.findIndex((x) => x.v === v) - 1];
+  return (
+    <div className="ag-skills">
+      <div className="ag-skill-list">
+        {(['dcm', 'builder'] as const).map((g) => {
+          const items = list.filter((a) => a.group === g);
+          if (!items.length) return null;
+          return (
+            <div key={g}>
+              <p className="ag-list-head">{g === 'dcm' ? '제안서 Agent' : 'Agent Builder'}</p>
+              <ul>
+                {items.map((a) => {
+                  const vs = versionsOf(store, a.id);
+                  return (
+                    <li key={a.id}>
+                      <button type="button" aria-current={a.id === id ? 'true' : undefined} onClick={() => setPick(a.id)}>
+                        <strong>{a.title}</strong>
+                        <span className="ag-skill-badges">
+                          <em className={vs.length > 1 ? '' : 'is-plain'}>v{vs[vs.length - 1].v}</em>
+                          <em className="is-plain">{meta(a.id)}</em>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+      <div className="ag-editor">
+        <div className="ag-editor-head">
+          <h2>{list.find((a) => a.id === id)?.title} <span className="ag-muted">v{cur.v} · {BY_LABEL[cur.by]}</span></h2>
+          <code className="ag-muted">{id}</code>
+        </div>
+        <textarea
+          className="ag-code ag-editor-text"
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSaved(null);
+          }}
+          spellCheck={false}
+          aria-label={id}
+        />
+        <div className="ag-editor-foot">
+          <button
+            type="button"
+            className="btn"
+            disabled={!dirty}
+            onClick={() => {
+              onSave(id, draft, '직접 수정', 'manual');
+              setSaved('새 판으로 저장했어요. 다음 실행부터 써요.');
+            }}
+          >
+            저장
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => setDraft(cur.text)}>고친 것 버리기</button>
+          <span className="ag-grow" />
+          {saved && !dirty && <span className="ag-ok">{saved}</span>}
+        </div>
+        <h3 className="ag-h3">판 이력 <span className="ag-muted">{vers.length}</span></h3>
+        <ol className="ag-vers">
+          {[...vers].reverse().map((x) => (
+            <li key={x.v} className={x.v === cur.v ? 'is-cur' : ''}>
+              <span className="ag-ver">v{x.v}</span>
+              <span className="ag-ver-by">{BY_LABEL[x.by]}</span>
+              <span className="ag-ver-note">{x.note}</span>
+              <time className="ag-muted">{when(x.at)}</time>
+              {prevOf(x.v) && (
+                <button type="button" className="ag-link" aria-expanded={cmp === x.v} onClick={() => setCmp(cmp === x.v ? null : x.v)}>
+                  {cmp === x.v ? '닫기' : `v${prevOf(x.v)!.v}와 비교`}
+                </button>
+              )}
+              {x.v !== cur.v && (
+                <button type="button" className="ag-link" onClick={() => onSave(id, x.text, `v${x.v}로 되돌림`, 'rollback')}>이 판으로</button>
+              )}
+            </li>
+          ))}
+        </ol>
+        {cmpVer && <Diff before={prevOf(cmpVer.v)?.text ?? ''} after={cmpVer.text} label={`v${cmpVer.v} 비교`} />}
+      </div>
     </div>
   );
 }
 
 function ToolsView() {
-  const groups = useMemo(() => {
-    const m = new Map<string, typeof TOOL_CATALOG>();
-    for (const t of TOOL_CATALOG) m.set(t.group, [...(m.get(t.group) ?? []), t]);
-    return [...m.entries()];
-  }, []);
-  const users = (name: string) => AGENTS.filter((a) => a.tools.includes(name)).map((a) => a.name.replace('DCM ', ''));
   return (
-    <div className="ag-tools">
-      <h2 className="ag-h2">기능</h2>
+    <div>
       <table className="ag-table">
         <thead>
           <tr>
-            <th scope="col">묶음</th>
-            <th scope="col">기능</th>
+            <th scope="col">쓰는 곳</th>
+            <th scope="col">도구</th>
+            <th scope="col">종류</th>
             <th scope="col">하는 일</th>
-            <th scope="col">실행</th>
           </tr>
         </thead>
         <tbody>
-          {groups.map(([g, list]) =>
-            list.map((t, i) => (
-              <tr key={t.name}>
-                {i === 0 && <th scope="rowgroup" rowSpan={list.length}>{g}</th>}
-                <td>
-                  {t.name}
-                  <span className={`ag-kind ${t.ai ? 'is-ai' : 'is-code'}`}>{t.ai ? 'AI' : '코드'}</span>
-                </td>
-                <td>{t.does}</td>
-                <td>{t.run ? <code>{t.run}</code> : <span className="ag-muted">예시</span>}</td>
-              </tr>
-            )),
-          )}
+          {TOOL_DOC.map((t) => (
+            <tr key={t.name}>
+              <td>{t.owner}</td>
+              <td><code>{t.name}</code></td>
+              <td><span className={`ag-kind ${t.kind === '호출' ? 'is-ai' : 'is-code'}`}>{t.kind}</span></td>
+              <td>{t.does}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
-
-      <h2 className="ag-h2">Claude 도구 정의</h2>
-      <ul className="ag-defs">
-        {Object.entries(TOOL_DEFS).map(([name, d]) => (
-          <li key={name}>
-            <div className="ag-def-head">
-              <code>{name}</code>
-              <span className="ag-muted">{users(name).join(' · ')}</span>
-            </div>
-            <p>{d.description}</p>
-            <details>
-              <summary>입력 형식</summary>
-              <pre>{JSON.stringify(d.input_schema, null, 2)}</pre>
-            </details>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
 
-function DataView({ deck, skills }: { deck: { state: EngineState | null; data: DeckData | null }; skills: Skill[] }) {
+function DataView({ deck }: { deck: { state: EngineState | null; data: DeckData | null } }) {
   const rep = useMemo(() => {
     if (!deck.state || !deck.data) return null;
-    const avail = available(deck.data, deck.state.input);
-    return dataReport(deck.data, deck.state.input, avail);
+    return dataReport(deck.data, deck.state.input, available(deck.data, deck.state.input));
   }, [deck]);
-  const guide = skills.find((s) => s.name === 'dcm-data-guide');
-  if (!rep || !deck.data) {
-    return (
-      <div className="ag-data">
-        <p className="ag-muted">실행에서 회사를 열면 그 초안이 쓰는 데이터가 장표별로 나와요. 아래는 데이터 안내 스킬 내용이에요.</p>
-        {guide && <pre className="ag-doc">{guide.files['references/data-by-slide.md'] ?? guide.files['SKILL.md']}</pre>}
-      </div>
-    );
-  }
+  if (!rep || !deck.data) return <p className="ag-muted">실행에서 회사를 열면 그 초안이 쓰는 데이터가 장표별로 나와요.</p>;
   return (
     <div className="ag-data">
       <p className="ag-muted">{deck.data.company.corp_name} 초안 기준</p>
@@ -220,7 +337,6 @@ function DataView({ deck, skills }: { deck: { state: EngineState | null; data: D
 function MemoryView({ memory, setMemory }: { memory: MemoryFile[]; setMemory: (m: MemoryFile[]) => void }) {
   return (
     <div className="ag-memory">
-      <p className="ag-muted">개인 기억이에요. 실행할 때마다 Master 에 함께 보내요. 팀 규칙은 암묵지(스킬)로 올려 주세요.</p>
       {memory.map((f, i) => {
         const def = DEFAULT_MEMORY.find((d) => d.path === f.path)?.body ?? '';
         return (
@@ -245,4 +361,3 @@ function MemoryView({ memory, setMemory }: { memory: MemoryFile[]; setMemory: (m
     </div>
   );
 }
-

@@ -1,4 +1,4 @@
-// Agent 탭 실행 루프 테스트 (web/lib/agent/run.ts): 가짜 Claude API 로 Master·Sub-agent·엔진 도구가 맞게 도는지.
+// Agent 탭(제안서 Agent + Agent Builder) 실행 테스트: 가짜 Claude API 로 Master·역할·도구·작업 세션·수정안이 맞게 도는지.
 // DB 는 고정 데이터(이랜드월드)로 바꾼다. 실행: node tests/agent_run.mjs
 import { build } from 'esbuild';
 import http from 'node:http';
@@ -17,25 +17,17 @@ const eq = (name, got, want) => {
     process.exitCode = 1;
   } else pass += 1;
 };
+const truthy = (name, v) => eq(name, !!v, true);
 
-// ── 가짜 Claude: 대화 형식을 검사하고, 시나리오대로 응답 ─────────────────────
+// ── 가짜 Claude ──────────────────────────────────────────────────────
 const seen = [];
-let script = () => null;
+let scripts = {};
 let n = 0;
 const tu = (name, input) => ({ type: 'tool_use', id: `toolu_${++n}`, name, input });
-const msg = (content, stop = 'tool_use') => ({ id: `msg_${++n}`, type: 'message', role: 'assistant', model: 'mock', content, stop_reason: stop });
+const msg = (content, stop = 'tool_use') => ({ id: `msg_${++n}`, type: 'message', role: 'assistant', model: 'mock-haiku', content, stop_reason: stop });
+const say = (text) => msg([{ type: 'text', text }], 'end_turn');
 function problems(body) {
   const errs = [];
-  let cc = 0;
-  const count = (x) => {
-    if (x && typeof x === 'object') {
-      if (x.cache_control) cc++;
-      Object.values(x).forEach(count);
-    }
-  };
-  count(body.system);
-  count(body.messages);
-  if (cc > 4) errs.push(`cache_control ${cc}`);
   if (body.messages[0]?.role !== 'user') errs.push('first not user');
   body.messages.forEach((m, i) => {
     if (i && body.messages[i - 1].role === m.role) errs.push(`same role at ${i}`);
@@ -45,32 +37,42 @@ function problems(body) {
       const got = nx && Array.isArray(nx.content) ? nx.content.filter((b) => b.type === 'tool_result').map((b) => b.tool_use_id) : [];
       if (ids.length && JSON.stringify(ids) !== JSON.stringify(got)) errs.push(`ids at ${i}`);
     }
-    if (Array.isArray(m.content)) for (const b of m.content) if (b.type === 'tool_result' && !b.content) errs.push('empty tool_result');
   });
   return errs;
 }
+const WHO = [
+  ['dcm.master', /'DCM 제안서 Agent'의 Master/], ['company', /'기업 분석' 역할/], ['market', /'시장 분석' 역할/], ['deal', /'딜 구조 설계' 역할/],
+  ['sales', /'Sales 세부 전략' 역할/], ['deck', /'장표 구성' 역할/], ['review', /'검토' 역할/],
+  ['builder.master', /'Agent Builder'의 Master/], ['knowhow', /'노하우 편집' 역할/], ['prompt', /'프롬프트 편집' 역할/], ['impact', /'영향 점검' 역할/],
+];
+const step = (body) => body.messages.filter((m) => m.role === 'assistant').length;
+const lastResults = (body) => {
+  const c = body.messages.at(-1).content;
+  return Array.isArray(c) ? c.filter((b) => b.type === 'tool_result') : [];
+};
+const resJson = (body, i = 0) => JSON.parse(lastResults(body)[i].content);
 const server = http.createServer((req, res) => {
   let b = '';
   req.on('data', (c) => (b += c));
   req.on('end', () => {
     const body = JSON.parse(b);
-    const sub = body.tools.length === 1;
-    seen.push({ sub, body, key: req.headers['x-api-key'] });
+    const sys = body.system[0].text;
+    const who = WHO.find(([, re]) => re.test(sys))?.[0] ?? '?';
+    seen.push({ who, body });
     const errs = problems(body);
-    if (errs.length) {
+    const f = scripts[who];
+    if (errs.length || !f) {
       res.writeHead(400, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ error: { message: errs.join('; ') } }));
+      return res.end(JSON.stringify({ error: { message: errs.join('; ') || `no script for ${who}` } }));
     }
-    const out = script(body, sub);
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(out));
+    res.end(JSON.stringify(f(body, step(body))));
   });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 process.env.ANTHROPIC_API_KEY = 'test-key';
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${server.address().port}`;
 
-// ── run.ts 묶기: DB·서버 전용 모듈은 고정 데이터로 ────────────────────────────
 const stub = {
   name: 'stub',
   setup(b) {
@@ -90,146 +92,216 @@ const stub = {
   },
 };
 const out = await build({
-  stdin: { contents: `export * from './lib/agent/run'; export * from './lib/agent/store'; export { DEFAULT_SKILLS, AGENTS } from './lib/agent/config';`, resolveDir: join(root, 'web'), loader: 'ts' },
+  stdin: { contents: `export * from './lib/agent/dcm'; export * from './lib/agent/builder'; export * from './lib/agent/defs';`, resolveDir: join(root, 'web'), loader: 'ts' },
   bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'error', plugins: [stub],
   tsconfig: join(root, 'web/tsconfig.json'),
 });
 const m = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`);
+const assets = { ...m.DEFAULT_ASSETS };
 
-const skills = m.DEFAULT_SKILLS.map((s) => ({ ...s, agents: m.AGENTS.filter((a) => a.skills.includes(s.name)).map((a) => a.key) }));
-async function run(messages, state, opts = {}) {
+async function runDcm(messages, session) {
   const ev = [];
-  await m.runAgent({ messages, state, skills: opts.skills ?? skills, memory: '- 위승종' }, (e) => ev.push(e), opts.budget, opts.hard);
-  return { ev, done: ev.find((e) => e.t === 'done'), state: [...ev].reverse().find((e) => e.t === 'state')?.state ?? state };
+  await m.runDcm({ messages, session, assets, memory: '- 위승종' }, (e) => ev.push(e));
+  const last = [...ev].reverse().find((e) => e.t === 'session');
+  return { ev, done: ev.find((e) => e.t === 'done'), session: last?.session ?? session };
 }
-const lastText = (body) => {
-  const ms = body.messages;
-  for (let i = ms.length - 1; i >= 0; i--) {
-    const c = ms[i].content;
-    if (ms[i].role === 'user' && (typeof c === 'string' || c.every((b) => b.type === 'text'))) return [typeof c === 'string' ? c : c.map((b) => b.text).join(''), ms.length - 1 - i];
-  }
-  return ['', 0];
-};
-const results = (body) => body.messages.at(-1).content.filter?.((b) => b.type === 'tool_result') ?? [];
 
-// 1) 초안: 스킬 읽기 → 회사 찾기 → 데이터 받기 → 산출
-script = (body) => {
-  const [, k] = lastText(body);
-  const step = k / 2;
-  if (step === 0) return msg([tu('read_skill', { skill: 'dcm-deck-engine' })]);
-  if (step === 1) return msg([tu('dcm_search', { query: '이랜드월드' })]);
-  if (step === 2) return msg([tu('dcm_load', { corp_code: JSON.parse(results(body)[0].content)[0].corp_code, mode: 'resume' })]);
-  if (step === 3) return msg([tu('dcm_check', {}), tu('dcm_render', {})]);
-  return msg([{ type: 'text', text: '초안을 만들었어요.' }], 'end_turn');
+// ── 1) 새 초안: Master → 역할 6개 → 산출 ─────────────────────────────
+let compareKeys = [];
+scripts = {
+  'dcm.master': (body, k) => {
+    if (k === 0) return msg([tu('find_company', { query: '이랜드월드' })]);
+    if (k === 1) return msg([tu('open_company', { corp_code: resJson(body)[0].corp_code, mode: 'new' })]);
+    if (k === 2) return msg([tu('call_roles', { roles: ['company', 'market', 'deal', 'sales'], task: '새 초안: 노하우 기본값으로 판단' })]);
+    if (k === 3) return msg([tu('call_roles', { roles: ['review', 'deck'], task: '새 초안' })]);
+    if (k === 4) return msg([tu('render', {})]);
+    return say('이랜드월드 제112회 공모사채 제안서 초안을 만들었어요.');
+  },
+  company: (body, k) => {
+    if (k === 0) return msg([tu('facts', {})]);
+    if (k === 1) {
+      const f = resJson(body);
+      const last = f.최근회차[0];
+      return msg([tu('memo', { points: [`최근 4회 모두 1년 단일 구조 → 반복 구조 (CO-01)`, `직전 제${last ? '111' : ''}회 경쟁률 ${last?.경쟁률 ?? '–'} (CO-02)`, '참여금액 73,219억원으로 최고 (CO-02)'] })]);
+    }
+    if (k === 2) return msg([tu('write', { field: 'corp', lines: ['최근 회차 발행금리와 가산금리 흐름 확인 필요'] })]);
+    return say('반복 구조, 수요 보통.');
+  },
+  market: (body, k) => {
+    if (k === 0) return msg([tu('facts', {})]);
+    if (k === 1) {
+      const f = resJson(body);
+      compareKeys = f.비교사례후보.slice(0, 2).map((x) => x.key);
+      return msg([tu('decide', { changes: [
+        { type: 'peer_scope', text: 'group', reason: '같은 노치 사례 10건 미만', rules: ['MK-01'] },
+        { type: 'peer_cases', months: 6, max: 16, reason: '기본', rules: ['MK-03'] },
+        { type: 'compare', keys: compareKeys, reason: '직전 회차와 최근 사례', rules: ['MK-04'] },
+        { type: 'tranches', tranches: [{ tenor: '3년', eok: 100 }], reason: '권한 밖', rules: [] },
+      ] })]);
+    }
+    if (k === 2) return msg([tu('write', { field: 'peers', lines: [`최근 1년 BBB등급 수요예측 사례 기준 비교 진행`, '금리는 반드시 하락할 것'] })]);
+    if (k === 3) return msg([tu('memo', { points: ['같은 등급 수요 분위기 보통 (MK-10)'] })]);
+    return say('사례를 골랐어요.');
+  },
+  deal: (body, k) => {
+    if (k === 0) return msg([tu('facts', {})]);
+    if (k === 1) {
+      const f = resJson(body);
+      truthy('딜: 메모 받음', f.메모?.['기업 분석']?.length && f.메모?.['시장 분석']?.length);
+      const tr = f.직전회차구조.트랜치.map((t) => ({ tenor: t.만기, eok: t.신고억원 }));
+      return msg([tu('decide', { changes: [
+        { type: 'tranches', tranches: tr, reason: '직전 회차 구조', rules: ['DL-01'] },
+        { type: 'band', band: { type: 'spread', low: -30, high: 30 }, reason: '현업 관행', rules: ['DL-07'] },
+        { type: 'demand_date', date: f.수요예측가능일값[1], reason: '가운데 날', rules: ['DL-11'] },
+      ] })]);
+    }
+    if (k === 2) return msg([tu('write', { field: 'lead', lines: ['NH투자증권은 반드시 흥행을 보장'] })]);
+    if (k === 3) {
+      const r = resJson(body);
+      eq('딜: 단정 표현 첫 탈락', r.결과, '넣지 못함');
+      return msg([tu('write', { field: 'lead', lines: ['NH투자증권은 **이랜드월드의 회사채 발행 및 당사 총액인수**를 제안'] })]);
+    }
+    if (k === 4) return msg([tu('write', { field: 'termNotes', notes: { band: '현업 관행 개별민평 ±30bp', fee: '이전 회차 준용' } }), tu('write', { field: 'sales', lines: ['권한 밖'] })]);
+    if (k === 5) return msg([tu('memo', { points: ['1년 단일 구조 유지 (DL-01)'] })]);
+    return say('직전 회차 구조로 정했어요.');
+  },
+  sales: (body, k) => {
+    if (k === 0) return msg([tu('facts', {})]);
+    if (k === 1) {
+      const f = resJson(body);
+      truthy('Sales: 딜 메모 받음', f.메모?.['딜 구조 설계']?.length);
+      return msg([tu('write', { field: 'sales', lines: ['운용사 중심 수요 확인 → IR·NDR 우선 진행', '증권사 리테일 세일즈 병행 제안'] })]);
+    }
+    return say('Sales 문안을 넣었어요.');
+  },
+  deck: (body, k) => {
+    if (k === 0) return msg([tu('facts', {})]);
+    if (k === 1) return msg([tu('decide', { changes: [{ type: 'slides', items: [{ id: 'compare', on: true }], reason: '미매각 사례 있음', rules: ['DK-03'] }] })]);
+    return say('미매각 사례 분석을 켰어요.');
+  },
+  review: (body, k) => {
+    if (k === 0) return msg([tu('session', {}), tu('checks', {})]);
+    return say('[트랜치 검토] 근거 숫자 추가 → 만기별 수요 한 줄 (RV-05)');
+  },
 };
-let r = await run([{ role: 'user', content: '이랜드월드 제안서 초안' }], null);
-eq('초안: 도구 순서', r.ev.filter((e) => e.t === 'tool').map((e) => e.name), ['read_skill', 'dcm_search', 'dcm_load', 'dcm_check', 'dcm_render']);
-eq('초안: 모두 성공', r.ev.filter((e) => e.t === 'tool_done').every((e) => e.ok), true);
-eq('초안: 상태(회사)', r.state?.corp, '00207108');
-eq('초안: 산출 이벤트', r.ev.some((e) => e.t === 'render' && e.slides > 10), true);
-eq('초안: 끝(이어갈 것 없음)', r.done.cont, false);
-eq('초안: 대화 = 사용자 1 + (assistant+결과) 4 + 마지막 답', r.done.messages.length, 10);
-eq('API 키·모델', [seen[0].key, seen[0].body.model], ['test-key', 'claude-opus-5-5']);
-eq('Master 시스템에 스킬 표·기억', [/dcm-deck-engine/.test(seen[0].body.system[0].text), /위승종/.test(seen[0].body.system[0].text)], [true, true]);
-eq('read_skill 결과 = SKILL.md', results(seen[1].body)[0].content.startsWith('---\nname: dcm-deck-engine'), true);
-let state = r.state;
-let hist = r.done.messages;
+let r = await runDcm([{ role: 'user', content: '이랜드월드 제안서 초안 만들어줘' }], m.emptySession());
+const S1 = r.session;
+eq('초안: Master 도구 순서', r.ev.filter((e) => e.t === 'tool' && e.agent === 'master').map((e) => e.name), ['find_company', 'open_company', 'call_roles', 'call_roles', 'render']);
+eq('초안: 역할 시작 순서(동시 2개 → 딜 → Sales → 장표 → 검토)', r.ev.filter((e) => e.t === 'role' && e.phase === 'start').map((e) => e.role).slice(2), ['deal', 'sales', 'deck', 'review']);
+eq('초안: 같은 순서 역할은 동시에', new Set(r.ev.filter((e) => e.t === 'role' && e.phase === 'start').slice(0, 2).map((e) => e.role)), new Set(['company', 'market']));
+eq('초안: 회사', S1.state?.corp, '00207108');
+eq('초안: 모델', seen.find((s) => s.who === 'deal').body.model, 'claude-haiku-5-5');
+truthy('역할 시스템 = 역할 프롬프트 + 노하우', /DL-02 A등급 만기/.test(seen.find((s) => s.who === 'deal').body.system[0].text) && /C-01/.test(seen.find((s) => s.who === 'deal').body.system[0].text));
+truthy('검토 시스템에 딜·시장·Sales 노하우', ['DL-02', 'MK-04', 'SL-05', 'RV-01'].every((x) => seen.find((s) => s.who === 'review').body.system[0].text.includes(x)));
+const roleTools = (who) => seen.find((s) => s.who === who).body.tools.map((t) => t.name);
+eq('역할 도구: 기업', roleTools('company'), ['facts', 'write', 'memo']);
+eq('역할 도구: 장표', roleTools('deck'), ['facts', 'decide']);
+eq('역할 도구: 검토', roleTools('review'), ['session', 'checks']);
+eq('결정 기록: 역할', [...new Set(S1.log.map((x) => x.role))], ['market', 'deal', 'deck']);
+truthy('결정 기록: 항목 번호', S1.log.find((x) => x.role === 'deal' && x.rules.includes('DL-07')));
+truthy('결정 기록: 같은 값은 유지', S1.log.some((x) => /유지/.test(x.what)));
+eq('비교 사례 반영', S1.state.input.compareKeys, compareKeys);
+eq('장표 켬', S1.state.input.items.compare, true);
+const marketDecide = r.ev.find((e) => e.t === 'tool_done' && /tranches: 시장 분석 역할은/.test(e.note));
+truthy('권한 밖 결정 거절', marketDecide);
+eq('문안: 단정 줄 제외', S1.state.edits.peers, ['최근 1년 BBB등급 수요예측 사례 기준 비교 진행']);
+eq('문안: lead 재시도 후 통과', S1.state.edits.lead, 'NH투자증권은 **이랜드월드의 회사채 발행 및 당사 총액인수**를 제안');
+eq('문안: termNotes 칸 병합', [S1.state.edits.termNotes.band, S1.state.edits.termNotes.fee, typeof S1.state.edits.termNotes.rating], ['현업 관행 개별민평 ±30bp', '이전 회차 준용', 'string']);
+eq('문안: Sales', S1.state.edits.sales.length, 2);
+eq('문안 표시(역할)', [S1.texts.lead.role, S1.texts.sales.role, S1.texts.peers.role, S1.texts.peers.dropped], ['deal', 'sales', 'market', 1]);
+truthy('남의 칸 쓰기 거절', r.ev.find((e) => e.t === 'tool_done' && !e.ok && /딜 구조 설계 역할이 쓸 수 있는 칸/.test(e.note)));
+eq('메모: 없는 숫자 줄 제외', [S1.memos.company.length, S1.memos.company.some((x) => x.includes('73,219'))], [2, false]);
+truthy('검토 의견 저장', /RV-05/.test(S1.review));
+truthy('산출', r.ev.some((e) => e.t === 'render' && e.slides > 10));
+eq('끝', r.done.cont, false);
+eq('도구 결과 짝 오류 없음', seen.every((s) => problems(s.body).length === 0), true);
 
-// 2) Sales: Sub-agent 가 쓴 줄 중 단정 표현은 엔진이 뺀다. Sub-agent 는 자기 스킬만 읽는다.
+// ── 2) 조건 변경: 딜만 → Sales 문안은 다시 써야 함 ──────────────────────
 seen.length = 0;
-script = (body, sub) => {
-  if (sub) {
-    const k = body.messages.length;
-    if (k === 1) return msg([tu('read_skill', { skill: 'dcm-deck-engine' }), tu('read_skill', { skill: 'dcm-proposal-playbook' })]);
-    return msg([{ type: 'text', text: JSON.stringify(['같은 등급 사례를 근거로 밴드를 제시한다.', '금리는 반드시 하락할 것이다.']) }], 'end_turn');
+scripts['dcm.master'] = (body, k) => {
+  if (k === 0) {
+    truthy('Master 시스템에 세션 요약', /최근결정/.test(body.system[0].text));
+    return msg([tu('call_roles', { roles: ['deal'], task: '사용자 요청: 3년 단일 1,500억으로 바꿔줘' })]);
   }
-  const [, k] = lastText(body);
-  const step = k / 2;
-  if (step === 0) return msg([tu('dcm_facts', { sales: true })]);
-  if (step === 1) return msg([tu('call_subagent', { agent: 'sales_writer', message: results(body)[0].content })]);
-  if (step === 2) return msg([tu('dcm_set_sales', { lines: JSON.parse(results(body)[0].content) })]);
-  return msg([{ type: 'text', text: '넣었어요.' }], 'end_turn');
+  if (k === 1) {
+    const res = resJson(body);
+    eq('변경: 다시 써야 할 문안 알림(딜이 안 고친 칸 + Sales)', res.다시써야할문안.map((x) => x.문안).sort(), ['Sales 전략', 'Term-sheet 비고', '주요 제안 첫 문장'].sort());
+    return msg([tu('session', {})]);
+  }
+  return say('바꿨어요.');
 };
-r = await run([...hist, { role: 'user', content: 'Sales 전략 문안 써줘' }], state);
-const subCalls = seen.filter((s) => s.sub);
-eq('Sales: Sub-agent 모델·도구', [subCalls[0].body.model, subCalls[0].body.tools.map((t) => t.name)], ['claude-sonnet-5-5', ['read_skill']]);
-const subRes = results(subCalls[1].body);
-eq('Sales: Sub-agent 는 엔진 스킬을 못 읽음', [subRes[0].is_error, subRes[1].is_error ?? false], [true, false]);
-eq('Sales: 단정 문장 제외', r.state.salesAi, ['같은 등급 사례를 근거로 밴드를 제시한다.']);
-eq('Sales: sub 이벤트', r.ev.filter((e) => e.t === 'sub').map((e) => e.phase), ['start', 'end']);
-eq('Sales: Sub-agent 도구 id 구분', r.ev.filter((e) => e.t === 'tool' && e.agent === 'sales_writer').every((e) => e.id.startsWith('sales_writer:')), true);
-eq('Sales: 지난 턴 긴 도구 결과는 줄여 보냄', seen.filter((s) => !s.sub)[0].body.messages.slice(0, hist.length).some((x) => Array.isArray(x.content) && x.content.some((b) => b.type === 'tool_result' && b.content.includes('지난 결과 줄임'))), true);
-state = r.state;
-hist = r.done.messages;
-
-// 3) 잘못된 값은 엔진이 거절, 맞는 값만 반영
-script = (body) => {
-  const [, k] = lastText(body);
-  if (k === 0) return msg([tu('dcm_apply', { actions: [{ type: 'tranches', tranches: [{ tenor: '3년', eok: 1500 }] }, { type: 'demand_date', date: '2099-01-01' }] })]);
-  return msg([{ type: 'text', text: '바꿨어요.' }], 'end_turn');
+scripts.deal = (body, k) => {
+  if (k === 0) return msg([tu('decide', { changes: [{ type: 'tranches', tranches: [{ tenor: '3년', eok: 1500 }], reason: '사용자 요청', rules: [] }] })]);
+  if (k === 1) return msg([tu('write', { field: 'sizing', lines: ['3년 단일 1,500억원 제안'] })]);
+  return say('3년 단일로 바꿨어요.');
 };
-r = await run([...hist, { role: 'user', content: '3년 1,500억' }], state);
-eq('반영: 트랜치', r.state.input.tranches, [{ tenor: '3년', eok: 1500 }]);
-const applyRes = JSON.parse(results(seen.at(-1).body)[0].content);
-eq('반영: 수요예측일 거절 알림', applyRes.알림.some((s) => s.includes('수요예측')), true);
-eq('반영: Sales 문안 유지', r.state.salesAi?.length, 1);
-state = r.state;
+r = await runDcm([{ role: 'user', content: '3년 단일 1,500억으로 바꿔줘' }], S1);
+const S2 = r.session;
+eq('변경: 트랜치', S2.state.input.tranches, [{ tenor: '3년', eok: 1500 }]);
+eq('변경: 증액 한도 재계산', S2.state.input.maxEok > 1500, true);
+eq('변경: stale', [S2.texts.sales.stale, S2.texts.sizing.stale, S2.texts.lead.stale], [true, false, true]);
+eq('변경: 결정 기록 이어짐', S2.log.length > S1.log.length, true);
 
-// 4) 시간 예산을 넘기면 cont=true 로 끊고, 다시 보내면 이어서 끝낸다
-script = (body) => {
-  const [, k] = lastText(body);
-  if (k < 4) return msg([tu('dcm_slides', {})]);
-  return msg([{ type: 'text', text: '끝' }], 'end_turn');
+// ── 3) Builder: 노하우 수정안 + 영향 점검 ─────────────────────────────
+seen.length = 0;
+let proposalId = null;
+scripts['builder.master'] = (body, k) => {
+  if (k === 0) return msg([tu('list_targets', {})]);
+  if (k === 1) return msg([tu('call_editor', { kind: 'knowhow', task: '피드백: A급은 3년물 위주로. 고칠 곳 후보 DL-02' })]);
+  if (k === 2) {
+    const r0 = resJson(body);
+    proposalId = r0.수정안[0].id;
+    return msg([tu('call_impact', { proposal_id: proposalId })]);
+  }
+  if (k === 3) return msg([tu('record_dev_request', { title: '민평 4사 연계', detail: '밴드 근거에 민평 필요' }), tu('record_memory', { text: '[선호] 답은 3줄 이내' })]);
+  return say('노하우 수정안이에요. 승인하면 바로 반영돼요.');
 };
-r = await run([{ role: 'user', content: '장표 목록' }], state, { budget: -1 });
-eq('예산: 첫 라운드 전에 끊김', [r.done.cont, r.done.messages.length], [true, 1]);
-r = await run([{ role: 'user', content: '장표 목록' }], state, { budget: 5 });
-const cont1 = r.done;
-r = await run(cont1.messages, state);
-eq('예산: 이어서 끝냄', [cont1.cont, r.done.cont, r.done.messages.at(-1).content[0].text], [true, false, '끝']);
-
-// 5) max_tokens 로 잘린 tool_use 는 대화에 남기지 않는다
-script = () => msg([{ type: 'text', text: '쓰는 중' }, tu('dcm_apply', { actions: [] })], 'max_tokens');
-r = await run([{ role: 'user', content: '길게' }], state);
-eq('잘림: 도구 실행 안 함', r.ev.filter((e) => e.t === 'tool').length, 0);
-eq('잘림: tool_use 제거', r.done.messages.at(-1).content.map((b) => b.type), ['text']);
-
-// 6) 열린 초안 없이 엔진 도구 → 오류 결과(대화는 이어짐)
-script = (body) => {
-  const [, k] = lastText(body);
-  if (k === 0) return msg([tu('dcm_state', {})]);
-  return msg([{ type: 'text', text: '먼저 회사를 여세요' }], 'end_turn');
+scripts.knowhow = (body, k) => {
+  if (k === 0) return msg([tu('list_items', { asset: 'knowhow.deal' })]);
+  if (k === 1) return msg([tu('read_item', { id: 'DL-02' })]);
+  if (k === 2) return msg([tu('propose_knowhow', { op: 'replace', id: 'DL-02', title: 'A등급 만기', body: '- 조건: 회사 등급이 A등급군일 때\n- 선택: ① 3년물 단일 또는 3년물 중심 (기본) ② 5년물은 사용자가 원할 때만\n- 근거: 사용자 피드백 (2026-11-03)', reason: 'A급은 3년물 위주' })]);
+  return say('DL-02 를 고쳤어요.');
 };
-r = await run([{ role: 'user', content: '상태' }], null);
-eq('초안 없음: 오류로 돌려줌', [r.ev.find((e) => e.t === 'tool_done').ok, r.done.cont], [false, false]);
+scripts.impact = (body, k) => {
+  if (k === 0) {
+    const first = [body.messages[0].content].flat().map((b) => (typeof b === 'string' ? b : b.text)).join('');
+    truthy('영향 점검: 전·후 받음', /DL-02/.test(first) && /3년물 단일/.test(first));
+    return msg([tu('list_items', {})]);
+  }
+  return say('- 중복: 없음\n- 모순: RV-01\n- 영향 역할: 딜 구조 설계, 검토\n- 다시 실행: 딜 구조 설계 → 트랜치 검토');
+};
+const bev = [];
+await m.runBuilder({ messages: [{ role: 'user', content: 'A급은 3년물 위주로 해줘. 민평도 넣어줘. 답은 짧게.' }], assets, memory: null, seq: 4 }, (e) => bev.push(e));
+const prop = bev.find((e) => e.t === 'proposal')?.proposal;
+eq('Builder: 도구 순서', bev.filter((e) => e.t === 'tool' && e.agent === 'master').map((e) => e.name), ['list_targets', 'call_editor', 'call_impact', 'record_dev_request', 'record_memory']);
+eq('Builder: 수정안 번호(이어서)', prop?.id, 'p5');
+eq('Builder: 대상', [prop.edit.kind, prop.edit.asset, prop.edit.op, prop.edit.id], ['knowhow', 'knowhow.deal', 'replace', 'DL-02']);
+truthy('Builder: 전 = 지금 항목', prop.before.startsWith('### DL-02 A등급 만기') && /3년물에 중심/.test(prop.before));
+truthy('Builder: 피드백 원문', /A급은 3년물/.test(prop.feedback));
+const next = m.applyEdit(assets['knowhow.deal'], prop.edit);
+truthy('Builder: 적용 결과', /3년물 단일 또는 3년물 중심/.test(next) && !/A급 주요 기관투자자는 5년물보다/.test(next) && /### DL-03 주력 트랜치/.test(next));
+eq('Builder: 다른 항목 그대로', m.parseItems('knowhow.deal', next).length, m.parseItems('knowhow.deal', assets['knowhow.deal']).length);
+truthy('Builder: 영향 점검 이벤트', bev.find((e) => e.t === 'impact' && e.id === 'p5' && /RV-01/.test(e.text)));
+eq('Builder: 개발 요청·기억', [bev.find((e) => e.t === 'dev')?.item.title, bev.find((e) => e.t === 'memory')?.text], ['민평 4사 연계', '- [선호] 답은 3줄 이내']);
+eq('Builder: 편집 역할 도구', seen.find((s) => s.who === 'knowhow').body.tools.map((t) => t.name), ['list_items', 'read_item', 'propose_knowhow']);
 
-// 7) Claude 오류: 오류 이벤트 + 짝 맞는 대화
-script = () => ({ bad: true });
-server.removeAllListeners('request');
-server.on('request', (req, res) => {
-  req.resume();
-  req.on('end', () => {
-    res.writeHead(529, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: 'overloaded' } }));
-  });
-});
-r = await run([{ role: 'user', content: '안녕' }], null);
-eq('API 오류: error + done', [r.ev[0].t, r.ev[0].message.includes('529'), r.done.cont, r.done.messages.length], ['error', true, false, 1]);
+// ── 4) 수정안 편집: 추가·삭제·프롬프트 ────────────────────────────────
+const t0 = assets['knowhow.deck'];
+const add = { kind: 'knowhow', asset: 'knowhow.deck', op: 'add', id: m.nextItemId('knowhow.deck', t0), after: 'DK-03', block: '### DK-09 새 항목\n- 조건: 테스트\n- 선택: ① 기본 (기본)' };
+eq('추가: 번호', add.id, 'DK-09');
+const t1 = m.applyEdit(t0, add);
+eq('추가: DK-03 뒤', m.parseItems('knowhow.deck', t1).map((i) => i.id).slice(2, 5), ['DK-03', 'DK-09', 'DK-04']);
+const t2 = m.applyEdit(t1, { ...add, op: 'delete', block: '' });
+eq('삭제: 원래대로', t2.trim(), t0.trim());
+const p0 = assets['dcm.review'];
+const p1 = m.applyEdit(p0, { kind: 'prompt', asset: 'dcm.review', op: 'replace', section: '지켜야 할 것', body: '- 의견은 3개까지.' });
+eq('프롬프트: 부분만 바뀜', [m.parseSections(p1).map((s) => s.heading), m.parseSections(p1).at(-1).body], [m.parseSections(p0).map((s) => s.heading), '- 의견은 3개까지.']);
 
-// 8) 스킬 저장소: 편집 이력·기본값 판별·검사
-const base = m.resolveSkills(null);
-eq('스킬: 기본 3개', base.map((s) => [s.name, s.edited]), [['dcm-deck-engine', false], ['dcm-proposal-playbook', false], ['dcm-data-guide', false]]);
-const eng = base[0];
-const edited = m.commitFiles(eng, { ...eng.files, 'SKILL.md': eng.files['SKILL.md'] + '\n- 메모' }, '저장');
-eq('스킬: 고치면 이력 1·고침', [edited.history.length, edited.edited], [1, true]);
-eq('스킬: 같은 내용이면 이력 안 늘어남', m.commitFiles(edited, edited.files, '저장').history.length, 1);
-const back = m.commitFiles(edited, edited.history[0].files, '되돌리기');
-eq('스킬: 기본 판으로 되돌리면 고침 아님', [back.history.length, back.edited], [2, false]);
-const stored = m.toStored([back, edited]);
-eq('스킬: 안 고친 기본 스킬은 파일 저장 안 함', [stored[0].files, stored[1].files != null], [null, true]);
-eq('스킬: 새 스킬 검사 통과', m.skillProblems('my-notes', m.newSkillFiles('my-notes')), []);
-eq('스킬: 이름 불일치·머리말 없음', [m.skillProblems('a-b', m.newSkillFiles('x-y')).length, m.skillProblems('a-b', { 'SKILL.md': 'hi' }).length > 0], [1, true]);
-eq('스킬: 저장본에 없는 기본 스킬은 뒤에 붙음', m.resolveSkills([{ name: 'mine', origin: 'custom', enabled: true, agents: ['master'], files: { 'SKILL.md': 'x' }, history: [] }]).map((s) => s.name), ['mine', 'dcm-deck-engine', 'dcm-proposal-playbook', 'dcm-data-guide']);
+// ── 5) 열린 초안 없이 역할 호출 → 오류 결과(대화는 이어짐) ──────────────
+scripts['dcm.master'] = (body, k) => (k === 0 ? msg([tu('call_roles', { roles: ['deal'], task: 'x' })]) : say('먼저 회사를 알려 주세요.'));
+r = await runDcm([{ role: 'user', content: '조건 바꿔줘' }], m.emptySession());
+truthy('초안 없음: 오류 결과', r.ev.find((e) => e.t === 'tool_done' && !e.ok && /열린 초안이 없어요/.test(e.note)));
+eq('초안 없음: 끝', r.done.cont, false);
 
 server.close();
-console.log(`agent_run: ${pass} passed${process.exitCode ? ', some FAILED' : ''}`);
+console.log(`${pass} passed${process.exitCode ? ', some failed' : ''}`);
