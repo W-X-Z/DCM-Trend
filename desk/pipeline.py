@@ -1,4 +1,4 @@
-"""하루 실행: 뉴스 수집 → 모니터링 → 대상 선정 → 기업 분석 → 1pager 작성 → 사실 검증 → 전달.
+"""하루 실행: 뉴스 수집 → 모니터링 → 대상 선정(공급망 조회 포함) → 기업 분석 → 1pager 작성 → 사실 검증 → 전달.
 
 - 대상 목록(desk.leads)에 단계 결과를 붙여 둔다. 비용 상한이나 오류로 멈추면 다음 실행이 끝난 단계를 건너뛰고 이어 한다.
 - 선정한 회사와 자금 수요 요약을 먼저 적고 나서 분석한다. 검증을 거치지 않은 1pager 는 전달되지 않는다.
@@ -9,7 +9,7 @@ RM 이 보는 말은 미팅 판단(미팅 추천 · 모니터링 · 제외)이�
 """
 import concurrent.futures as cf, datetime as dt, json, os, traceback
 
-from . import core as c, news, render, runtime as rt, tools
+from . import core as c, news, render, runtime as rt, supply, tools
 from .agents import AGENTS, BATCH, CALLS, MAX_LEADS
 
 REPEAT_DAYS = 14                 # 보드에 오른 회사를 다시 고르지 않는 기간
@@ -97,15 +97,30 @@ def scout(inp, rid, stat):
         g["signals"].append({k: s.get(k) for k in ("src_ref", "src_type", "dt", "need", "what", "why", "strength") if s.get(k) is not None})
     comps = sorted(groups.values(), key=lambda g: (-max(x.get("strength") or 1 for x in g["signals"]), -len(g["signals"])))[:50]
     rules = [{k: r.get(k) for k in ("signal_key", "corp_code", "corp_name", "label", "facts", "context", "event_dt")} for r in (inp.get("rules") or [])][:40]
-    if not comps and not rules:
+    orders, latest = supply.orders(_today())          # 수주 급증 후보
+    chain = supply.chain(comps, _today())             # 투자·증설 건이 있는 회사의 협력사
+    if supply.enabled():
+        stat["supply"] = {"orders": len(orders), "suppliers": sum(len(x["협력사"]) for x in chain), "latest": latest}
+        if latest and str(latest) < str(_today() - dt.timedelta(days=supply.STALE_DAYS)):
+            stat["supply_stale"] = str(latest)
+    if not comps and not rules and not orders:
         return []
     board = inp.get("board") or []
-    user = (f"오늘은 {_today()} 이다.\n\n[회사별 선별 공시·기사 (최근 14일)]\n{_j(comps)}\n\n[정기 점검 후보]\n{_j(rules, 20000)}\n\n[최근 선정 이력 (45일)]\n{_j(board, 8000)}")
-    out, _ = rt.call("scout.lead", user, item=f"선별 {len(comps)}개사 · 정기 점검 {len(rules)}건")
+    user = (f"오늘은 {_today()} 이다.\n\n[회사별 선별 공시·기사 (최근 14일)]\n{_j(comps)}\n\n[정기 점검 후보]\n{_j(rules, 20000)}"
+            + (f"\n\n[수주 급증 후보 (최근 {supply.ORDER_DAYS}일 공급계약 공시)]\n{_j(supply.public(orders), 20000)}" if orders else "")
+            + (f"\n\n[투자·증설 회사의 협력사]\n{_j(supply.public(chain), 12000)}" if chain else "")
+            + f"\n\n[최근 선정 이력 (45일)]\n{_j(board, 8000)}")
+    out, _ = rt.call("scout.lead", user, item=f"선별 {len(comps)}개사 · 정기 점검 {len(rules)}건" + (f" · 수주 {len(orders)}개사" if orders else ""))
     if out is None:
         return []
     stat["skipped"] = str(out.get("skipped") or "")[:1500]
-    known = {x["corp_code"]: x["corp_name"] for x in comps + rules if x.get("corp_code")}
+    known = {x["corp_code"]: x["corp_name"] for x in comps + rules + orders if x.get("corp_code")}
+    partners = {}                                     # 협력사 corp_code → 관련 공시에 남길 줄
+    for row in chain:
+        for sp in row["협력사"]:
+            known.setdefault(sp["corp_code"], sp["corp_name"])
+            partners.setdefault(sp["corp_code"], []).append(supply.chain_line(row["전방"], sp))
+    by_order = {o["corp_code"]: o for o in orders}
     by_name = {v: k for k, v in known.items()}
     caution = {g["corp_code"] or g["corp_name"] for g in comps if any(x.get("need") == "영업 주의" for x in g["signals"])}
     cutoff = str(_today() - dt.timedelta(days=REPEAT_DAYS))
@@ -120,6 +135,9 @@ def scout(inp, rid, stat):
         sg = [{"dt": s.get("dt"), "what": s.get("what"), "need": s.get("need"), "url": s.get("url")} for s in sigs if s.get("corp_code") == code][:6]
         sg += [{"dt": r.get("event_dt"), "what": f"{r.get('label')} ({', '.join(f'{k} {_fact(v)}' for k, v in (r.get('facts') or {}).items())})"}
                for r in rules if r.get("corp_code") == code]
+        if code in by_order:
+            sg.append(supply.order_line(by_order[code]))
+        sg += partners.get(code, [])[:2]
         row = {"corp_code": code, "corp_name": known[code], "origin": "daily", "priority": ld.get("priority"), "need": ld.get("need"),
                "hypothesis": ld.get("funding") or ld.get("hypothesis"), "signals": sg, "questions": ld.get("checks") or ld.get("questions") or [],
                "kill": ld.get("exclude_if") or ld.get("kill"), "run_id": rid}   # 칸 이름(hypothesis · questions · kill)은 처음 만든 표의 것. 뜻은 자금 수요 요약 · 확인 사항 · 제외 사유
@@ -185,7 +203,7 @@ def work(lead, slot=1):
             call = "모니터링"   # RM 이 요청한 회사는 제외하지 않고 판단 근거를 그대로 적어 전달한다
         if not lead.get("brief"):
             ds = lead["dossier"]
-            data = {k: ds.get(k) for k in ("overview", "short_debt", "maturities", "deals", "financials", "comps")}
+            data = {k: ds.get(k) for k in ("overview", "short_debt", "maturities", "deals", "financials", "comps", "supply") if k != "supply" or ds.get(k)}
             out, _ = rt.call("brief.writer", _head(lead) + f"\n미팅 판단: {call} ({why})\n\n[분석 결과]\n{_j(rs, 24000)}\n\n[회사 자료]\n{_j(data, 24000)}", item=lead["corp_name"], slot=slot, reserve=0.3)
             if out is None:
                 return "대기"
@@ -232,6 +250,8 @@ def write_out(rid, leads, stat):
          f"검토한 공시·기사 {stat.get('read', 0)}건 · 선별 {stat.get('signals', 0)}건 · 새 기사 {stat.get('news_new') if stat.get('news_new') is not None else '수집 안 함'} · 비용 ${rt.RUN['cost']:.2f} (상한 ${rt.RUN['cap']:g})\n"]
     if stat.get("stale"):
         L.append(f"\n**수집 확인 필요:** 가장 최근 공시가 {stat['stale']} 이다.\n")
+    if stat.get("supply_stale"):
+        L.append(f"\n**수집 확인 필요:** 공급계약 공시가 {stat['supply_stale']} 까지만 수집돼 있다.\n")
     for name in CALLS[:2]:
         rows = [x for x in by("게시") if call(x) == name]
         if rows or name == CALLS[0]:

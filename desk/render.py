@@ -176,6 +176,13 @@ def detail(lead):
             for d in ((cp.get("mezz") or [])[:6] + (cp.get("equity") or [])[:3])]
     if rows:
         md.append(f"\n## 동일 등급 발행 사례\n{cp.get('basis', '')}\n\n" + _table(["일자", "회사", "금액", "조건"], rows))
+    sp = ds.get("supply") or {}
+    cus = [f"{x.get('name')}: 매출의 {x['share_pct']}%" + (f" ({x['segment']})" if x.get("segment") else "") for x in (sp.get("customers") or []) if x.get("name") and x.get("share_pct") is not None]
+    od = [[_d(x.get("dt")), str(x.get("title") or "–").replace("|", "/"), str(x.get("counterparty") or "–").replace("|", "/"), won(x.get("amount")), f"{x['pct']}%" if x.get("pct") is not None else "–"] for x in (sp.get("orders") or [])[:6]]
+    if cus or od:
+        fy = next((x.get("fiscal_year") for x in sp.get("customers") or [] if x.get("fiscal_year")), None)
+        md.append("\n## 주요 고객 및 수주\n" + (f"{fy}년 사업보고서 기준 매출 10% 이상 고객\n\n" + _lines(cus) if cus else "")
+                  + ("\n" + _table(["공시일", "계약", "상대방", "금액", "연매출 대비"], od) if od else ""))
     sig = [f"{_d(s.get('dt'))} {s.get('what') or s.get('label') or ''}" + (f" ([원문]({s['url']}))" if s.get("url") else "") for s in (lead.get("signals") or []) if isinstance(s, dict)]
     if sig:
         md.append("\n## 관련 공시·기사\n" + _lines(sig))

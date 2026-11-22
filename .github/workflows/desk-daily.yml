@@ -4,6 +4,7 @@
 # 오늘(KST) 이미 끝났거나 도는 실행이 있으면 바로 끝난다(force 로 다시 돌린다).
 # 시크릿: ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENDART_API_KEY
 # 선택(뉴스, 둘 중 한 쌍): NAVER_HUB_CLIENT_ID·NAVER_HUB_CLIENT_SECRET 또는 NAVER_CLIENT_ID·NAVER_CLIENT_SECRET
+# 선택(공급망): SUPPLY_MAP_DB_URL = 공급망 지도(supply-map) DB 의 읽기 전용 계정(sm_viewer) 접속 주소. 없으면 공시 · 기사만으로 돈다
 # 시크릿이 비어 있으면 실행하지 않고 끝난다(실패로 치지 않는다).
 name: desk-daily
 on:
@@ -50,6 +51,7 @@ jobs:
       NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
       NAVER_HUB_CLIENT_ID: ${{ secrets.NAVER_HUB_CLIENT_ID }}
       NAVER_HUB_CLIENT_SECRET: ${{ secrets.NAVER_HUB_CLIENT_SECRET }}
+      SUPPLY_MAP_DB_URL: ${{ secrets.SUPPLY_MAP_DB_URL }}
       DESK_USD_CAP: ${{ inputs.cap || '5' }}
     steps:
       - id: ready
@@ -65,6 +67,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - if: steps.ready.outputs.ok == '1' && env.SUPPLY_MAP_DB_URL != ''
+        run: pip install --quiet "psycopg[binary]>=3.1,<4"
       - if: steps.ready.outputs.ok == '1'
         env:
           CORP: ${{ inputs.corp }}
