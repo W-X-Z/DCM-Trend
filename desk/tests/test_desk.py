@@ -259,7 +259,7 @@ class Units(Base):
         md = render.one_pager({"corp_name": "시험", "brief": {"headline": "h", "funding": ["a"] * 9, "agenda": ["b"] * 9, "reference": "사례", "recent": "한 줄", "open_items": []}, "dossier": {}}, "2026-11-22")
         self.assertIn("**모니터링** | h", md)                                   # 판단이 없으면 모니터링
         self.assertEqual((md.count("- a\n"), md.count(". b\n")), (4, 3))         # 칸마다 줄 수 상한
-        self.assertIn("- 참고 사례: 사례", md)
+        self.assertIn("3. b\n\n참고 사례: 사례\n", md)
         self.assertIn("## 당사 주관 이력\n- 공모 조달 이력 없음", md)
         self.assertNotIn("## 확인 필요 사항", md)                               # 빈 칸은 제목도 없다
         self.assertIn("## 출처", render.detail({"dossier": {"financials": {"error": "없음"}}}))

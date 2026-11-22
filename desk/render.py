@@ -135,7 +135,7 @@ def one_pager(lead, asof=None):
     block("당사 주관 이력", b.get("nh") or nh_lines(ds, asof))
     block("미팅 아젠다", _cut(b.get("agenda"), "agenda"), numbered=True)
     if _s(b.get("reference") or "") and (b.get("agenda") or []):
-        md.append(f"- 참고 사례: {_s(b['reference'])}\n")
+        md.append(f"\n참고 사례: {_s(b['reference'])}\n")   # 번호 목록에 이어 붙지 않게 한 줄 띄운다
     block("최근 동향", _cut(b.get("recent"), "recent"))
     block("확인 필요 사항", _cut(b.get("open_items"), "open_items"))
     return "".join(md)
@@ -150,7 +150,7 @@ def detail(lead):
         md.append(f"## 분기 실적\n{fin.get('basis', '')} 기준\n\n" + _table(["분기", "매출", "영업이익", "순이익"],
                   [[q["period"] + ("*" if q.get("derived") else ""), won(q.get("revenue")), won(q.get("op")), won(q.get("ni"))] for q in qs[:5]]))
         if any(q.get("derived") for q in qs[:5]):
-            md.append("\\* 연간 실적에서 3분기 누적을 차감\n")
+            md.append("\n주: 4Q(*)는 연간 실적에서 3분기 누적을 차감\n")
     bal, sd, facts = fin.get("balance") or {}, ds.get("short_debt") or {}, []
     if bal:
         facts.append(f"{bal.get('as_of')} 말 현금성자산 {won(bal.get('cash'))}, 차입금 {won(bal.get('borrowings_sum'))}"
