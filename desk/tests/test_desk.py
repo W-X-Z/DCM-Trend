@@ -12,7 +12,8 @@ GOOD = {s: {"state": "확인", "note": "공시로 확인"} for s in ("need", "ca
 def research_ok(body):
     return {"checks": GOOD, "need_detail": {"what": "전환사채 만기 상환", "amount": "700억원", "when": "2026-11-29", "basis": "발행 이력"},
             "business": "제주 복합리조트를 운영한다.", "position": "", "earnings_note": "", "issues": [{"date": "2026-11-20", "title": "단기차입 400억 결정", "why": "상환 재원", "source": "https://dart.fss.or.kr"}],
-            "funding_done": "", "comps_pick": [], "unknowns": ["나머지 300억 재원"], "kill_hit": "", "sources": [{"title": "DART", "url": "https://dart.fss.or.kr"}]}
+            "funding_done": "", "comps_pick": [], "unknowns": ["나머지 300억 재원"], "kill": {"hit": False, "note": "제외 조건 둘 다 확인되지 않음"},
+            "sources": [{"title": "DART", "url": "https://dart.fss.or.kr"}]}
 
 
 def script(**over):
@@ -28,7 +29,7 @@ def script(**over):
 
     s = {"signals": signals,
          "pick": lambda b: {"leads": [lead("00231372", "롯데관광개발", 1), lead("00172185", "남성", 2), lead("00550082", "빅텐츠", 3), lead("99999999", "유령", 4)], "skipped": "롯데쇼핑: 통상 차환"},
-         "research": lambda b: {**research_ok(b), "kill_hit": "이미 PF 대출 약정 공시"} if "남성" in fakes.first_text(b) else research_ok(b),
+         "research": lambda b: {**research_ok(b), "kill": {"hit": True, "note": "이미 PF 대출 약정 공시"}} if "남성" in fakes.first_text(b) else research_ok(b),
          "brief": lambda b: {"headline": "CB 700억 만기", "need": "상환 재원 필요", "company": "리조트 운영", "earnings": "", "debt": "", "issues": ["11/20 단기차입"],
                              "talking_points": ["상환 계획은?"], "angles": [], "unknowns": []},
          "verdict": lambda b: {"state": "수정", "fixes": [{"item": "headline", "finding": "만기일 누락", "kind": "날짜 누락"}],
@@ -110,7 +111,9 @@ class Flow(Base):
         self.assertIsNotNone(l.get("research"))                # 끝난 단계는 저장돼 있다
         self.assertIsNone(l.get("brief"))
         os.environ["DESK_USD_CAP"] = "5"
-        r = pipeline.daily(force=True)
+        n = self.ai.count("signals") + self.ai.count("pick")
+        r = pipeline.resume()                                  # 새 대상을 고르지 않고 이어서만 한다
+        self.assertEqual(self.ai.count("signals") + self.ai.count("pick"), n)
         self.assertEqual(self.ai.count("research"), 1)         # 조사는 다시 하지 않는다
         self.assertEqual(self.lead("롯데관광개발")["status"], "게시")
         self.assertEqual(r["status"], "done")
@@ -127,8 +130,25 @@ class Flow(Base):
         self.assertEqual((l["status"], l["note"]), ("보류", "11/18 차환 발행 공시가 이미 있음"))
         self.assertNotIn("**롯데관광개발**", (sorted(core.OUT.iterdir())[-1] / "summary.md").read_text(encoding="utf-8").split("## 보류")[0])
 
+    def test_first_run_defects(self):
+        """2026-11-22 첫 실제 실행에서 난 일: '제외 조건 해당 없음'을 글로 적은 것을 해당으로 읽어 기각했고, 검수 결과의 형식이 어긋나 결과를 잃었다."""
+        odd = {"state": "수정", "note": "고침", "fixes": ["만기일 누락", {"item": "합계", "finding": "9,050억"}], "unconfirmed": ["부채비율"],
+               "patches": ["headline 을 고칠 것", {"section": "debt", "text": "현금 대비 43.7%\n| 일자 | 금액 |\n|---|---|\n| 2027.04.16 | 3,300억 |"}, {"section": "issues", "items": ["11/13 토지 매입"]}]}
+        self.boot(script(research=lambda b: {**research_ok(b), "kill": "제외 조건 두 가지 중 어느 것도 사실로 확인되지 않았다", "kill_hit": "해당 없음. 반대다."}, verdict=lambda b: odd))
+        pipeline.daily()
+        for name in ("롯데관광개발", "남성"):
+            l = self.lead(name)
+            self.assertEqual(l["status"], "게시", name)          # 기각하지 않는다
+        md = self.lead("롯데관광개발")["brief_md"]
+        self.assertIn("- 만기일 누락", md)                       # 글로 온 고침도 검수 칸에 남는다
+        self.assertIn("- 합계: 9,050억", md)
+        self.assertIn("현금 대비 43.7%", md)
+        self.assertNotIn("| 2027.04.16 | 3,300억 |", md)         # 검수가 글 칸에 넣은 표는 뺀다
+        self.assertIn("- 11/13 토지 매입", md)
+        self.assertTrue(all(c.get("output") for c in self.sb.calls))   # 호출의 출력을 기록에 남긴다
+
     def test_brief_request(self):
-        self.boot(script(research=lambda b: {**research_ok(b), "kill_hit": "조달 계획 없음"}, verdict=lambda b: {"state": "보류", "fixes": [], "note": "수요 불명"}))
+        self.boot(script(research=lambda b: {**research_ok(b), "kill": {"hit": True, "note": "조달 계획 없음"}}, verdict=lambda b: {"state": "보류", "fixes": [], "note": "수요 불명"}))
         r = pipeline.brief_for("롯데관광개발")
         self.assertEqual(self.ai.count("signals") + self.ai.count("pick"), 0)   # 모니터링·발굴은 건너뛴다
         self.assertEqual(self.lead("롯데관광개발")["status"], "게시")           # RM 이 요청한 회사는 기각·보류하지 않고 그대로 적어 낸다
