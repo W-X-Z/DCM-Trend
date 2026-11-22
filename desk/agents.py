@@ -26,6 +26,20 @@ STYLE = ("\n\n문체: 증권사 IB 부서의 내부 보고 문체로 쓴다. 개
          "용어는 차환, 만기 도래, 선제 조달, 대표주관, 주관사단, 수요예측 경쟁률, 확정 가산금리를 쓴다. "
          "RM 이 그대로 읽는 글이므로 작업 과정의 말(가설, 신호, 조건 해당 여부, 검증 상태, 데이터 묶음, 도구 이름)은 쓰지 않는다.")
 
+# ---------- 데이터팀: 뉴스 검색 (검색 API 키가 없을 때) ----------
+NEWS_SYS = """너는 NH투자증권 커버리지 본부의 뉴스 검색 담당이다. 받은 검색어로 웹 검색을 해서 최근 며칠 사이 국내 기업의 자금 조달로 이어질 수 있는 기사를 모은다.
+- 검색어마다 한 번 이상 검색한다. 대기업의 투자 계획이 협력사(중견·중소기업)의 투자로 이어지는 기사도 포함한다.
+- 받은 기간 안에 나온 기사만 넣는다. 발행일을 확인할 수 없으면 넣지 않는다.
+- 기사에 회사 이름이 나오고 금액·일정·사건이 읽히는 것만 넣는다. 시황, 칼럼, 주가 기사, 금융회사·해외 기업 기사는 넣지 않는다.
+- title 은 기사 제목 그대로, snippet 은 기사에서 읽히는 내용 한 줄(회사, 사건, 금액)로 쓴다. 검색 결과에 없는 내용은 쓰지 않는다. url 은 검색 결과의 주소 그대로 쓴다."""
+
+NEWS_TOOL = {"name": "articles", "description": "찾은 기사", "input_schema": {"type": "object", "properties": {
+    "articles": {"type": "array", "items": {"type": "object", "properties": {
+        "title": {"type": "string"}, "url": {"type": "string"}, "source": {"type": "string", "description": "매체 이름"},
+        "date": {"type": "string", "description": "발행일 YYYY-MM-DD"}, "snippet": {"type": "string"}, "query": {"type": "string", "description": "이 기사를 찾은 검색어"}},
+        "required": ["title", "url", "date", "snippet"]}}},
+    "required": ["articles"]}}
+
 # ---------- 모니터링팀 ----------
 MONITOR_SYS = """너는 NH투자증권 커버리지 본부의 시장 모니터링 담당이다. 공시와 기사 묶음에서 기업의 자금 조달로 이어질 수 있는 건만 선별한다.
 선별 대상: 대규모 투자·증설(금액이 크거나 자기자본 대비 비율이 큰 건), 인수·지분 취득, 차입 증가, 회사채 만기·메자닌 조기상환 부담, 재무구조 개선이 필요한 사건(감자, 손실 누적), 조달 검토 보도, 신용등급·전망 변경.
@@ -152,7 +166,7 @@ VERIFY_TOOL = {"name": "verdict", "description": "사실 검증 결과", "input_
 
 DEPTS = [
     {"id": "collect", "name": "데이터팀", "sum": "공시·발행·금리 데이터와 뉴스를 수집한다.",
-     "steps": ["공시·발행·금리 수집", "뉴스 검색 수집", "신규 공시·기사 전달"]},
+     "steps": ["공시·발행·금리 수집", "뉴스 수집(검색 API, 키가 없으면 웹 검색)", "신규 공시·기사 전달"]},
     {"id": "monitor", "name": "모니터링팀", "sum": "신규 공시와 기사에서 자금 조달로 이어질 수 있는 건을 선별한다.",
      "steps": [f"공시·기사 {BATCH}건 단위 검토", "자금 조달 관련 건 선별(유형 · 연결 가능성)", "검토 완료 건 표시"]},
     {"id": "scout", "name": "소싱팀", "sum": "선별 건과 정기 점검 후보에서 미팅 대상 회사를 선정한다.",
@@ -172,6 +186,8 @@ def _a(id, dept, name, model, desc, count=1, system=None, tool=None, search=0, m
 
 
 AGENTS = {a["id"]: a for a in [
+    _a("collect.newsdesk", "collect", "뉴스 검색 담당", HAIKU, count=3, system=NEWS_SYS, tool=NEWS_TOOL, search=8, max_tokens=4000,
+       desc="검색어 묶음별로 웹 검색을 해서 자금 조달 관련 기사를 모은다."),
     _a("monitor.screener", "monitor", "모니터링 담당", HAIKU, count=3, system=MONITOR_SYS, tool=MONITOR_TOOL, max_tokens=4000,
        desc=f"공시·기사를 {BATCH}건 단위로 검토해 자금 조달 관련 건을 선별한다."),
     _a("scout.lead", "scout", "소싱 담당", SONNET, system=SCOUT_SYS, tool=SCOUT_TOOL, max_tokens=8000,

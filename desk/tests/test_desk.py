@@ -27,7 +27,12 @@ def script(**over):
     def lead(code, name, pr):
         return {"corp_code": code, "corp_name": name, "need": "차환·상환", "funding": f"{name} 자금 수요", "checks": ["상환 재원"], "exclude_if": "조달 완료", "priority": pr}
 
+    today = str(pipeline._today())
     s = {"signals": signals,
+         # 뉴스 검색 담당(검색 API 키가 없을 때): 기간 안 기사 하나, 오래된 기사 · 주소가 없는 기사 · 발행일이 없는 기사
+         "articles": lambda b: {"articles": [{"title": "남성, 면목동 개발에 850억 투입", "url": "https://news.example.com/n1", "source": "시험일보", "date": today, "snippet": "남성 850억원 투자", "query": "신규 시설투자 결정"},
+                                             {"title": "오래된 기사", "url": "https://news.example.com/old", "date": "2020-01-01", "snippet": "x"},
+                                             {"title": "주소 없음", "url": "javascript:alert(1)", "date": today, "snippet": "x"}, {"title": "날짜 없음", "url": "https://news.example.com/nd", "date": "", "snippet": "x"}]},
          "pick": lambda b: {"leads": [lead("00231372", "롯데관광개발", 1), lead("00172185", "남성", 2), lead("00550082", "빅텐츠", 3), lead("99999999", "유령", 4)], "skipped": "롯데쇼핑: 정기 차환"},
          "research": lambda b: {**research_ok(b), "call": "제외", "call_reason": "2026.11.18 PF 대출 약정 공시로 조달 완료"} if "남성" in fakes.first_text(b) else research_ok(b),
          "brief": lambda b: {"headline": "CB 700억원 만기 도래", "funding": ["전환사채 만기 도래: 700억원"], "agenda": ["상환 재원 조달 계획"], "reference": "",
@@ -243,7 +248,13 @@ class Units(Base):
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]["title"], rows[0]["snippet"], rows[0]["source"]), ('남성, 면목동 개발에 850억 "투입"', "자금 조달 방안은 미정", "example.com"))
         self.assertTrue(rows[0]["published_at"].startswith("2026-11-21T09:00:00+09:00"))
-        self.assertIsNone(news.collect())   # 키가 없으면 건너뛴다
+        rt.start_run("daily")
+        self.assertEqual(news.collect(), 1)   # 키가 없으면 뉴스 검색 담당이 웹 검색으로 찾는다. 기간 안이고 주소·발행일이 있는 기사만 넣는다
+        row = self.sb.news.pop()
+        self.assertEqual((row["url"], row["grp"], row["source"], row["published_at"][:10]), ("https://news.example.com/n1", "투자·증설", "시험일보", str(pipeline._today())))
+        req = next(x for x in self.ai.requests if x["tools"][0]["name"] == "articles")
+        self.assertTrue(any(t.get("type", "").startswith("web_search") for t in req["tools"]))
+        self.assertIn("신규 시설투자 결정", fakes.first_text(req))
         payload["items"][0]["pubDate"] = dt.datetime.now(dt.timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
         srv = fakes.News(payload)
         self.addCleanup(lambda: (srv.srv.shutdown(), srv.srv.server_close()) and None)

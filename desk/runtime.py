@@ -86,6 +86,8 @@ def summarize(agent_id, out):
     """기록(과 나중의 화면 말풍선)에 남길 짧은 요약."""
     if not isinstance(out, dict):
         return ""
+    if agent_id == "collect.newsdesk":
+        return f"기사 {len(out.get('articles') or [])}건"
     if agent_id == "monitor.screener":
         s = [x for x in out.get("signals") or [] if isinstance(x, dict)]
         return f"선별 {len(s)}건" + (f" · {s[0].get('corp_name', '')} {s[0].get('what', '')[:60]}" if s else "")

@@ -5,7 +5,7 @@ python3 -m desk config > config.json
 from .agents import AGENTS, DEPTS, PRICES, WEB_SEARCH_USD
 from .tools import TOOLS
 
-ROLE = {"monitor.screener": "공시·기사 선별", "scout.lead": "대상 선정", "research.analyst": "기업 분석",
+ROLE = {"collect.newsdesk": "뉴스 검색", "monitor.screener": "공시·기사 선별", "scout.lead": "대상 선정", "research.analyst": "기업 분석",
         "brief.writer": "1pager 작성", "verify.checker": "사실 검증"}
 
 
