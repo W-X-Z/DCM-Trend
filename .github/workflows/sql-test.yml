@@ -24,5 +24,17 @@ jobs:
       - run: npm run test:feed
       - run: npm run test:deck
       - run: npm run test:prompts
+  desk:   # 딜 발굴 데스크 (다른 시험과 따로 돈다)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
       - run: npm run test:desk
       - run: npm run test:desk-run
