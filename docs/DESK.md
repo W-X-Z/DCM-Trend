@@ -43,7 +43,7 @@ GitHub Actions `desk-daily` 는 수동 실행만 둔다. 결과는 실행 요약
 ## 켜는 순서
 
 1. 이 변경을 병합한다.
-2. 운영 DB 에 `supabase/migrations/20261122140000_desk.sql` 을 적용한다.
+2. 운영 DB 에 `supabase/migrations/20261122144336_desk.sql` 을 적용한다(2026-11-22 적용함).
 3. 저장소 시크릿에 `ANTHROPIC_API_KEY` 를 넣는다. 뉴스를 쓰려면 네이버 뉴스 검색 API 키 한 쌍도 넣는다: `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`(네이버 클라우드 NAVER API HUB) 또는 `NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET`(네이버 개발자센터). 없으면 공시만으로 돈다.
 4. `desk-daily` 를 수동으로 한 번 돌려 결과와 비용을 본다. 그 뒤 워크플로의 예약 주석을 푼다.
 
