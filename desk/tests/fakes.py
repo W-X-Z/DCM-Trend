@@ -107,7 +107,8 @@ class Supabase:
             self.leads.append(row)
             return row["lead_id"]
         row = next(l for l in self.leads if l["lead_id"] == p["lead_id"])
-        row.update({k: v for k, v in p.items() if k in ("status", "dossier", "research", "brief", "brief_md", "verify", "note", "run_id") and (v is not None or k == "note")})
+        # 실제 함수처럼: 넘어온 칸은 비어 있어도 그대로 넣는다(다시 쓰기 전에 비우는 데 쓴다). status · run_id 만 비면 그대로 둔다
+        row.update({k: v for k, v in p.items() if k in ("dossier", "research", "brief", "brief_md", "verify", "note") or (k in ("status", "run_id") and v is not None)})
         return row["lead_id"]
 
     def desk_open_leads(self):

@@ -1,17 +1,20 @@
-"""하루 실행: 뉴스 수집 → 모니터링 → 발굴 → 조사 → 브리핑 → 검수 → 게시.
+"""하루 실행: 뉴스 수집 → 모니터링 → 대상 선정 → 기업 분석 → 1pager 작성 → 사실 검증 → 전달.
 
-- 대상 보드(desk.leads)에 단계 결과를 붙여 둔다. 비용 상한이나 오류로 멈추면 다음 실행이 끝난 단계를 건너뛰고 이어 한다.
-- 가설을 보드에 먼저 적고 나서 조사한다. 검수를 거치지 않은 1pager 는 게시되지 않는다.
+- 대상 목록(desk.leads)에 단계 결과를 붙여 둔다. 비용 상한이나 오류로 멈추면 다음 실행이 끝난 단계를 건너뛰고 이어 한다.
+- 선정한 회사와 자금 수요 요약을 먼저 적고 나서 분석한다. 검증을 거치지 않은 1pager 는 전달되지 않는다.
 - 하루 한 번만 돈다(오늘 끝났거나 도는 실행이 있으면 바로 끝난다. force 로 다시 돌린다).
+
+RM 이 보는 말은 미팅 판단(미팅 추천 · 모니터링 · 제외)이다. desk.leads.status(대기 · 게시 · 보류 · 기각)는 진행 상태를 적는 안쪽 값이고 화면이 바꿔 보여 준다:
+게시 = 1pager 전달(미팅 추천 또는 모니터링), 기각 = 제외, 보류 = 검증에서 걸림, 대기 = 작성 중.
 """
 import concurrent.futures as cf, datetime as dt, json, os, traceback
 
 from . import core as c, news, render, runtime as rt, tools
-from .agents import AGENTS, BATCH, MAX_LEADS
+from .agents import AGENTS, BATCH, CALLS, MAX_LEADS
 
 REPEAT_DAYS = 14                 # 보드에 오른 회사를 다시 고르지 않는 기간
-TEXT = ("headline", "need", "company", "earnings", "debt")
-LISTS = ("issues", "talking_points", "angles", "unknowns")
+TEXT = ("headline", "reference")
+LISTS = ("funding", "agenda", "recent", "open_items")
 
 
 def _j(o, cap=30000):
@@ -48,7 +51,7 @@ def monitor(inp, rid):
 
     def one(batch, slot):
         try:
-            out, _ = rt.call("monitor.screener", "아래 항목에서 자금 수요 신호만 남겨라.\n" + _j(batch, 60000), item=f"공시·기사 {len(batch)}건", slot=slot)
+            out, _ = rt.call("monitor.screener", "아래 공시·기사에서 자금 조달로 이어질 수 있는 건만 선별하라.\n" + _j(batch, 60000), item=f"공시·기사 {len(batch)}건", slot=slot)
         except rt.BudgetExceeded:
             out = None
         return batch, out
@@ -85,7 +88,7 @@ def _fact(v):
     return render.won(v) if isinstance(v, (int, float)) and v > 1e7 else v
 
 
-# ---------- 발굴 ----------
+# ---------- 대상 선정 ----------
 def scout(inp, rid, stat):
     sigs = c.rpc("desk_recent_signals", {"p_days": 14}) or []
     groups = {}
@@ -97,8 +100,8 @@ def scout(inp, rid, stat):
     if not comps and not rules:
         return []
     board = inp.get("board") or []
-    user = (f"오늘은 {_today()} 이다.\n\n[회사별 신호 (최근 14일)]\n{_j(comps)}\n\n[규칙이 뽑은 후보]\n{_j(rules, 20000)}\n\n[최근 보드 (45일)]\n{_j(board, 8000)}")
-    out, _ = rt.call("scout.lead", user, item=f"신호 회사 {len(comps)} · 규칙 후보 {len(rules)}")
+    user = (f"오늘은 {_today()} 이다.\n\n[회사별 선별 공시·기사 (최근 14일)]\n{_j(comps)}\n\n[정기 점검 후보]\n{_j(rules, 20000)}\n\n[최근 선정 이력 (45일)]\n{_j(board, 8000)}")
+    out, _ = rt.call("scout.lead", user, item=f"선별 {len(comps)}개사 · 정기 점검 {len(rules)}건")
     if out is None:
         return []
     stat["skipped"] = str(out.get("skipped") or "")[:1500]
@@ -111,27 +114,28 @@ def scout(inp, rid, stat):
     for ld in sorted([x for x in out.get("leads") or [] if isinstance(x, dict)], key=lambda x: x.get("priority") or 9)[:MAX_LEADS]:
         code = ld.get("corp_code") if ld.get("corp_code") in known else by_name.get((ld.get("corp_name") or "").strip(), "")
         if not code or code in recent or code in caution or ld.get("corp_name") in caution:
-            print(f"발굴: {ld.get('corp_name')} 제외 ({'회사 코드 없음' if not code else '최근 보드에 있음' if code in recent else '영업 주의'})")
+            print(f"대상 선정: {ld.get('corp_name')} 제외 ({'회사 코드 없음' if not code else '최근 선정 이력' if code in recent else '영업 주의'})")
             continue
         recent.add(code)
         sg = [{"dt": s.get("dt"), "what": s.get("what"), "need": s.get("need"), "url": s.get("url")} for s in sigs if s.get("corp_code") == code][:6]
         sg += [{"dt": r.get("event_dt"), "what": f"{r.get('label')} ({', '.join(f'{k} {_fact(v)}' for k, v in (r.get('facts') or {}).items())})"}
                for r in rules if r.get("corp_code") == code]
         row = {"corp_code": code, "corp_name": known[code], "origin": "daily", "priority": ld.get("priority"), "need": ld.get("need"),
-               "hypothesis": ld.get("hypothesis"), "signals": sg, "questions": ld.get("questions") or [], "kill": ld.get("kill"), "run_id": rid}
-        row["lead_id"] = c.rpc("desk_lead_put", {"p": row})   # 가설을 보드에 먼저 적는다
+               "hypothesis": ld.get("funding") or ld.get("hypothesis"), "signals": sg, "questions": ld.get("checks") or ld.get("questions") or [],
+               "kill": ld.get("exclude_if") or ld.get("kill"), "run_id": rid}   # 칸 이름(hypothesis · questions · kill)은 처음 만든 표의 것. 뜻은 자금 수요 요약 · 확인 사항 · 제외 사유
+        row["lead_id"] = c.rpc("desk_lead_put", {"p": row})   # 선정한 회사를 먼저 적는다
         leads.append(row)
     return leads
 
 
-# ---------- 조사 → 브리핑 → 검수 ----------
+# ---------- 기업 분석 → 1pager 작성 → 사실 검증 ----------
 def _put(lid, **kw):
     c.rpc("desk_lead_put", {"p": {"lead_id": lid, "run_id": rt.RUN["id"], **kw}})
 
 
 def _head(lead):
-    return (f"회사: {lead['corp_name']} (corp_code {lead['corp_code']})\n가설: {lead.get('hypothesis') or 'RM 요청'}\n"
-            f"확인할 질문: {_j(lead.get('questions') or [])}\n제외 조건(kill): {lead.get('kill') or '없음'}\n근거 신호: {_j(lead.get('signals') or [], 4000)}")
+    return (f"회사: {lead['corp_name']} (corp_code {lead['corp_code']})\n자금 수요 요약: {lead.get('hypothesis') or 'RM 요청: 미팅 준비'}\n"
+            f"확인 사항: {_j(lead.get('questions') or [])}\n제외 사유(사실로 확인되면 미팅 대상에서 제외): {lead.get('kill') or '없음'}\n관련 공시·기사: {_j(lead.get('signals') or [], 4000)}")
 
 
 def _patch(brief, patches):
@@ -139,7 +143,7 @@ def _patch(brief, patches):
         if not isinstance(p, dict):
             continue
         sec, text = p.get("section"), p.get("text")
-        text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("|")).strip() if isinstance(text, str) else ""   # 표는 코드가 그린다
+        text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("|")).strip() if isinstance(text, str) else ""   # 1pager 에는 표를 넣지 않는다
         items = [str(x) for x in p.get("items") or [] if x] if isinstance(p.get("items"), list) else []
         if sec in TEXT and text:
             brief[sec] = text
@@ -147,48 +151,62 @@ def _patch(brief, patches):
             brief[sec] = items or [x.strip("-• ").strip() for x in text.splitlines() if x.strip()]
 
 
+def _fresh(lead):
+    """지금 형식으로 만든 결과만 이어 쓴다. 예전 형식(미팅 판단이 없는 분석, 자금 수요 칸이 없는 1pager)은 다시 만든다."""
+    if not isinstance(lead.get("research"), dict) or lead["research"].get("call") not in CALLS:
+        lead["research"] = lead["brief"] = lead["verify"] = None
+    if not isinstance(lead.get("brief"), dict) or not isinstance(lead["brief"].get("funding"), list):
+        lead["brief"] = lead["verify"] = None
+
+
 def work(lead, slot=1):
-    """대상 한 곳을 끝까지. 돌려주는 값은 상태(게시·보류·기각·대기)."""
+    """대상 한 곳을 끝까지. 돌려주는 값은 진행 상태(게시·보류·기각·대기)."""
     lid, req = lead["lead_id"], lead.get("origin") == "request"
     try:
+        _fresh(lead)
         if not lead.get("dossier"):
             lead["dossier"] = tools.dossier(lead["corp_code"])
             _put(lid, dossier=lead["dossier"])
         if not lead.get("research"):
-            out, _ = rt.call("research.analyst", _head(lead) + f"\n오늘은 {_today()} 이다.\n\n[데이터 묶음]\n{_j(lead['dossier'], 40000)}", item=lead["corp_name"], slot=slot, reserve=0.5)
+            out, _ = rt.call("research.analyst", _head(lead) + f"\n오늘은 {_today()} 이다.\n\n[회사 자료]\n{_j(lead['dossier'], 40000)}", item=lead["corp_name"], slot=slot, reserve=0.5)
             if out is None:
                 return "대기"
+            if out.get("call") not in CALLS:   # 정해진 값이 아니면 제외로 읽지 않는다
+                out["call"] = CALLS[1]
             lead["research"] = out
             _put(lid, research=out)
         rs = lead["research"]
-        ck = rs.get("checks") or {}
-        kill = rs.get("kill") if isinstance(rs.get("kill"), dict) else {}   # 예전 줄의 kill_hit(글)는 읽지 않는다: '해당 없음'을 글로 적은 것을 해당으로 읽어 잘못 기각했다
-        bad = (kill.get("note") or "제외 조건 해당") if kill.get("hit") is True else next(
-            (f"{k}: {(ck.get(k) or {}).get('note')}" for k in ("need", "access") if isinstance(ck.get(k), dict) and ck[k].get("state") == "반대 증거"), None)
-        if bad and not req:   # RM 이 요청한 회사는 기각하지 않고 1pager 에 그대로 적는다
-            _put(lid, status="기각", note=str(bad)[:300])
-            lead["note"] = str(bad)[:300]
-            return "기각"
+        call, why = rs["call"], str(rs.get("call_reason") or "").strip()
+        if call == "제외":
+            if not req:
+                lead["note"] = why[:300] or "미팅 대상 아님"
+                _put(lid, status="기각", note=lead["note"])
+                return "기각"
+            call = "모니터링"   # RM 이 요청한 회사는 제외하지 않고 판단 근거를 그대로 적어 전달한다
         if not lead.get("brief"):
             ds = lead["dossier"]
             data = {k: ds.get(k) for k in ("overview", "short_debt", "maturities", "deals", "financials", "comps")}
-            out, _ = rt.call("brief.writer", _head(lead) + f"\n\n[조사 결과]\n{_j(rs, 24000)}\n\n[데이터 묶음]\n{_j(data, 24000)}", item=lead["corp_name"], slot=slot, reserve=0.3)
+            out, _ = rt.call("brief.writer", _head(lead) + f"\n미팅 판단: {call} ({why})\n\n[분석 결과]\n{_j(rs, 24000)}\n\n[회사 자료]\n{_j(data, 24000)}", item=lead["corp_name"], slot=slot, reserve=0.3)
             if out is None:
                 return "대기"
-            lead["brief"] = out
+            lead["brief"] = {**out, "call": call, "call_reason": why, "nh": render.nh_lines(ds, _today()), "detail_md": render.detail(lead)}
             lead["brief_md"] = render.one_pager(lead, str(_today()))
-            _put(lid, brief=out, brief_md=lead["brief_md"])
+            _put(lid, brief=lead["brief"], brief_md=lead["brief_md"])
         if not lead.get("verify"):
             lead.pop("verify", None)
-            md = render.one_pager(lead, str(_today()))   # 검수 담당에게는 1pager 만 준다 (작성 과정은 주지 않는다)
-            out, _ = rt.call("verify.checker", f"회사: {lead['corp_name']} (corp_code {lead['corp_code']})\n오늘은 {_today()} 이다.\n\n[1pager]\n{md}", item=lead["corp_name"], slot=slot)
+            md = render.one_pager(lead, str(_today()))   # 검증 담당에게는 1pager 만 준다 (작성 과정은 주지 않는다)
+            odd = render.jargon(md)
+            out, _ = rt.call("verify.checker", f"회사: {lead['corp_name']} (corp_code {lead['corp_code']})\n오늘은 {_today()} 이다.\n\n[1pager]\n{md}"
+                             + (f"\n\n[표현 점검] 내부 보고 문체에 맞지 않는 말이 있다: {', '.join(odd)}. 해당 칸을 고쳐 쓴다." if odd else ""), item=lead["corp_name"], slot=slot)
             if out is None:
                 return "대기"
             try:
                 _patch(lead["brief"], out.get("patches"))
-            except Exception as e:   # 고침을 못 넣어도 검수 결과는 남긴다
-                print(f"[{lead['corp_name']}] 검수의 고침을 넣지 못함: {str(e)[:160]}")
-            lead["verify"] = {k: out.get(k) for k in ("state", "fixes", "unconfirmed", "note")}
+                if out.get("call") in CALLS[:2]:
+                    lead["brief"]["call"] = out["call"]
+            except Exception as e:   # 고친 내용을 못 넣어도 검증 결과는 남긴다
+                print(f"[{lead['corp_name']}] 검증의 정정을 넣지 못함: {str(e)[:160]}")
+            lead["verify"] = {k: out.get(k) for k in ("state", "call", "fixes", "unconfirmed", "note")}
             hold = out.get("state") == "보류" and not req
             lead["brief_md"] = render.one_pager(lead, str(_today()))
             lead["note"] = str(out.get("note") or "")[:300] if hold else None
@@ -209,17 +227,23 @@ def write_out(rid, leads, stat):
     d = c.OUT / rid
     d.mkdir(parents=True, exist_ok=True)
     by = lambda st: [x for x in leads if x.get("result") == st]
-    L = [f"# 딜 발굴 데스크 {_today()}\n",
-         f"읽은 공시·기사 {stat.get('read', 0)}건 · 신호 {stat.get('signals', 0)}건 · 새 기사 {stat.get('news_new') if stat.get('news_new') is not None else '수집 안 함'} · 비용 ${rt.RUN['cost']:.2f} (상한 ${rt.RUN['cap']:g})\n"]
+    call = lambda x: (x.get("brief") or {}).get("call") or CALLS[1]
+    L = [f"# RM 미팅 준비 {_today()}\n",
+         f"검토한 공시·기사 {stat.get('read', 0)}건 · 선별 {stat.get('signals', 0)}건 · 새 기사 {stat.get('news_new') if stat.get('news_new') is not None else '수집 안 함'} · 비용 ${rt.RUN['cost']:.2f} (상한 ${rt.RUN['cap']:g})\n"]
     if stat.get("stale"):
         L.append(f"\n**수집 확인 필요:** 가장 최근 공시가 {stat['stale']} 이다.\n")
-    L.append("\n## 오늘 연락할 회사\n" + ("".join(f"{i}. **{x['corp_name']}**: {(x.get('brief') or {}).get('headline', '')} (검수 {(x.get('verify') or {}).get('state', '')})\n" for i, x in enumerate(by("게시"), 1)) or "없음\n"))
-    if by("보류") or by("기각"):
-        L.append("\n## 보류·기각\n" + "".join(f"- {x['corp_name']} ({x['result']}): {x.get('note') or ''}\n" for x in by("보류") + by("기각")))
+    for name in CALLS[:2]:
+        rows = [x for x in by("게시") if call(x) == name]
+        if rows or name == CALLS[0]:
+            L.append(f"\n## {name}\n" + ("".join(f"{i}. **{x['corp_name']}**: {(x.get('brief') or {}).get('headline', '')}\n" for i, x in enumerate(rows, 1)) or "없음\n"))
+    if by("기각"):
+        L.append("\n## 제외\n" + "".join(f"- {x['corp_name']}: {x.get('note') or ''}\n" for x in by("기각")))
+    if by("보류"):
+        L.append("\n## 검증 보류\n" + "".join(f"- {x['corp_name']}: {x.get('note') or ''}\n" for x in by("보류")))
     if by("대기"):
-        L.append("\n## 대기 (다음 실행에서 이어 한다)\n" + "".join(f"- {x['corp_name']}\n" for x in by("대기")))
+        L.append("\n## 작성 중 (다음 실행에서 이어 한다)\n" + "".join(f"- {x['corp_name']}\n" for x in by("대기")))
     if stat.get("skipped"):
-        L.append("\n## 발굴팀이 고르지 않은 후보\n" + stat["skipped"] + "\n")
+        L.append("\n## 선정하지 않은 후보\n" + stat["skipped"] + "\n")
     summary = "".join(L)
     (d / "summary.md").write_text(summary, encoding="utf-8")
     for x in by("게시"):
@@ -277,12 +301,24 @@ def daily(days=3, force=False):
 
 
 def resume():
-    """새 대상을 고르지 않고, 끝내지 못한 대상(대기)만 이어서 한다."""
+    """새 대상을 선정하지 않고, 끝내지 못한 대상(대기)만 이어서 한다."""
     return _run("resume", lambda rid, stat: c.rpc("desk_open_leads") or [])
 
 
+def redo(days=7):
+    """최근 선정한 회사를 지금 기준으로 다시 분석하고 1pager 를 다시 쓴다(판단 기준이나 1pager 형식을 바꾼 뒤). 새 대상은 선정하지 않는다."""
+    def body(rid, stat):
+        cutoff = str(_today() - dt.timedelta(days=days))
+        ids = {b["lead_id"] for b in (c.rpc("desk_inputs", {"p_days": 1}) or {}).get("board") or [] if str(b.get("created")) >= cutoff}
+        for lid in sorted(ids):   # 분석부터 다시 한다. 공시 자료(dossier)도 새로 받는다
+            c.rpc("desk_lead_put", {"p": {"lead_id": lid, "run_id": rid, "status": "대기", "dossier": None, "research": None, "brief": None, "brief_md": None, "verify": None, "note": None}})
+        return [x for x in c.rpc("desk_open_leads") or [] if x["lead_id"] in ids]
+
+    return _run("redo", body)
+
+
 def brief_for(q):
-    """RM 이 회사를 지정한 경우: 발굴을 건너뛰고 그 회사의 1pager 를 만든다."""
+    """RM 이 회사를 지정한 경우: 대상 선정을 건너뛰고 그 회사의 1pager 를 만든다."""
     q = q.strip()
     hit = (c.rpc("desk_find_company", {"p_q": q, "p_limit": 1}) or [None])[0]
     if not hit:
@@ -290,7 +326,7 @@ def brief_for(q):
 
     def body(rid, stat):
         row = {"corp_code": hit["corp_code"], "corp_name": hit["corp_name"], "origin": "request", "priority": 1,
-               "hypothesis": "RM 요청: 미팅 준비. 자금 수요가 될 만한 것을 데이터에서 찾는다.", "signals": [], "questions": [], "kill": "", "run_id": rid}
+               "hypothesis": "RM 요청: 미팅 준비. 회사 자료에서 자금 수요가 될 만한 것을 확인한다.", "signals": [], "questions": [], "kill": "", "run_id": rid}
         row["lead_id"] = c.rpc("desk_lead_put", {"p": row})
         return [row]
 
