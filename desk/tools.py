@@ -155,6 +155,10 @@ def dossier(corp_code):
     d = c.rpc("desk_company", {"p_corp_code": corp_code}) or {}
     d["comps"] = c.rpc("desk_comps", {"p_corp_code": corp_code}) or {}
     d["financials"] = financials(corp_code)
+    from . import supply
+    pos = supply.position(corp_code)   # 주요 고객 · 최근 수주 · 납품 상장사. 공급망 DB 를 쓰지 않으면 넣지 않는다
+    if pos:
+        d["supply"] = pos
     return d
 
 

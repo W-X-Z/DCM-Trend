@@ -2,7 +2,7 @@
 import datetime as dt, json, os, tempfile, unittest
 from pathlib import Path
 
-from desk import agents, core, news, office, pipeline, render, runtime as rt, tools
+from desk import agents, core, news, office, pipeline, render, runtime as rt, supply, tools
 from desk.tests import fakes
 
 E8 = 100_000_000
@@ -50,7 +50,7 @@ class Base(unittest.TestCase):
         core.OUT = Path(self.tmp.name)
         os.environ.update(SUPABASE_URL=self.sb.url, SUPABASE_SERVICE_ROLE_KEY="sb_test", ANTHROPIC_BASE_URL=self.ai.url, ANTHROPIC_API_KEY="k",
                           OPENDART_BASE=self.dart.url, OPENDART_API_KEY="k", DESK_USD_CAP=cap)
-        for k in ("NAVER_CLIENT_ID", "NAVER_HUB_CLIENT_ID", "DESK_NEWS_BASE"):
+        for k in ("NAVER_CLIENT_ID", "NAVER_HUB_CLIENT_ID", "DESK_NEWS_BASE", "SUPPLY_MAP_DB_URL"):
             os.environ.pop(k, None)
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
         self.addCleanup(lambda: [(x.srv.shutdown(), x.srv.server_close()) for x in (self.sb, self.ai, self.dart)] and None)
@@ -235,6 +235,53 @@ class Units(Base):
         self.assertEqual(f["quarters"][0]["period"], "2026.2Q")
         self.boot(dart_missing={(y, c) for y in (2024, 2025, 2026) for c in ("11011", "11012", "11013", "11014")})
         self.assertIn("error", tools.financials("x", today=dt.date(2026, 11, 22)))
+
+    def test_supply(self):
+        """공급망 DB 를 붙이면 수주 급증 후보와 협력사가 대상 선정에 들어가고, 선정된 회사의 관련 공시와 근거 자료에 남는다."""
+        today = pipeline._today()
+        k = lambda pct, amt, cp=None: {"dt": str(today), "title": "2차전지 조립설비 | 공급", "counterparty": cp, "counterparty_corp": None, "amount": amt, "pct": pct,
+                                       "start": "2026-11-01", "end": "2028-03-31", "rcept_no": "20261101000001"}
+        feed = {"latest": str(today - dt.timedelta(days=20)), "items": [
+            {"corp_code": "00231372", "corp_name": "롯데관광개발", "market": "Y", "induty_code": "55101", "revenue_year": 2025, "revenue": 300 * E8, "n": 2, "amount": 900 * E8, "pct": 300.0,
+             "last_dt": str(today), "contracts": [k(200.0, 600 * E8, "글로벌 배터리 제조사"), k(100.0, 300 * E8)]},
+            {"corp_code": "00000041", "corp_name": "시험건설", "market": "K", "induty_code": "41221", "revenue": 100 * E8, "n": 1, "amount": 500 * E8, "pct": 500.0, "contracts": [k(500.0, 500 * E8)]}]}
+        sup = [{"corp_code": "00550082", "corp_name": "빅텐츠", "market": "K", "induty_code": "59114", "top_pct": 12.0, "last_dt": str(today),
+                "evidence": [{"basis": "공급계약", "dt": str(today), "item": "설비 납품", "amount": 50 * E8, "pct": 12.0, "rcept_no": "20261101000009"}]}]
+        pos = {"customers": [{"fiscal_year": 2025, "name": "고객 A", "party_corp": None, "share_pct": 41.2, "segment": None, "rcept_no": "x"}],
+               "orders": [{**k(200.0, 600 * E8, "글로벌 배터리 제조사")}], "suppliers": []}
+        calls = []
+
+        def fake(sql, args=()):
+            calls.append(sql)
+            return feed if "orders" in sql else sup if "suppliers" in sql else pos if args[0] == "00231372" else None
+
+        real = supply._call
+        supply._call = fake
+        self.addCleanup(lambda: setattr(supply, "_call", real))
+        self.boot()
+        self.assertEqual((supply.orders(today), supply.position("00231372")), (([], None), None))   # 주소가 없으면 조회하지 않는다
+        self.assertEqual(calls, [])
+        os.environ["SUPPLY_MAP_DB_URL"] = "postgresql://test"
+        out = pipeline.daily(force=True)
+        user = next(r for r in self.ai.requests if r["tools"][0]["name"] == "pick")["messages"][0]["content"]
+        self.assertIn("[수주 급증 후보 (최근 90일 공급계약 공시)]", user)
+        self.assertIn("900억원", user)
+        self.assertNotIn("시험건설", user)                     # 건설은 뺀다
+        self.assertIn("[투자·증설 회사의 협력사]", user)       # 남성(투자·증설)의 협력사
+        self.assertNotIn("_url", user)
+        lead = self.lead("롯데관광개발")
+        self.assertTrue(any("최근 90일 공급계약 2건 · 900억원 · 최근 연매출 대비 300.0%" == s.get("what") and s["url"].endswith("20261101000001") for s in lead["signals"]))
+        self.assertEqual(lead["dossier"]["supply"]["customers"][0]["name"], "고객 A")
+        self.assertIn("## 주요 고객 및 수주", lead["brief"]["detail_md"])
+        self.assertIn("고객 A: 매출의 41.2%", lead["brief"]["detail_md"])
+        self.assertIn("2차전지 조립설비 / 공급", lead["brief"]["detail_md"])
+        self.assertNotIn("supply", self.lead("남성")["dossier"])   # 공급망 자료가 없는 회사
+        self.assertEqual(out["stat"]["supply"], {"orders": 1, "suppliers": 1, "latest": feed["latest"]})
+        self.assertEqual(out["stat"]["supply_stale"], feed["latest"])
+        self.assertIn("공급계약 공시가", (core.OUT / out["run_id"] / "summary.md").read_text(encoding="utf-8"))
+        supply._call = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down"))   # 조회가 안 돼도 멈추지 않는다
+        self.assertEqual(supply.orders(today), ([], None))
+        self.assertEqual(supply.chain([{"corp_code": "00172185", "corp_name": "남성", "signals": [{"need": "투자·증설"}]}], today), [])
 
     def test_news_parse(self):
         self.boot()
