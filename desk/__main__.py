@@ -5,15 +5,16 @@ python3 -m desk resume                         새 대상 없이, 끝내지 못�
 python3 -m desk brief <회사명 또는 corp_code>  회사를 지정해 1pager 만
 python3 -m desk news [--days 3]                뉴스 수집만
 python3 -m desk fin <corp_code>                재무 도구 결과 확인
+python3 -m desk config                         사무실 화면 설정(JSON)
 """
 import argparse, json, sys
 
-from . import news, pipeline, tools
+from . import news, office, pipeline, tools
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="desk", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["daily", "resume", "brief", "news", "fin"])
+    ap.add_argument("cmd", choices=["daily", "resume", "brief", "news", "fin", "config"])
     ap.add_argument("target", nargs="*")
     ap.add_argument("--days", type=int, default=3)
     ap.add_argument("--force", action="store_true")
@@ -24,6 +25,8 @@ def main(argv=None):
         pipeline.resume()
     elif a.cmd == "news":
         news.collect(a.days)
+    elif a.cmd == "config":
+        print(json.dumps(office.config(), ensure_ascii=False, indent=1))
     elif not a.target:
         ap.error(f"{a.cmd} 에는 회사가 필요하다")
     elif a.cmd == "brief":

@@ -2,7 +2,7 @@
 import datetime as dt, json, os, tempfile, unittest
 from pathlib import Path
 
-from desk import core, news, pipeline, render, runtime as rt, tools
+from desk import agents, core, news, office, pipeline, render, runtime as rt, tools
 from desk.tests import fakes
 
 E8 = 100_000_000
@@ -206,6 +206,19 @@ class Units(Base):
         self.assertEqual(render.won(620000000000), "6,200억")
         self.assertEqual(render.won(12300000000000), "12.3조")
         self.assertEqual(tools.calc("85000000000/105500000000*100") > 80, True)
+
+    def test_office_config(self):
+        """사무실 화면 설정: 부서마다 절차가 있고, 호출 기록에 남는 에이전트가 모두 들어 있다."""
+        c = office.config()
+        self.assertEqual([d["id"] for d in c["depts"]], ["collect", "monitor", "scout", "research", "brief", "verify"])
+        self.assertTrue(all(d["steps"] for d in c["depts"]))
+        self.assertEqual(set(c["agents"]) - {"collect.workflow"}, set(agents.AGENTS))
+        for a in c["agents"].values():
+            self.assertIn(a["dept"], [d["id"] for d in c["depts"]])
+            self.assertTrue(a["role"] and a["name"])
+            self.assertTrue(set(a["tools"]) <= set(c["tools"]))
+        self.assertEqual(c["agents"]["verify.checker"]["out"]["name"], "verdict")
+        json.dumps(c)
 
 
 if __name__ == "__main__":

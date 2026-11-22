@@ -35,11 +35,17 @@ python3 -m desk resume                         # 새 대상 없이, 끝내지 �
 python3 -m desk brief 롯데관광개발              # 회사를 지정해 1pager 만
 python3 -m desk news                           # 뉴스 수집만
 python3 -m desk fin 00231372                   # 재무 도구 결과 확인
+python3 -m desk config                         # 사무실 화면 설정(JSON)
 npm run test:desk                              # SQL 함수 시험 (PGlite)
 npm run test:desk-run                          # 실행 코드 시험 (가짜 Supabase·Claude·OpenDART 로 전 구간)
 ```
 
 GitHub Actions `desk-daily` 는 수동 실행만 둔다. 결과는 실행 요약과 첨부(`desk-out`), DB 의 `mart.v_desk_briefs`·`v_desk_board`·`v_desk_signals`·`v_desk_runs`·`v_desk_calls` 에 남는다.
+
+## 화면
+
+AX 플랫폼 Agent 갤러리의 'RM 미팅 준비' 카드에서 본다. 사무실 화면은 `mart.v_desk_runs`·`v_desk_calls` 를, 결과물 화면은 `v_desk_board`·`v_desk_briefs` 를 읽는다.
+부서·에이전트 구성이 바뀌면 `python3 -m desk config` 결과를 AX 플랫폼의 `src/desk/config.json` 에 다시 넣는다.
 
 ## 켜는 순서
 
