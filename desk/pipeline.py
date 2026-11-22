@@ -4,7 +4,7 @@
 - 가설을 보드에 먼저 적고 나서 조사한다. 검수를 거치지 않은 1pager 는 게시되지 않는다.
 - 하루 한 번만 돈다(오늘 끝났거나 도는 실행이 있으면 바로 끝난다. force 로 다시 돌린다).
 """
-import concurrent.futures as cf, datetime as dt, json, os
+import concurrent.futures as cf, datetime as dt, json, os, traceback
 
 from . import core as c, news, render, runtime as rt, tools
 from .agents import AGENTS, BATCH, MAX_LEADS
@@ -79,6 +79,12 @@ def monitor(inp, rid):
     return {"signals": len(rows), "read": len(seen)}
 
 
+def _fact(v):
+    if isinstance(v, bool):
+        return "있음" if v else "없음"
+    return render.won(v) if isinstance(v, (int, float)) and v > 1e7 else v
+
+
 # ---------- 발굴 ----------
 def scout(inp, rid, stat):
     sigs = c.rpc("desk_recent_signals", {"p_days": 14}) or []
@@ -109,7 +115,7 @@ def scout(inp, rid, stat):
             continue
         recent.add(code)
         sg = [{"dt": s.get("dt"), "what": s.get("what"), "need": s.get("need"), "url": s.get("url")} for s in sigs if s.get("corp_code") == code][:6]
-        sg += [{"dt": r.get("event_dt"), "what": f"{r.get('label')} ({', '.join(f'{k} {render.won(v) if isinstance(v, (int, float)) and v > 1e7 else v}' for k, v in (r.get('facts') or {}).items())})"}
+        sg += [{"dt": r.get("event_dt"), "what": f"{r.get('label')} ({', '.join(f'{k} {_fact(v)}' for k, v in (r.get('facts') or {}).items())})"}
                for r in rules if r.get("corp_code") == code]
         row = {"corp_code": code, "corp_name": known[code], "origin": "daily", "priority": ld.get("priority"), "need": ld.get("need"),
                "hypothesis": ld.get("hypothesis"), "signals": sg, "questions": ld.get("questions") or [], "kill": ld.get("kill"), "run_id": rid}
@@ -130,11 +136,15 @@ def _head(lead):
 
 def _patch(brief, patches):
     for p in patches or []:
-        sec = (p or {}).get("section")
-        if sec in TEXT and p.get("text"):
-            brief[sec] = p["text"]
-        elif sec in LISTS and (p.get("items") or p.get("text")):
-            brief[sec] = p.get("items") or [x.strip("-• ").strip() for x in p["text"].splitlines() if x.strip()]
+        if not isinstance(p, dict):
+            continue
+        sec, text = p.get("section"), p.get("text")
+        text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("|")).strip() if isinstance(text, str) else ""   # 표는 코드가 그린다
+        items = [str(x) for x in p.get("items") or [] if x] if isinstance(p.get("items"), list) else []
+        if sec in TEXT and text:
+            brief[sec] = text
+        elif sec in LISTS and (items or text):
+            brief[sec] = items or [x.strip("-• ").strip() for x in text.splitlines() if x.strip()]
 
 
 def work(lead, slot=1):
@@ -152,7 +162,9 @@ def work(lead, slot=1):
             _put(lid, research=out)
         rs = lead["research"]
         ck = rs.get("checks") or {}
-        bad = rs.get("kill_hit") or next((f"{k}: {(ck.get(k) or {}).get('note')}" for k in ("need", "access") if (ck.get(k) or {}).get("state") == "반대 증거"), None)
+        kill = rs.get("kill") if isinstance(rs.get("kill"), dict) else {}   # 예전 줄의 kill_hit(글)는 읽지 않는다: '해당 없음'을 글로 적은 것을 해당으로 읽어 잘못 기각했다
+        bad = (kill.get("note") or "제외 조건 해당") if kill.get("hit") is True else next(
+            (f"{k}: {(ck.get(k) or {}).get('note')}" for k in ("need", "access") if isinstance(ck.get(k), dict) and ck[k].get("state") == "반대 증거"), None)
         if bad and not req:   # RM 이 요청한 회사는 기각하지 않고 1pager 에 그대로 적는다
             _put(lid, status="기각", note=str(bad)[:300])
             lead["note"] = str(bad)[:300]
@@ -172,7 +184,10 @@ def work(lead, slot=1):
             out, _ = rt.call("verify.checker", f"회사: {lead['corp_name']} (corp_code {lead['corp_code']})\n오늘은 {_today()} 이다.\n\n[1pager]\n{md}", item=lead["corp_name"], slot=slot)
             if out is None:
                 return "대기"
-            _patch(lead["brief"], out.get("patches"))
+            try:
+                _patch(lead["brief"], out.get("patches"))
+            except Exception as e:   # 고침을 못 넣어도 검수 결과는 남긴다
+                print(f"[{lead['corp_name']}] 검수의 고침을 넣지 못함: {str(e)[:160]}")
             lead["verify"] = {k: out.get(k) for k in ("state", "fixes", "unconfirmed", "note")}
             hold = out.get("state") == "보류" and not req
             lead["brief_md"] = render.one_pager(lead, str(_today()))
@@ -185,6 +200,7 @@ def work(lead, slot=1):
         return "대기"
     except Exception as e:
         print(f"[{lead['corp_name']}] 오류: {str(e)[:200]}")
+        traceback.print_exc()
         return "대기"
 
 
@@ -258,6 +274,11 @@ def daily(days=3, force=False):
         return carry + scout(inp, rid, stat)
 
     return _run("daily", body)
+
+
+def resume():
+    """새 대상을 고르지 않고, 끝내지 못한 대상(대기)만 이어서 한다."""
+    return _run("resume", lambda rid, stat: c.rpc("desk_open_leads") or [])
 
 
 def brief_for(q):

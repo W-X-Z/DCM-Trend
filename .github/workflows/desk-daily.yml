@@ -14,6 +14,10 @@ on:
       corp:
         description: '회사명 또는 corp_code (넣으면 그 회사의 1pager 만 만든다)'
         default: ''
+      resume:
+        description: '새 대상을 고르지 않고 끝내지 못한 대상만 이어서 한다'
+        type: boolean
+        default: false
       days:
         description: '읽을 공시·기사 기간(일)'
         default: '3'
@@ -62,9 +66,12 @@ jobs:
           CORP: ${{ inputs.corp }}
           DAYS: ${{ inputs.days || '3' }}
           FORCE: ${{ inputs.force && '--force' || '' }}
+          RESUME: ${{ inputs.resume && '1' || '' }}
         run: |
           if [ -n "$CORP" ]; then
             python3 -m desk brief "$CORP"
+          elif [ -n "$RESUME" ]; then
+            python3 -m desk resume
           else
             python3 -m desk daily --days "$DAYS" $FORCE
           fi

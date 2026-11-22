@@ -95,7 +95,7 @@ def summarize(agent_id, out):
     if agent_id == "research.analyst":
         ck = out.get("checks") or {}
         st = lambda k: str((ck.get(k) or {}).get("state", "–")) if isinstance(ck.get(k), dict) else "–"
-        return f"수요 {st('need')} · 여력 {st('capacity')} · 시기 {st('timing')} · 열림 {st('access')}" + (" · 제외 조건 해당" if out.get("kill_hit") else "")
+        return f"수요 {st('need')} · 여력 {st('capacity')} · 시기 {st('timing')} · 열림 {st('access')}" + (" · 제외 조건 해당" if (out.get("kill") or {}).get("hit") is True else "")
     if agent_id == "brief.writer":
         return str(out.get("headline", ""))[:120]
     if agent_id == "verify.checker":
@@ -112,7 +112,9 @@ def _fit(v, sch):
         except Exception:
             if t == "array":
                 return [v] if v.strip() else []
-            return v
+            return {"_text": v}   # 객체 자리에 글이 오면 감싼다 (쓰는 쪽의 .get 이 죽지 않게. 11/22 첫 실행에서 검수 결과를 잃었다)
+    if t == "object" and not isinstance(v, dict):
+        return {"_text": v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)} if v not in (None, "") else {}
     if t == "object" and isinstance(v, dict):
         props = sch.get("properties") or {}
         return {k: _fit(x, props.get(k)) for k, x in v.items()}
@@ -220,7 +222,8 @@ def call(agent_id, user, item="", slot=1, model=None, reserve=0.0):
         _safe(lambda: c.rpc("desk_call_finish", {"p_id": cid, "p": {
             "status": "ok" if out is not None else "error", "error": err,
             "input_tokens": u["input_tokens"] + u["cache_read_input_tokens"] + u["cache_creation_input_tokens"], "output_tokens": u["output_tokens"],
-            "searches": u["web_search_requests"], "cost_usd": round(cost, 5), "summary": summ}}))
+            "searches": u["web_search_requests"], "cost_usd": round(cost, 5), "summary": summ,
+            "output": out if out is not None and len(json.dumps(out, ensure_ascii=False)) < 60000 else None}}))
     if out is None:
         print(f"[{agent_id}#{slot}] 실패: {err}")
         return None, {**u, "error": err, "cost": cost}

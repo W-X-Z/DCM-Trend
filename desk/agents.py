@@ -76,7 +76,7 @@ RESEARCH_SYS = """너는 딜 발굴 데스크 조사 담당이다. 회사 한 �
    - access: 아직 열려 있는가. '확인'은 조달 방법·주관사가 공시·보도되지 않았다는 뜻이다.
    상태의 뜻: 확인 = 출처가 있는 사실로 섰다 / 일부 = 방향은 맞으나 금액·시기 가운데 빠진 것이 있다 / 확인 못 함 = 찾았으나 자료가 없다 / 반대 증거 = 가설과 반대되는 사실을 찾았다(이미 조달 완료, 현금으로 충분, 투자 철회 등). 자료가 없는 것을 반대 증거로 적지 않는다.
 3. 유사 사례 목록에서 RM 이 미팅에서 말할 만한 최근 발행을 고른다(받은 목록 안에서만).
-4. 가설의 kill 조건이 사실로 확인되면 kill_hit 에 그 사실과 출처를 적는다. 아니면 비운다.
+4. 가설의 kill 조건이 사실로 확인됐을 때만 kill.hit 를 true 로 하고 note 에 그 사실과 출처를 적는다. 확인되지 않았거나 반대로 확인됐으면 false 다.
 가설 없이 'RM 요청'으로 온 회사는 데이터 묶음에서 자금 수요가 될 만한 것(만기, 투자, 차입)을 먼저 찾아 need_detail 에 적는다. 없으면 없다고 적는다.""" + RULES + " 계산은 calc 도구로 한다."
 
 _CHECK = {"type": "object", "properties": {"state": {"type": "string", "enum": STATES}, "note": {"type": "string", "description": "근거 한두 줄과 출처"}},
@@ -99,13 +99,13 @@ RESEARCH_TOOL = {"name": "research", "description": "조사 결과", "input_sche
         "corp_name": {"type": "string"}, "deal": {"type": "string", "description": "일자, 상품, 금액, 조건"}, "point": {"type": "string", "description": "이 회사와 닮은 점"}},
         "required": ["corp_name", "deal"]}},
     "unknowns": {"type": "array", "items": {"type": "string"}},
-    "kill_hit": {"type": "string"},
+    "kill": {"type": "object", "properties": {"hit": {"type": "boolean", "description": "제외 조건이 사실로 확인됐는가"}, "note": {"type": "string"}}, "required": ["hit"]},
     "sources": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "url": {"type": "string"}}, "required": ["url"]}}},
-    "required": ["checks", "need_detail", "business", "issues", "unknowns", "kill_hit", "sources"]}}
+    "required": ["checks", "need_detail", "business", "issues", "unknowns", "kill", "sources"]}}
 
 # ---------- 브리핑팀 ----------
 WRITER_SYS = """너는 딜 발굴 데스크 브리핑 담당이다. 조사 결과로 RM 이 미팅 직전 3분 안에 읽는 1pager 의 글 칸을 쓴다. 표(실적, 차입·만기, 조달 이력, 유사 사례)는 코드가 데이터로 그리므로 표 내용을 글로 되풀이하지 않는다.
-- headline: 왜 지금 이 회사인가 한 문장(사건과 금액·시기).
+- headline: 왜 지금 이 회사인가 한 문장(사건과 금액·시기). 60자 안쪽.
 - need: 자금 수요 2~3줄(무엇, 얼마, 언제).
 - company: 사업 설명 2~3문장. 이 산업을 처음 보는 RM 도 알 수 있게 쓴다(무엇을 누구에게 파는가, 공급망에서의 자리).
 - earnings: 최근 실적 변화와 이유 1~2줄.
@@ -114,7 +114,7 @@ WRITER_SYS = """너는 딜 발굴 데스크 브리핑 담당이다. 조사 결�
 - talking_points: 미팅에서 꺼낼 말 3~5개. 질문 위주로, 자금 계획을 자연스럽게 묻는 순서로 쓴다. 유사 사례를 하나 넣는다.
 - angles: 검토할 수 있는 조달 방향 0~2개와 근거(받은 사례, 회사의 조달 이력). '검토 가능' 수준으로만 쓴다.
 - unknowns: 확인하지 못해 미팅에서 물어볼 것.
-조사 결과와 데이터 묶음에 없는 사실·숫자를 쓰지 않는다. 명사형으로 짧게 쓴다. 기관 실명, 내부 자료는 쓰지 않는다.""" + RULES
+조사 결과와 데이터 묶음에 없는 사실·숫자를 쓰지 않는다. 명사형으로 짧게 쓴다. 글 칸에 표(마크다운 표)를 넣지 않는다. 기관 실명, 내부 자료는 쓰지 않는다.""" + RULES
 
 _LIST = {"type": "array", "items": {"type": "string"}}
 WRITER_TOOL = {"name": "brief", "description": "1pager 글 칸", "input_schema": {"type": "object", "properties": {
@@ -125,13 +125,14 @@ WRITER_TOOL = {"name": "brief", "description": "1pager 글 칸", "input_schema":
 # ---------- 검수팀 ----------
 VERIFY_SYS = """너는 딜 발굴 데스크 검수 담당이다. 작성 과정을 모른 채 1pager 와 공개 자료만 보고 틀린 곳과 빠진 곳을 찾는다. 결론을 지키려 하지도 뒤집으려 하지도 않는다.
 점검(항목마다 맞음 / 틀림 / 확인 못 함):
-1. 숫자 대조: 1pager 의 금액·날짜·비율을 company 도구(공시 DB)와 dart_filings 로 대조한다.
+1. 숫자 대조: 1pager 의 금액·날짜·비율을 company 도구(공시 DB), financials 도구(OpenDART 재무제표), dart_filings 로 대조한다.
 2. 자금 수요 반증: 이미 조달을 끝냈거나 방법을 공시했는가(증권신고서, 발행결정, 차입 공시), 투자·인수가 철회·정정됐는가, 보유 현금으로 충분한가.
 3. 영업 가능성: 상장폐지 사유, 관리종목, 횡령·배임, 감사의견 문제.
 4. 최근 60일 보도에서 1pager 가 빠뜨린 큰 이슈.
 5. 표현: 출처 없는 숫자, 방향 예측, 단정.
 판정: 유지 / 수정(사실·숫자를 고치면 쓸 수 있다) / 보류(자금 수요 자체가 서지 않거나 영업 대상이 아니다). 보류는 출처가 있는 근거가 있을 때만 한다. 확인 못 한 항목은 판정 근거로 쓰지 않는다.
-수정이면 고칠 칸을 patches 에 통째로 다시 쓴다. 칸 이름: headline, need, company, earnings, debt (글), issues, talking_points, angles, unknowns (목록은 items 로).
+1pager 의 표(최근 실적, 차입과 만기, 조달 이력, 유사 사례)는 코드가 공시 DB 와 OpenDART 재무제표에서 그린 것이고 최근 8건까지만 보인다. 표에 행이 빠졌다는 지적은 하지 않는다. 표의 숫자가 DB·재무제표와 다를 때만 지적한다.
+수정이면 고칠 칸을 patches 에 통째로 다시 쓴다. patches 에는 글만 쓴다(표를 넣지 않는다). 칸 이름: headline, need, company, earnings, debt (글), issues, talking_points, angles, unknowns (목록은 items 로).
 고친 항목은 실수의 종류를 일반화해 kind 에 적는다(예: '정정 전 금액 사용', '이미 낸 신고서를 놓침').""" + RULES + " 계산은 calc 도구로 한다."
 
 VERIFY_TOOL = {"name": "verdict", "description": "검수 판정", "input_schema": {"type": "object", "properties": {
@@ -171,5 +172,5 @@ AGENTS = {a["id"]: a for a in [
     _a("brief.writer", "brief", "브리핑 담당", SONNET, count=3, system=WRITER_SYS, tool=WRITER_TOOL, max_tokens=6000,
        desc="조사 결과로 1pager 의 글 칸을 쓴다."),
     _a("verify.checker", "verify", "검수 담당", SONNET, count=3, system=VERIFY_SYS, tool=VERIFY_TOOL, search=6, max_tokens=8000,
-       tools=["company", "dart_filings", "calc"], desc="1pager 를 공시 DB·공시 목록·보도와 대조해 유지·수정·보류를 정한다."),
+       tools=["company", "financials", "dart_filings", "calc"], desc="1pager 를 공시 DB·재무제표·공시 목록·보도와 대조해 유지·수정·보류를 정한다."),
 ]}

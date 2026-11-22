@@ -21,10 +21,16 @@ def _table(head, rows):
     return "\n".join(["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(str(x) for x in r) + " |" for r in rows]) + "\n"
 
 
+def _s(x):
+    if isinstance(x, dict):   # 목록 자리에 객체가 오면 값만 이어 붙인다
+        return " ".join(str(v).strip() for v in x.values() if v not in (None, "", [], {}))
+    return str(x).strip()
+
+
 def _lines(xs):
     if isinstance(xs, str):
         return xs.strip() + "\n" if xs.strip() else ""
-    return "".join(f"- {str(x).strip()}\n" for x in (xs or []) if str(x).strip())
+    return "".join(f"- {_s(x)}\n" for x in (xs or []) if _s(x))
 
 
 def _terms(d):
@@ -62,7 +68,7 @@ def one_pager(lead, asof=None):
     md = [f"# {lead.get('corp_name')} 미팅 1pager\n", f"**{b.get('headline', '').strip()}**\n", " · ".join(x for x in meta if x) + "\n"]
 
     md.append("\n## 왜 지금\n" + _lines(b.get("need")))
-    sig = [f"{_d(s.get('dt'))} {s.get('what') or s.get('label') or ''}" + (f" ([원문]({s['url']}))" if s.get("url") else "") for s in (lead.get("signals") or [])]
+    sig = [f"{_d(s.get('dt'))} {s.get('what') or s.get('label') or ''}" + (f" ([원문]({s['url']}))" if s.get("url") else "") for s in (lead.get("signals") or []) if isinstance(s, dict)]
     if sig:
         md.append("\n근거 신호\n" + _lines(sig))
 
@@ -86,7 +92,9 @@ def one_pager(lead, asof=None):
         facts.append(f"{bal.get('as_of')} 말: 현금성자산 {won(bal.get('cash'))}, 차입 계정 합계 {won(bal.get('borrowings_sum'))}"
                      + (f", 부채비율 {bal['debt_ratio_pct']}%" if bal.get("debt_ratio_pct") is not None else ""))
     if sd.get("total_1y_krw"):
-        parts = [f"{k} {won(sd[c])}" for k, c in (("회사채", "bond_1y_krw"), ("CP", "cp_1y_krw"), ("전단채", "stb_krw")) if sd.get(c)]
+        parts = [f"{k} {won(sd[c])}" for k, c in (("사채", "bond_1y_krw"), ("CP", "cp_1y_krw"), ("전단채", "stb_krw")) if sd.get(c)]
+        if sd.get("bond_private_1y_krw") and parts and parts[0].startswith("사채"):
+            parts[0] += f"(사모 {won(sd['bond_private_1y_krw'])} 포함)"
         facts.append(f"1년 내 만기 채무증권 {won(sd['total_1y_krw'])} ({', '.join(parts)}; {_d(sd.get('stlm_dt'))} 정기보고서)")
     md.append(_lines(facts))
     md.append("\n" + _table(["일자", "구분", "금액", "비고"], [[_d(m.get("event_dt")), f"{m.get('product', '')} {m.get('sub_type') or ''} {m.get('event', '')}".strip(), won(m.get("amount_krw")),
@@ -96,7 +104,7 @@ def one_pager(lead, asof=None):
 
     deals = ds.get("deals") or []
     if deals:
-        md.append("\n## 조달 이력\n" + _table(["일자", "상품", "금액", "조건", "대표주관"],
+        md.append("\n## 조달 이력" + (" (최근 8건)" if len(deals) > 8 else "") + "\n" + _table(["일자", "상품", "금액", "조건", "대표주관"],
                   [[_d(d.get("deal_dt")), f"{d.get('product', '')} {d.get('sub_type') or ''}".strip(), won(d.get("amount_krw")), _terms(d),
                     (d.get("lead_managers") or "–") + (" (NH)" if d.get("nh_lead") and "NH" not in (d.get("lead_managers") or "") else "")] for d in deals[:8]]))
 
@@ -109,7 +117,7 @@ def one_pager(lead, asof=None):
     if rows:
         md.append(f"\n## 유사 사례\n{cp.get('basis', '')}\n\n" + _table(["일자", "회사", "금액", "조건"], rows))
 
-    md.append("\n## 미팅 토킹포인트\n" + "".join(f"{i}. {str(x).strip()}\n" for i, x in enumerate(b.get("talking_points") or [], 1)))
+    md.append("\n## 미팅 토킹포인트\n" + "".join(f"{i}. {_s(x)}\n" for i, x in enumerate(b.get("talking_points") or [], 1)))
     if b.get("angles"):
         md.append("\n## 검토할 수 있는 방향\n" + _lines(b.get("angles")))
     if b.get("unknowns"):
@@ -117,11 +125,12 @@ def one_pager(lead, asof=None):
 
     if vf:
         md.append(f"\n## 검수\n{vf.get('state', '')}: {vf.get('note', '')}\n")
-        md.append(_lines([f"{f.get('item')}: {f.get('finding')}" + (f" ({f['source']})" if f.get("source") else "") for f in vf.get("fixes") or []]))
+        md.append(_lines([((f"{f['item']}: " if f.get("item") else "") + str(f.get("finding") or f.get("_text") or "") + (f" ({f['source']})" if f.get("source") else "")) if isinstance(f, dict) else _s(f)
+                          for f in vf.get("fixes") or []]))
         if vf.get("unconfirmed"):
-            md.append("확인 못 한 항목: " + "; ".join(vf["unconfirmed"]) + "\n")
+            md.append("확인 못 한 항목: " + "; ".join(_s(x) for x in vf["unconfirmed"]) + "\n")
 
-    src = [f"[{s.get('title') or s['url']}]({s['url']})" for s in (rs.get("sources") or []) if s.get("url")]
+    src = [f"[{s.get('title') or s['url']}]({s['url']})" for s in (rs.get("sources") or []) if isinstance(s, dict) and s.get("url")]
     md.append("\n## 출처\n" + _lines(["공시 DB(OpenDART 수집분), OpenDART 재무제표"] + src[:12]))
     md.append("\n공개 자료만으로 만든 초안이다. 미팅 전에 숫자와 일정을 확인한다.\n")
     return "".join(md)
