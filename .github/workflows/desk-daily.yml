@@ -1,4 +1,4 @@
-# 딜 발굴 데스크 (desk/): 뉴스 수집 → 모니터링 → 발굴 → 조사 → 1pager → 검수.
+# RM 미팅 준비 (desk/): 뉴스 수집 → 모니터링 → 대상 선정 → 기업 분석 → 1pager → 사실 검증.
 # 공시는 ingest-daily(07:10 KST)가 쌓은 것을 읽는다. 결과는 DB(mart.v_desk_*)와 이 실행의 요약·첨부(desk-out)에 남는다.
 # 지금은 수동 실행만 둔다. 첫 실행에서 비용을 재고 나서 아래 예약 두 줄의 주석을 푼다(07:50 KST, 월~금).
 # 오늘(KST) 이미 끝났거나 도는 실행이 있으면 바로 끝난다(force 로 다시 돌린다).
@@ -15,7 +15,11 @@ on:
         description: '회사명 또는 corp_code (넣으면 그 회사의 1pager 만 만든다)'
         default: ''
       resume:
-        description: '새 대상을 고르지 않고 끝내지 못한 대상만 이어서 한다'
+        description: '새 대상을 선정하지 않고 끝내지 못한 대상만 이어서 한다'
+        type: boolean
+        default: false
+      redo:
+        description: '최근 7일 선정한 회사를 지금 기준으로 다시 분석 · 작성한다 (판단 기준 · 1pager 형식을 바꾼 뒤)'
         type: boolean
         default: false
       days:
@@ -67,9 +71,12 @@ jobs:
           DAYS: ${{ inputs.days || '3' }}
           FORCE: ${{ inputs.force && '--force' || '' }}
           RESUME: ${{ inputs.resume && '1' || '' }}
+          REDO: ${{ inputs.redo && '1' || '' }}
         run: |
           if [ -n "$CORP" ]; then
             python3 -m desk brief "$CORP"
+          elif [ -n "$REDO" ]; then
+            python3 -m desk redo
           elif [ -n "$RESUME" ]; then
             python3 -m desk resume
           else

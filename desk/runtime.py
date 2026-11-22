@@ -88,18 +88,17 @@ def summarize(agent_id, out):
         return ""
     if agent_id == "monitor.screener":
         s = [x for x in out.get("signals") or [] if isinstance(x, dict)]
-        return f"신호 {len(s)}" + (f" · {s[0].get('corp_name', '')} {s[0].get('what', '')[:60]}" if s else "")
+        return f"선별 {len(s)}건" + (f" · {s[0].get('corp_name', '')} {s[0].get('what', '')[:60]}" if s else "")
     if agent_id == "scout.lead":
         ls = [x for x in out.get("leads") or [] if isinstance(x, dict)]
         return ("대상 " + ", ".join(x.get("corp_name", "") for x in ls)) if ls else "대상 없음"
     if agent_id == "research.analyst":
-        ck = out.get("checks") or {}
-        st = lambda k: str((ck.get(k) or {}).get("state", "–")) if isinstance(ck.get(k), dict) else "–"
-        return f"수요 {st('need')} · 여력 {st('capacity')} · 시기 {st('timing')} · 열림 {st('access')}" + (" · 제외 조건 해당" if (out.get("kill") or {}).get("hit") is True else "")
+        return f"{out.get('call', '')} · {str(out.get('call_reason', ''))[:100]}".strip(" ·")
     if agent_id == "brief.writer":
         return str(out.get("headline", ""))[:120]
     if agent_id == "verify.checker":
-        return f"{out.get('state', '')} · 고친 항목 {len(out.get('fixes') or [])}"
+        n = len(out.get("fixes") or [])
+        return "검증 보류" if out.get("state") == "보류" else f"검증 완료 · 정정 {n}건" if n else "검증 완료"
     return ""
 
 

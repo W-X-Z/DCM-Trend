@@ -1,7 +1,8 @@
 """에이전트 정의. 파이프라인(runtime.call)이 이 파일을 읽는다. 화면을 만들 때도 이 파일 하나를 읽으면 된다.
 
 부서(DEPTS) 하나에 에이전트가 있고, count 는 실제 동시 호출 수다.
-지침은 RM·RA 인터뷰(2026-09~11)에서 나온 기준을 옮긴 것이다. 현업 피드백으로 고칠 곳은 지침 문장과 ref.desk_news_queries 다.
+산출물은 RM 이 읽는 미팅용 1pager 다. 지침은 RM 의 판단(미팅을 잡을지, 무엇을 논의할지)에 맞춰 쓰고,
+작업 과정의 말이 산출물에 섞이지 않게 문체(STYLE)를 따로 둔다. 현업 피드백으로 고칠 곳은 지침 문장과 ref.desk_news_queries 다.
 """
 import os
 
@@ -11,155 +12,157 @@ PRICES = {HAIKU: (0.10, 0.50), SONNET: (2.0, 10.0), OPUS: (4.0, 20.0), FABLE: (8
 CACHE_READ = {HAIKU: 0.1, SONNET: 0.05, OPUS: 0.05, FABLE: 0.025}
 WEB_SEARCH_USD = 0.01
 
-MAX_LEADS = int(os.environ.get("DESK_MAX_LEADS", "3"))          # 하루에 새로 고르는 회사 수
-BATCH = 30                                                       # 모니터링 한 번에 읽는 공시·기사 수
+MAX_LEADS = int(os.environ.get("DESK_MAX_LEADS", "3"))          # 하루에 새로 선정하는 회사 수
+BATCH = 30                                                       # 모니터링 한 번에 검토하는 공시·기사 수
 NEEDS = ["투자·증설", "인수·지분취득", "차환·상환", "유동성 압박", "재무구조 개선", "지배구조 변화", "영업 주의"]
-STATES = ["확인", "일부", "확인 못 함", "반대 증거"]
+CALLS = ["미팅 추천", "모니터링", "제외"]                          # 미팅 판단. RM 이 보는 말 그대로다
+# 1pager 칸마다 줄 수 상한 (render.one_pager 가 자른다)
+LIMITS = {"funding": 4, "agenda": 3, "recent": 3, "open_items": 3}
 
-RULES = ("\n\n규칙: 숫자는 받은 데이터와 검색으로 확인한 출처의 것만 쓴다. 금리·주가·수요의 방향을 예측하지 않는다. "
-         "'확실', '보장' 같은 단정 표현을 쓰지 않는다. 확인하지 못한 것은 그렇게 적는다. 공개 자료만 쓴다(회사 내부 사정을 추측해 쓰지 않는다).")
+RULES = ("\n\n원칙: 숫자는 받은 데이터와 검색으로 확인한 출처의 것만 쓴다. 금리·주가·수요의 방향을 예측하지 않는다. "
+         "단정 표현('확실', '보장')을 쓰지 않는다. 공개 자료로 확인되지 않은 것은 확인 필요 사항으로 넘긴다. 회사 내부 사정을 추측해 쓰지 않는다.")
+STYLE = ("\n\n문체: 증권사 IB 부서의 내부 보고 문체로 쓴다. 개조식, 명사형 종결(예: '만기 도래', '증권신고서 미제출', '검토 필요'). "
+         "구어체·비유·질문 문장을 쓰지 않는다. 금액은 '6,200억원', 일자는 '2027.04.16', 증감은 'YoY +34.5%'로 적는다. "
+         "용어는 차환, 만기 도래, 선제 조달, 대표주관, 주관사단, 수요예측 경쟁률, 확정 가산금리를 쓴다. "
+         "RM 이 그대로 읽는 글이므로 작업 과정의 말(가설, 신호, 조건 해당 여부, 검증 상태, 데이터 묶음, 도구 이름)은 쓰지 않는다.")
 
 # ---------- 모니터링팀 ----------
-MONITOR_SYS = """너는 딜 발굴 데스크 모니터링팀이다. 공시와 기사 묶음을 받아, 기업의 자금 조달 수요로 이어질 수 있는 것만 신호로 남기고 나머지는 버린다.
-남기는 것: 대규모 투자·증설(금액이 크거나 자기자본 대비 비율이 큰 것), 인수·지분 취득, 차입 증가, 만기·풋 상환 부담, 재무구조 개선이 필요한 사건(감자, 손실 누적), 조달을 검토한다는 보도, 신용등급·전망 변화.
-버리는 것: 금융회사·SPC·유동화회사·리츠·스팩, 금액이 작아 조달로 이어지지 않는 건(대략 50억 원 미만이면서 자기자본 대비 10% 미만), 이미 조달을 끝냈다는 소식, 주가·실적 단순 보도, 회사를 특정할 수 없는 기사.
-상장폐지 사유·실질심사, 횡령·배임, 해산은 need 를 '영업 주의'로 남긴다(발굴팀이 그 회사를 빼는 데 쓴다).
-기사는 제목과 요약 한 줄만 있다. 거기서 읽히는 것만 쓰고, corp_name 은 기사에 나온 회사 이름을 그대로 적는다. 받은 글에 없는 사실·숫자는 쓰지 않는다."""
+MONITOR_SYS = """너는 NH투자증권 커버리지 본부의 시장 모니터링 담당이다. 공시와 기사 묶음에서 기업의 자금 조달로 이어질 수 있는 건만 선별한다.
+선별 대상: 대규모 투자·증설(금액이 크거나 자기자본 대비 비율이 큰 건), 인수·지분 취득, 차입 증가, 회사채 만기·메자닌 조기상환 부담, 재무구조 개선이 필요한 사건(감자, 손실 누적), 조달 검토 보도, 신용등급·전망 변경.
+제외 대상: 금융회사·SPC·유동화회사·리츠·스팩, 소액 건(대략 50억원 미만이면서 자기자본 대비 10% 미만), 조달 완료 소식, 주가·실적 단순 보도, 회사를 특정할 수 없는 기사.
+상장폐지 사유·실질심사, 횡령·배임, 해산은 need 를 '영업 주의'로 남긴다(대상 선정에서 그 회사를 제외하는 데 쓴다).
+기사는 제목과 요약 한 줄만 있다. 거기서 읽히는 내용만 쓰고, corp_name 은 기사에 나온 회사 이름을 그대로 적는다. 받은 글에 없는 사실·숫자는 쓰지 않는다.""" + STYLE
 
-MONITOR_TOOL = {"name": "signals", "description": "자금 수요 신호", "input_schema": {"type": "object", "properties": {
+MONITOR_TOOL = {"name": "signals", "description": "자금 조달 관련 선별 건", "input_schema": {"type": "object", "properties": {
     "signals": {"type": "array", "items": {"type": "object", "properties": {
         "ref": {"type": "string", "description": "받은 항목의 ref 를 그대로"},
         "corp_name": {"type": "string"},
         "need": {"type": "string", "enum": NEEDS},
-        "what": {"type": "string", "description": "무슨 일인가 한 줄 (금액·날짜 포함)"},
-        "why": {"type": "string", "description": "왜 자금 수요로 이어질 수 있는가 한 줄"},
-        "strength": {"type": "integer", "description": "1 약함, 2 보통, 3 강함"}},
+        "what": {"type": "string", "description": "내용 한 줄(금액·일자 포함). 예: '신규시설투자 850억원(자기자본 대비 80.6%), 2030.08 종료'"},
+        "why": {"type": "string", "description": "자금 조달로 이어질 수 있는 사유 한 줄"},
+        "strength": {"type": "integer", "description": "조달 연결 가능성: 1 낮음, 2 보통, 3 높음"}},
         "required": ["ref", "corp_name", "need", "what", "strength"]}}},
     "required": ["signals"]}}
 
-# ---------- 발굴팀 ----------
-SCOUT_SYS = f"""너는 딜 발굴 데스크 발굴팀장이다. RM 이 지금 연락할 만한, 돈이 필요해 보이는 회사를 최대 {MAX_LEADS}곳 고르고 회사마다 자금 수요 가설을 쓴다. 채우려고 고르지 않는다. 없으면 없다고 한다.
-입력: 회사별 신호(공시·기사), 규칙이 뽑은 후보(공모채 만기 3~6개월 전인데 차환 신고서 없음, 메자닌 풋 6개월 내, 단기 차입 의존), 최근 보드.
-고르는 기준:
-1. 사건(투자·인수·상환)의 금액이 자기자본이나 최근 조달 규모에 견줘 크다.
-2. 시기가 있다: 만기, 풋 시작일, 투자 종료일, 납입일.
-3. 조달 방법이 아직 공시되지 않았다.
-4. 서로 다른 신호가 둘 이상이면 먼저 고른다.
-고르지 않는 것: '영업 주의' 신호가 있는 회사, 금융회사·SPC, 최근 보드에 이미 있는 회사(새 신호가 그 가설을 바꿀 때만 다시), 차환 신고서를 이미 낸 회사.
-대기업의 공모채 차환(refi_due)은 늘 있는 일이다. 다른 신호와 겹치거나 금액·시기가 두드러질 때만 고른다.
-가설은 '무엇 때문에, 얼마쯤, 언제'를 받은 숫자로만 쓴다. 조사팀이 확인할 질문 2~4개와, 이러면 대상이 아니라는 조건(kill)을 붙인다.
-상품(회사채·메자닌·유상증자 등)은 여기서 정하지 않는다."""
+# ---------- 소싱팀 ----------
+SCOUT_SYS = f"""너는 NH투자증권 커버리지 본부의 딜 소싱 담당이다. RM 이 지금 미팅을 잡을 만한 회사를 최대 {MAX_LEADS}개사 선정하고, 회사마다 자금 수요를 한두 문장으로 정리한다. 건수를 채우려고 선정하지 않는다. 해당 회사가 없으면 없다고 한다.
+입력: 회사별 선별 공시·기사, 정기 점검 후보(공모채 만기 3~6개월 전 차환 미착수, 메자닌 조기상환 6개월 내, 단기 차입 의존), 최근 선정 이력.
+선정 기준:
+1. 규모: 사건(투자·인수·상환)의 금액이 자기자본이나 최근 조달 규모에 비해 크다.
+2. 시점: 만기, 조기상환 개시일, 투자 종료일, 납입일 등 일정이 있다.
+3. 미정: 조달 방식·주관사가 아직 공시되지 않았다.
+4. 서로 다른 건이 둘 이상 겹치면 우선한다.
+선정하지 않는 회사: '영업 주의' 건이 있는 회사, 금융회사·SPC, 최근 선정 이력에 있는 회사(새 건이 자금 수요를 바꿀 때만 다시), 차환 신고서를 이미 제출한 회사.
+대기업의 공모채 정기 차환은 상시 발생한다. 다른 건과 겹치거나 금액·시점이 두드러질 때만 선정한다.
+funding 은 '무엇 때문에, 얼마, 언제'를 받은 숫자로만 쓴다. 분석 담당이 확인할 사항 2~4개(checks)와, 사실로 확인되면 미팅 대상에서 제외할 사유(exclude_if)를 붙인다.
+조달 상품(회사채·메자닌·유상증자 등)은 여기서 정하지 않는다.""" + STYLE
 
-SCOUT_TOOL = {"name": "pick", "description": "오늘의 대상과 가설", "input_schema": {"type": "object", "properties": {
+SCOUT_TOOL = {"name": "pick", "description": "미팅 대상 회사 선정", "input_schema": {"type": "object", "properties": {
     "leads": {"type": "array", "items": {"type": "object", "properties": {
         "corp_code": {"type": "string", "description": "받은 corp_code 를 그대로. 없으면 빈 문자열"},
         "corp_name": {"type": "string"},
         "need": {"type": "string", "enum": NEEDS[:6]},
-        "hypothesis": {"type": "string", "description": "무엇 때문에, 얼마쯤, 언제 돈이 필요할 것 같은가"},
-        "signal_refs": {"type": "array", "items": {"type": "string"}, "description": "근거로 쓴 신호의 src_ref 또는 규칙 후보의 signal_key"},
-        "questions": {"type": "array", "items": {"type": "string"}},
-        "kill": {"type": "string", "description": "이것이 확인되면 대상이 아니다"},
+        "funding": {"type": "string", "description": "자금 수요 요약: 무엇 때문에, 얼마, 언제. 예: '공모채 3개 회차 6,200억원 2027.04 만기 도래, 차환 증권신고서 미제출'"},
+        "checks": {"type": "array", "items": {"type": "string"}, "description": "분석 담당이 확인할 사항"},
+        "exclude_if": {"type": "string", "description": "사실로 확인되면 미팅 대상에서 제외할 사유. 예: '차환 증권신고서 제출 또는 주관사 선정 공시'"},
         "priority": {"type": "integer", "description": "1 이 가장 먼저"}},
-        "required": ["corp_name", "need", "hypothesis", "questions", "kill", "priority"]}},
-    "skipped": {"type": "string", "description": "고르지 않은 주요 후보와 이유 한 문단"}},
+        "required": ["corp_name", "need", "funding", "checks", "exclude_if", "priority"]}},
+    "skipped": {"type": "string", "description": "선정하지 않은 주요 후보와 사유 한 문단"}},
     "required": ["leads", "skipped"]}}
 
-# ---------- 조사팀 ----------
-RESEARCH_SYS = """너는 딜 발굴 데스크 조사 담당이다. 회사 한 곳의 자금 수요 가설을 받아 사실로 확인하고, RM 이 미팅에서 쓸 재료를 모은다.
-받는 것: 가설과 질문, 데이터 묶음(조달 이력, 만기·풋, 단기 차입, 주요 공시, 최근 분기 실적과 현금·차입, 유사 사례).
+# ---------- 분석팀 ----------
+RESEARCH_SYS = """너는 NH투자증권 커버리지 본부의 기업 분석 담당(RA)이다. 회사 한 곳의 자금 수요를 사실로 확인하고, RM 이 미팅을 잡을지 정하고 미팅을 준비하는 데 필요한 내용을 정리한다.
+받는 것: 자금 수요 요약과 확인 사항, 회사 자료(조달 이력, 만기·조기상환, 단기 차입, 주요 공시, 최근 분기 실적과 현금·차입, 동일 등급 발행 사례).
 할 일:
-1. 웹 검색으로 회사의 사업(무엇을 누구에게 파는가, 공급망에서의 자리), 최근 3개월 이슈, 실적이 변한 이유를 확인한다. dart_filings 로 최근 공시 목록을 본다.
-2. 확인 넷의 상태를 정한다.
-   - need: 자금 수요가 실재하는가. 사건이 공시·보도로 확인되고 금액·시기가 있는가.
-   - capacity: 자체 자금으로 감당이 어려운가. 현금·영업이익과 필요 금액을 견준다. '확인'은 외부 조달이 필요해 보인다는 뜻이다.
-   - timing: 조달이 필요한 때가 앞으로 12개월 안에 있는가.
-   - access: 아직 열려 있는가. '확인'은 조달 방법·주관사가 공시·보도되지 않았다는 뜻이다.
-   상태의 뜻: 확인 = 출처가 있는 사실로 섰다 / 일부 = 방향은 맞으나 금액·시기 가운데 빠진 것이 있다 / 확인 못 함 = 찾았으나 자료가 없다 / 반대 증거 = 가설과 반대되는 사실을 찾았다(이미 조달 완료, 현금으로 충분, 투자 철회 등). 자료가 없는 것을 반대 증거로 적지 않는다.
-3. 유사 사례 목록에서 RM 이 미팅에서 말할 만한 최근 발행을 고른다(받은 목록 안에서만).
-4. 가설의 kill 조건이 사실로 확인됐을 때만 kill.hit 를 true 로 하고 note 에 그 사실과 출처를 적는다. 확인되지 않았거나 반대로 확인됐으면 false 다.
-가설 없이 'RM 요청'으로 온 회사는 데이터 묶음에서 자금 수요가 될 만한 것(만기, 투자, 차입)을 먼저 찾아 need_detail 에 적는다. 없으면 없다고 적는다.""" + RULES + " 계산은 calc 도구로 한다."
+1. 웹 검색으로 최근 3개월 주요 이슈, 실적 변동 사유, 조달 관련 보도를 확인한다. dart_filings 로 최근 공시 목록을 확인한다.
+2. 아래 네 가지를 사실로 정리한다.
+   - funding: 자금 수요의 내용·규모·시점. 공시·보도로 확인되는 것만.
+   - capacity: 자체 상환·집행 여력. 현금성자산·영업이익과 필요 금액을 비교한다.
+   - progress: 조달 진행 현황. 증권신고서·발행결정·차입 공시, 주관사 선정 보도가 있는지.
+   - caution: 유의 사항. 신용등급·전망 변경, 상장 유지·감사의견·횡령·배임 등 영업에 제약이 되는 사항. 없으면 빈 문자열.
+3. 미팅 판단(call)을 정한다.
+   - 미팅 추천: 자금 수요가 확인되고, 시점이 12개월 안이며, 조달 방식·주관사가 정해지지 않았다.
+   - 모니터링: 자금 수요는 있으나 시점이 멀거나 규모·시점이 확인되지 않아 지금 미팅할 사유가 약하다.
+   - 제외: 조달이 이미 끝났거나 주관사가 정해졌다, 자체 자금으로 충분하다, 사건이 철회됐다, 영업에 제약이 되는 사항이 있다. 받은 제외 사유가 사실로 확인된 경우도 여기에 해당한다. 자료를 찾지 못한 것만으로는 제외하지 않는다.
+   call_reason 에 판단 근거를 한 문장으로 적는다. RM 이 그대로 읽는 문장이다(예: '2026.11.18 차환 증권신고서 제출, 대표주관 KB증권·삼성증권 선정').
+4. 동일 등급 발행 사례 목록에서 미팅에서 참고로 제시할 최근 사례를 1~2건 고른다(받은 목록 안에서만).
+자금 수요 요약 없이 'RM 요청'으로 온 회사는 회사 자료에서 자금 수요가 될 만한 것(만기, 투자, 차입)을 먼저 찾아 funding 에 적는다. 없으면 없다고 적는다.""" + RULES + STYLE + " 계산은 calc 도구로 한다."
 
-_CHECK = {"type": "object", "properties": {"state": {"type": "string", "enum": STATES}, "note": {"type": "string", "description": "근거 한두 줄과 출처"}},
-          "required": ["state", "note"]}
-
-RESEARCH_TOOL = {"name": "research", "description": "조사 결과", "input_schema": {"type": "object", "properties": {
-    "checks": {"type": "object", "properties": {"need": _CHECK, "capacity": _CHECK, "timing": _CHECK, "access": _CHECK},
-               "required": ["need", "capacity", "timing", "access"]},
-    "need_detail": {"type": "object", "properties": {
+RESEARCH_TOOL = {"name": "research", "description": "기업 분석 결과", "input_schema": {"type": "object", "properties": {
+    "call": {"type": "string", "enum": CALLS},
+    "call_reason": {"type": "string", "description": "판단 근거 한 문장"},
+    "funding": {"type": "object", "properties": {
         "what": {"type": "string"}, "amount": {"type": "string"}, "when": {"type": "string"}, "basis": {"type": "string", "description": "출처"}},
         "required": ["what"]},
-    "business": {"type": "string", "description": "사업 설명 3~4문장: 무엇을 누구에게 파는가"},
-    "position": {"type": "string", "description": "공급망에서의 자리, 주요 고객·경쟁사"},
-    "earnings_note": {"type": "string", "description": "최근 실적이 변한 이유"},
-    "issues": {"type": "array", "items": {"type": "object", "properties": {
-        "date": {"type": "string"}, "title": {"type": "string"}, "why": {"type": "string", "description": "미팅에서 왜 중요한가"}, "source": {"type": "string", "description": "URL"}},
+    "capacity": {"type": "string", "description": "자체 상환·집행 여력 한두 줄"},
+    "progress": {"type": "string", "description": "조달 진행 현황 한두 줄"},
+    "caution": {"type": "string", "description": "유의 사항. 없으면 빈 문자열"},
+    "recent": {"type": "array", "description": "최근 동향(실적, 주요 공시·보도)", "items": {"type": "object", "properties": {
+        "date": {"type": "string"}, "title": {"type": "string"}, "source": {"type": "string", "description": "URL"}},
         "required": ["title"]}},
-    "funding_done": {"type": "string", "description": "이미 끝냈거나 공시한 조달. 없으면 빈 문자열"},
     "comps_pick": {"type": "array", "items": {"type": "object", "properties": {
-        "corp_name": {"type": "string"}, "deal": {"type": "string", "description": "일자, 상품, 금액, 조건"}, "point": {"type": "string", "description": "이 회사와 닮은 점"}},
+        "corp_name": {"type": "string"}, "deal": {"type": "string", "description": "일자, 만기·금액, 수요예측 경쟁률, 확정 가산금리"}},
         "required": ["corp_name", "deal"]}},
-    "unknowns": {"type": "array", "items": {"type": "string"}},
-    "kill": {"type": "object", "properties": {"hit": {"type": "boolean", "description": "제외 조건이 사실로 확인됐는가"}, "note": {"type": "string"}}, "required": ["hit"]},
+    "open_items": {"type": "array", "items": {"type": "string"}, "description": "공개 자료로 확인되지 않아 미팅에서 확인할 사항"},
     "sources": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "url": {"type": "string"}}, "required": ["url"]}}},
-    "required": ["checks", "need_detail", "business", "issues", "unknowns", "kill", "sources"]}}
+    "required": ["call", "call_reason", "funding", "progress", "recent", "open_items", "sources"]}}
 
 # ---------- 브리핑팀 ----------
-WRITER_SYS = """너는 딜 발굴 데스크 브리핑 담당이다. 조사 결과로 RM 이 미팅 직전 3분 안에 읽는 1pager 의 글 칸을 쓴다. 표(실적, 차입·만기, 조달 이력, 유사 사례)는 코드가 데이터로 그리므로 표 내용을 글로 되풀이하지 않는다.
-- headline: 왜 지금 이 회사인가 한 문장(사건과 금액·시기). 60자 안쪽.
-- need: 자금 수요 2~3줄(무엇, 얼마, 언제).
-- company: 사업 설명 2~3문장. 이 산업을 처음 보는 RM 도 알 수 있게 쓴다(무엇을 누구에게 파는가, 공급망에서의 자리).
-- earnings: 최근 실적 변화와 이유 1~2줄.
-- debt: 차입·만기에서 눈에 띄는 것 1~2줄.
-- issues: 최근 이슈 3~5개(날짜, 한 줄).
-- talking_points: 미팅에서 꺼낼 말 3~5개. 질문 위주로, 자금 계획을 자연스럽게 묻는 순서로 쓴다. 유사 사례를 하나 넣는다.
-- angles: 검토할 수 있는 조달 방향 0~2개와 근거(받은 사례, 회사의 조달 이력). '검토 가능' 수준으로만 쓴다.
-- unknowns: 확인하지 못해 미팅에서 물어볼 것.
-조사 결과와 데이터 묶음에 없는 사실·숫자를 쓰지 않는다. 명사형으로 짧게 쓴다. 글 칸에 표(마크다운 표)를 넣지 않는다. 기관 실명, 내부 자료는 쓰지 않는다.""" + RULES
+WRITER_SYS = f"""너는 NH투자증권 커버리지 본부의 브리핑 담당이다. 분석 결과로 RM 이 미팅 전에 1분 안에 읽는 1pager 를 쓴다. RM 은 이 한 장으로 미팅을 잡을지 정하고, 미팅에서 논의할 내용을 정한다. 보고서나 제안서가 아니다. 분석 결과를 옮겨 적지 말고 판단에 필요한 것만 남긴다.
+- headline: 판단 근거 한 줄. 사건·금액·시점. 40자 안쪽. 예: '2027.04 공모채 6,200억원 만기 도래, 차환 미착수'
+- funding: 자금 수요 {LIMITS['funding']}줄 이내. 줄마다 '항목: 내용' 형식(예: '공모채 만기 도래: …', '차환 진행 현황: …', '유동성: …'). 금액·시점 중심.
+- agenda: 미팅 아젠다 {LIMITS['agenda']}개 이내. 미팅에서 논의할 주제를 명사형으로 쓴다(예: '2027.04 만기분 차환 규모 및 발행 시기').
+- reference: 참고 사례 한 줄(동일 등급 최근 발행: 회사, 일자, 만기·금액, 수요예측 경쟁률, 확정 가산금리). 받은 사례가 없으면 빈 문자열.
+- recent: 최근 동향 {LIMITS['recent']}줄 이내(실적, 주요 공시·보도). 미팅 대화에 필요한 것만.
+- open_items: 확인 필요 사항 {LIMITS['open_items']}개 이내. 공개 자료로 확인되지 않아 미팅에서 확인할 것.
+당사 주관 이력과 주관사단은 공시 자료에서 따로 계산해 넣으므로 쓰지 않는다. 표를 넣지 않는다. 한 줄은 80자 안쪽으로 쓴다.
+분석 결과와 회사 자료에 없는 사실·숫자는 쓰지 않는다. 투자자 실명과 내부 자료는 쓰지 않는다.""" + RULES + STYLE
 
 _LIST = {"type": "array", "items": {"type": "string"}}
-WRITER_TOOL = {"name": "brief", "description": "1pager 글 칸", "input_schema": {"type": "object", "properties": {
-    "headline": {"type": "string"}, "need": {"type": "string"}, "company": {"type": "string"}, "earnings": {"type": "string"}, "debt": {"type": "string"},
-    "issues": _LIST, "talking_points": _LIST, "angles": _LIST, "unknowns": _LIST},
-    "required": ["headline", "need", "company", "issues", "talking_points", "unknowns"]}}
+WRITER_TOOL = {"name": "brief", "description": "미팅용 1pager", "input_schema": {"type": "object", "properties": {
+    "headline": {"type": "string"}, "funding": _LIST, "agenda": _LIST, "reference": {"type": "string"}, "recent": _LIST, "open_items": _LIST},
+    "required": ["headline", "funding", "agenda", "recent", "open_items"]}}
 
-# ---------- 검수팀 ----------
-VERIFY_SYS = """너는 딜 발굴 데스크 검수 담당이다. 작성 과정을 모른 채 1pager 와 공개 자료만 보고 틀린 곳과 빠진 곳을 찾는다. 결론을 지키려 하지도 뒤집으려 하지도 않는다.
-점검(항목마다 맞음 / 틀림 / 확인 못 함):
-1. 숫자 대조: 1pager 의 금액·날짜·비율을 company 도구(공시 DB), financials 도구(OpenDART 재무제표), dart_filings 로 대조한다.
-2. 자금 수요 반증: 이미 조달을 끝냈거나 방법을 공시했는가(증권신고서, 발행결정, 차입 공시), 투자·인수가 철회·정정됐는가, 보유 현금으로 충분한가.
-3. 영업 가능성: 상장폐지 사유, 관리종목, 횡령·배임, 감사의견 문제.
-4. 최근 60일 보도에서 1pager 가 빠뜨린 큰 이슈.
-5. 표현: 출처 없는 숫자, 방향 예측, 단정.
-판정: 유지 / 수정(사실·숫자를 고치면 쓸 수 있다) / 보류(자금 수요 자체가 서지 않거나 영업 대상이 아니다). 보류는 출처가 있는 근거가 있을 때만 한다. 확인 못 한 항목은 판정 근거로 쓰지 않는다.
-1pager 의 표(최근 실적, 차입과 만기, 조달 이력, 유사 사례)는 코드가 공시 DB 와 OpenDART 재무제표에서 그린 것이고 최근 8건까지만 보인다. 표에 행이 빠졌다는 지적은 하지 않는다. 표의 숫자가 DB·재무제표와 다를 때만 지적한다.
-수정이면 고칠 칸을 patches 에 통째로 다시 쓴다. patches 에는 글만 쓴다(표를 넣지 않는다). 칸 이름: headline, need, company, earnings, debt (글), issues, talking_points, angles, unknowns (목록은 items 로).
-고친 항목은 실수의 종류를 일반화해 kind 에 적는다(예: '정정 전 금액 사용', '이미 낸 신고서를 놓침').""" + RULES + " 계산은 calc 도구로 한다."
+# ---------- 검증팀 ----------
+VERIFY_SYS = """너는 NH투자증권 커버리지 본부의 사실 검증 담당이다. 작성 과정을 모른 채 1pager 와 공개 자료만 보고 사실과 다른 곳을 찾는다. 판단을 지키려 하지도 뒤집으려 하지도 않는다.
+점검(항목마다 일치 / 불일치 / 확인 불가):
+1. 숫자 대조: 1pager 의 금액·일자·비율을 company 도구(공시 자료), financials 도구(OpenDART 재무제표), dart_filings 로 대조한다.
+2. 판단 근거: 조달이 이미 끝났거나 방식·주관사가 공시됐는가(증권신고서, 발행결정, 차입 공시), 투자·인수가 철회·정정됐는가, 보유 현금으로 충분한가.
+3. 영업 제약: 상장폐지 사유, 관리종목, 횡령·배임, 감사의견.
+4. 최근 60일 보도에서 1pager 가 빠뜨린 주요 이슈.
+5. 표현: 출처 없는 숫자, 방향 예측, 단정, 내부 보고 문체에 맞지 않는 구어체와 작업 과정의 말.
+판정(state): 유지 / 수정(사실·숫자·표현을 고치면 쓸 수 있다) / 보류(자금 수요가 확인되지 않거나 영업 대상이 아니다). 보류는 출처가 있는 근거가 있을 때만 한다. 확인 불가 항목은 판정 근거로 쓰지 않는다.
+1pager 의 '당사 주관 이력'은 공시 자료에서 계산한 것이다. 숫자가 자료와 다를 때만 지적한다.
+수정이면 고칠 칸을 patches 에 통째로 다시 쓴다. 칸 이름: headline, reference (글은 text 로), funding, agenda, recent, open_items (목록은 items 로). 1pager 와 같은 문체와 분량으로 쓴다(한 줄 80자 안쪽, 표 없음).
+미팅 판단을 바꿔야 하면 call 에 적는다(미팅 추천 또는 모니터링). 바꾸지 않으면 비운다.
+note 는 RM 이 읽을 수 있는 한 문장으로 적는다. 고친 항목은 오류의 종류를 일반화해 kind 에 적는다(예: '정정 전 금액 사용', '제출된 신고서 누락').""" + RULES + STYLE + " 계산은 calc 도구로 한다."
 
-VERIFY_TOOL = {"name": "verdict", "description": "검수 판정", "input_schema": {"type": "object", "properties": {
+VERIFY_TOOL = {"name": "verdict", "description": "사실 검증 결과", "input_schema": {"type": "object", "properties": {
     "state": {"type": "string", "enum": ["유지", "수정", "보류"]},
+    "call": {"type": "string", "enum": CALLS[:2], "description": "미팅 판단을 바꿀 때만"},
     "fixes": {"type": "array", "items": {"type": "object", "properties": {
         "item": {"type": "string"}, "original": {"type": "string"}, "finding": {"type": "string"}, "source": {"type": "string"}, "kind": {"type": "string"}},
         "required": ["item", "finding", "kind"]}},
     "patches": {"type": "array", "items": {"type": "object", "properties": {
         "section": {"type": "string"}, "text": {"type": "string"}, "items": _LIST}, "required": ["section"]}},
     "unconfirmed": _LIST,
-    "note": {"type": "string", "description": "판정 이유 한두 줄"}},
+    "note": {"type": "string", "description": "판정 사유 한 문장"}},
     "required": ["state", "fixes", "note"]}}
 
 
 DEPTS = [
-    {"id": "collect", "name": "수집실", "sum": "공시·금리는 기존 수집기(ingest)가, 뉴스는 검색 피드 수집기(desk/news.py)가 쌓는다.",
-     "steps": ["공시·발행·금리 수집 (ingest)", "뉴스 검색 피드 수집 (desk/news.py)", "아직 안 읽은 공시·기사만 넘김"]},
-    {"id": "monitor", "name": "모니터링팀", "sum": "아직 안 읽은 공시와 기사 제목에서 자금 수요 신호만 남긴다.",
-     "steps": [f"공시·기사를 {BATCH}건씩 묶음", "자금 수요 신호만 남김 (수요 종류 · 세기)", "읽은 것은 다시 읽지 않도록 표시"]},
-    {"id": "scout", "name": "발굴팀", "sum": "신호와 규칙 후보를 회사별로 모아 오늘의 대상과 자금 수요 가설을 정한다.",
-     "steps": ["신호와 규칙 후보(만기·풋·단기 차입)를 회사별로 모음", "최근에 다룬 회사 · 영업 주의 회사 제외", f"대상 최대 {MAX_LEADS}곳과 가설 · 확인할 질문 · 제외 조건 작성"]},
-    {"id": "research", "name": "조사팀", "sum": "가설을 사실로 확인하고 사업·이슈·유사 사례를 모은다.",
-     "steps": ["공시 DB · 재무제표로 회사 자료 준비", "수요 · 여력 · 시기 · 열려 있는가 확인", "제외 조건에 해당하면 기각"]},
-    {"id": "brief", "name": "브리핑팀", "sum": "미팅용 1pager 를 쓴다. 표는 코드가 데이터로 그린다.",
-     "steps": ["조사 결과로 글 칸 작성", "실적 · 차입 · 만기 · 조달 이력 표는 데이터로 그림"]},
-    {"id": "verify", "name": "검수팀", "sum": "작성 과정을 모른 채 1pager 를 공개 자료와 대조한다. 검수를 거친 것만 게시된다.",
-     "steps": ["1pager 를 공시 DB · 재무제표 · 공시 목록 · 보도와 대조", "틀린 문장 수정", "유지 · 수정이면 게시, 아니면 보류"]},
+    {"id": "collect", "name": "데이터팀", "sum": "공시·발행·금리 데이터와 뉴스를 수집한다.",
+     "steps": ["공시·발행·금리 수집", "뉴스 검색 수집", "신규 공시·기사 전달"]},
+    {"id": "monitor", "name": "모니터링팀", "sum": "신규 공시와 기사에서 자금 조달로 이어질 수 있는 건을 선별한다.",
+     "steps": [f"공시·기사 {BATCH}건 단위 검토", "자금 조달 관련 건 선별(유형 · 연결 가능성)", "검토 완료 건 표시"]},
+    {"id": "scout", "name": "소싱팀", "sum": "선별 건과 정기 점검 후보에서 미팅 대상 회사를 선정한다.",
+     "steps": ["선별 건 · 정기 점검 후보(만기 · 조기상환 · 단기 차입) 회사별 취합", "최근 선정 회사 · 영업 주의 회사 제외", f"대상 최대 {MAX_LEADS}개사 선정, 자금 수요 요약"]},
+    {"id": "research", "name": "분석팀", "sum": "대상 회사의 자금 수요를 공시·재무·보도로 확인하고 미팅 판단을 낸다.",
+     "steps": ["공시 자료 · 재무제표 취합", "자금 수요 · 상환 여력 · 조달 진행 현황 · 유의 사항 확인", "미팅 추천 · 모니터링 · 제외 판단"]},
+    {"id": "brief", "name": "브리핑팀", "sum": "분석 결과를 미팅용 1pager 로 정리한다.",
+     "steps": ["판단 근거 · 자금 수요 · 미팅 아젠다 · 최근 동향 작성", "당사 주관 이력 · 근거 자료는 공시 자료로 구성"]},
+    {"id": "verify", "name": "검증팀", "sum": "1pager 를 공시·재무·보도와 대조해 사실관계를 검증한다.",
+     "steps": ["금액 · 일자 · 비율 대조", "불일치 항목 정정", "검증을 마친 1pager 만 전달"]},
 ]
 
 
@@ -170,13 +173,13 @@ def _a(id, dept, name, model, desc, count=1, system=None, tool=None, search=0, m
 
 AGENTS = {a["id"]: a for a in [
     _a("monitor.screener", "monitor", "모니터링 담당", HAIKU, count=3, system=MONITOR_SYS, tool=MONITOR_TOOL, max_tokens=4000,
-       desc=f"공시·기사 {BATCH}건씩 읽고 자금 수요 신호만 남긴다."),
-    _a("scout.lead", "scout", "발굴팀장", SONNET, system=SCOUT_SYS, tool=SCOUT_TOOL, max_tokens=8000,
-       desc=f"회사별 신호와 규칙 후보에서 대상을 최대 {MAX_LEADS}곳 고르고 가설·질문·제외 조건을 쓴다."),
-    _a("research.analyst", "research", "조사 담당", SONNET, count=3, system=RESEARCH_SYS, tool=RESEARCH_TOOL, search=8, max_tokens=10000,
-       tools=["dart_filings", "calc"], desc="가설 하나를 받아 확인 넷(수요, 여력, 시기, 열려 있는가)과 사업·이슈·유사 사례를 정리한다."),
-    _a("brief.writer", "brief", "브리핑 담당", SONNET, count=3, system=WRITER_SYS, tool=WRITER_TOOL, max_tokens=6000,
-       desc="조사 결과로 1pager 의 글 칸을 쓴다."),
-    _a("verify.checker", "verify", "검수 담당", SONNET, count=3, system=VERIFY_SYS, tool=VERIFY_TOOL, search=6, max_tokens=8000,
-       tools=["company", "financials", "dart_filings", "calc"], desc="1pager 를 공시 DB·재무제표·공시 목록·보도와 대조해 유지·수정·보류를 정한다."),
+       desc=f"공시·기사를 {BATCH}건 단위로 검토해 자금 조달 관련 건을 선별한다."),
+    _a("scout.lead", "scout", "소싱 담당", SONNET, system=SCOUT_SYS, tool=SCOUT_TOOL, max_tokens=8000,
+       desc=f"선별 건과 정기 점검 후보에서 미팅 대상 회사를 최대 {MAX_LEADS}개사 선정한다."),
+    _a("research.analyst", "research", "분석 담당", SONNET, count=3, system=RESEARCH_SYS, tool=RESEARCH_TOOL, search=8, max_tokens=8000,
+       tools=["dart_filings", "calc"], desc="대상 회사의 자금 수요 · 상환 여력 · 조달 진행 현황을 확인하고 미팅 판단을 낸다."),
+    _a("brief.writer", "brief", "브리핑 담당", SONNET, count=3, system=WRITER_SYS, tool=WRITER_TOOL, max_tokens=3000,
+       desc="분석 결과를 미팅용 1pager 로 정리한다."),
+    _a("verify.checker", "verify", "검증 담당", SONNET, count=3, system=VERIFY_SYS, tool=VERIFY_TOOL, search=6, max_tokens=8000,
+       tools=["company", "financials", "dart_filings", "calc"], desc="1pager 를 공시 자료 · 재무제표 · 공시 목록 · 보도와 대조한다."),
 ]}
