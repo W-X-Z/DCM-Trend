@@ -75,12 +75,14 @@ await check('회사채 자금용도',
   `select use_of_funds ->> '채무상환자금' from core.bond_terms where deal_key = 'bond:00500254:22-1'`, '50000000000');
 
 // 메자닌
+// 상태는 납입일이 지났는지로 정해진다. 시험하는 날에 따라 바뀌므로 값 대신 규칙(납입일 ≤ 오늘이면 completed)이 지켜지는지 본다.
 await check('메자닌 3종 조건',
-  `select deal_key, amount_eok, coupon_pct, ytm_pct, conv_price, shares_ratio_pct, is_public, status
+  `select deal_key, amount_eok, coupon_pct, ytm_pct, conv_price, shares_ratio_pct, is_public,
+          payment_dt::text || ':' || case when status = case when payment_dt <= current_date then 'completed' else 'announced' end then '규칙대로' else status end
      from mart.v_deals where product_type = 'mezz' order by deal_key`,
-  ['mezz:00366137:EB-4|162.5|0.0|0.0|6872||false|announced',
-   'mezz:01370322:BW-2|100.0|0.0|0.0|7427|11.95|false|completed',
-   'mezz:01764099:CB-2|300.0|0.0|0.0|32823|13.71|false|completed']);
+  ['mezz:00366137:EB-4|162.5|0.0|0.0|6872||false|2026-11-09:규칙대로',
+   'mezz:01370322:BW-2|100.0|0.0|0.0|7427|11.95|false|2026-09-28:규칙대로',
+   'mezz:01764099:CB-2|300.0|0.0|0.0|32823|13.71|false|2026-09-22:규칙대로']);
 await check('메자닌 기준일 = 이사회 결의일, 정관 잔여한도',
   `select deal_dt::text || '|' || articles_remaining_krw from mart.v_deals where deal_key = 'mezz:01764099:CB-2'`,
   '2026-09-14|49400000000');
