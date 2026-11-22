@@ -1,0 +1,66 @@
+{
+  "_note": "운영 DB(mart.v_key_filings, ingest_signal_candidates, v_company_overview, v_deals, v_maturities) 2026-11-22 조회분에서 옮긴 실제 공시 값. news 와 재무제표(fake DART)는 형식 시험용으로 만든 값이다.",
+  "inputs": {
+    "data": {"latest_filing_dt": "2026-11-20", "last_refresh_at": "2026-11-22T02:13:29Z"},
+    "filings": [
+      {"ref": "20261120800930", "dt": "2026-11-20", "corp_code": "00231372", "corp_name": "롯데관광개발", "market": "유가증권", "label": "단기차입금 증가", "grp": "자금 수요",
+       "facts": {"차입금액": "400억원", "차입 목적": "기발행 전환사채 만기상환자금 확보", "차입 형태": "금융기관외의 자로부터 차입", "자기자본 대비": "10.86%", "차입 후 단기차입금": "400억원"},
+       "size_krw": 40000000000, "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261120800930"},
+      {"ref": "20261120800697", "dt": "2026-11-20", "corp_code": "00172185", "corp_name": "남성", "market": "유가증권", "label": "신규 시설투자", "grp": "자금 수요",
+       "facts": {"투자금액": "850억원", "투자 대상": "서울특별시 중랑구 면목동 650", "투자 목적": "자가보유 노후 부동산 개발", "투자 종료일": "2030.08.31", "자기자본 대비": "80.57%"},
+       "size_krw": 85000000000, "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261120800697",
+       "expansion": {"cat": "생산·설비 증설", "purpose": "자가보유 노후 부동산 개발", "target": "서울특별시 중랑구 면목동 650", "ratio_pct": 80.57}},
+      {"ref": "20261120900621", "dt": "2026-11-20", "corp_code": "01480708", "corp_name": "HEM파마", "market": "코스닥", "label": "신규 시설투자", "grp": "자금 수요",
+       "facts": {"투자금액": "13억원", "투자 목적": "생산성 및 업무효율 제고를 위한 설비투자", "투자 종료일": "2027.05.31", "자기자본 대비": "20.9%"}, "size_krw": 1305000000},
+      {"ref": "20261120900873", "dt": "2026-11-20", "corp_code": "00550082", "corp_name": "빅텐츠", "market": "코스닥", "label": "상장폐지 사유·실질심사", "grp": "신용·상장 위험", "facts": {}},
+      {"ref": "20261120000568", "dt": "2026-11-20", "corp_code": "01830930", "corp_name": "엘원비엘티제팔차", "market": "기타", "label": "해산사유 발생", "grp": "신용·상장 위험",
+       "facts": {"해산사유": "정관 제33조 제1항에 의한 해산사유가 발생", "해산사유 발생일": "2026.04.28"}}
+    ],
+    "news": [
+      {"ref": "n0001", "dt": "2026-11-21", "title": "남성, 면목동 사옥 부지 개발에 850억 투입", "snippet": "(형식 시험용 기사) 자금 조달 방안은 정해지지 않았다", "source": "example.com", "grp": "투자·증설", "url": "https://example.com/n0001"},
+      {"ref": "n0002", "dt": "2026-11-21", "title": "코스피 강보합 마감", "snippet": "(형식 시험용 기사)", "source": "example.com", "grp": "조달·차환", "url": "https://example.com/n0002"}
+    ],
+    "rules": [
+      {"kind": "touchpoint", "signal_key": "refi_due", "label": "3~6개월 뒤 공모채 만기, 차환 신고서 아직 없음", "corp_code": "00120526", "corp_name": "롯데쇼핑", "event_dt": "2027-04-16", "priority": 10,
+       "facts": {"등급": "AA-", "만기 금액": 620000000000, "만기 회차 수": 3, "NH 대표주관 이력": true, "가장 빠른 만기일": "2027-04-16"},
+       "context": {"시장": "유가증권", "최근 회사채 등급": "AA-", "공모채 발행 이력(건)": 38, "메자닌 이력(건)": 0, "유상증자 이력(건)": 0, "NH 대표주관 이력": true}},
+      {"kind": "touchpoint", "signal_key": "put_due", "label": "6개월 안에 메자닌 조기상환청구(풋) 시작", "corp_code": "00447487", "corp_name": "제주반도체", "event_dt": "2027-03-23", "priority": 40,
+       "facts": {"건수": 3, "종류": "BW, CB", "풋 대상 금액": 117000000000, "가장 빠른 풋 시작일": "2027-03-23"},
+       "context": {"시장": "코스닥", "공모채 발행 이력(건)": 0, "메자닌 이력(건)": 4, "유상증자 이력(건)": 0, "NH 대표주관 이력": false}}
+    ],
+    "board": []
+  },
+  "companies": {
+    "00231372": {
+      "overview": {"corp_code": "00231372", "corp_name": "롯데관광개발", "market": "유가증권", "stock_code": "032350", "bond_deal_count": 0, "mezz_deal_count": 7, "equity_deal_count": 0,
+                   "last_deal_dt": "2025-10-20", "latest_bond_rating": null, "articles_remaining_krw": 405740000000},
+      "short_debt": {"corp_code": "00231372", "stlm_dt": "2026-09-30", "bond_1y_krw": 37500000000, "bond_private_1y_krw": 37500000000, "bond_total_krw": 37500000000, "total_1y_krw": 37500000000},
+      "maturities": [
+        {"product": "메자닌", "sub_type": "CB", "event": "만기", "event_dt": "2026-11-29", "days_left": 7, "amount_krw": 70000000000},
+        {"product": "메자닌", "sub_type": "CB", "event": "만기", "event_dt": "2027-02-23", "days_left": 93, "amount_krw": 25000000000},
+        {"product": "메자닌", "sub_type": "CB", "event": "만기", "event_dt": "2027-04-27", "days_left": 156, "amount_krw": 6000000000},
+        {"product": "메자닌", "sub_type": "CB", "event": "만기", "event_dt": "2027-08-29", "days_left": 280, "amount_krw": 16300000000},
+        {"product": "메자닌", "sub_type": "CB", "event": "만기", "event_dt": "2027-08-29", "days_left": 280, "amount_krw": 4000000000}
+      ],
+      "deals": [
+        {"product": "메자닌", "sub_type": "CB", "status": "completed", "deal_dt": "2025-10-20", "amount_krw": 70000000000},
+        {"product": "메자닌", "sub_type": "CB", "status": "completed", "deal_dt": "2024-01-16", "amount_krw": 57260000000},
+        {"product": "메자닌", "sub_type": "CB", "status": "completed", "deal_dt": "2023-08-28", "amount_krw": 16300000000},
+        {"product": "메자닌", "sub_type": "CB", "status": "completed", "deal_dt": "2023-02-22", "amount_krw": 25000000000}
+      ],
+      "filings": [
+        {"dt": "2026-11-20", "label": "단기차입금 증가", "grp": "자금 수요", "facts": {"차입금액": "400억원", "차입 목적": "기발행 전환사채 만기상환자금 확보"}, "size_krw": 40000000000},
+        {"dt": "2026-08-03", "label": "전환사채 만기 전 취득(풋)", "grp": "자금 수요", "facts": {}}
+      ],
+      "expansions": [], "news": []
+    },
+    "00172185": {
+      "overview": {"corp_code": "00172185", "corp_name": "남성", "market": "유가증권", "bond_deal_count": 0, "mezz_deal_count": 0, "equity_deal_count": 0, "latest_bond_rating": null},
+      "short_debt": null, "maturities": [], "deals": [],
+      "filings": [{"dt": "2026-11-20", "label": "신규 시설투자", "grp": "자금 수요", "facts": {"투자금액": "850억원", "자기자본 대비": "80.57%", "투자 종료일": "2030.08.31"}, "size_krw": 85000000000}],
+      "expansions": [{"decided_dt": "2026-11-20", "src": "신규시설투자", "cat": "생산·설비 증설", "amount_krw": 85000000000, "ratio_pct": 80.57, "ratio_basis": "자기자본", "target": "서울특별시 중랑구 면목동 650", "purpose": "자가보유 노후 부동산 개발"}],
+      "news": []
+    }
+  },
+  "comps": {"basis": "같은 시장(유가증권) 메자닌·유상증자, 최근 6개월", "bonds": [], "mezz": [], "equity": []}
+}

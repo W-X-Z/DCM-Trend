@@ -7,3 +7,5 @@ node_modules/
 supabase/.temp/
 *.tsbuildinfo
 scripts/local/out/
+desk/out/
+__pycache__/

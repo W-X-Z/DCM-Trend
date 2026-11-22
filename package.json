@@ -16,7 +16,9 @@
     "test:prompts": "node tests/prompts.mjs",
     "test:reco": "node tests/reco.mjs",
     "test:deck-agent": "node tests/deck_agent.mjs",
-    "test:agent": "node tests/agent_run.mjs"
+    "test:agent": "node tests/agent_run.mjs",
+    "test:desk": "node tests/desk.mjs",
+    "test:desk-run": "python3 -m unittest desk.tests.test_desk"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17",

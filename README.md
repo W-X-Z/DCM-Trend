@@ -7,6 +7,8 @@ OpenDART·ECOS 공개 데이터로 **① 시장·공시 모니터링**, **② �
 
 현업 피드백(화면 오른쪽 아래 '의견 보내기')은 Supabase 대시보드 Table Editor > 스키마 `ops` > `v_feedback` 에서 본다.
 
+**딜 발굴 데스크**(`desk/`)는 같은 데이터 위에서 매일 도는 에이전트 부서다: 공시·뉴스 모니터링 → 자금이 필요해 보이는 회사 발굴 → 조사 → 미팅용 1pager → 검수. 설명과 켜는 순서는 [docs/DESK.md](docs/DESK.md).
+
 개인 투자 아이디어 분석용 '사업 확장 기업' 목록은 [research/expansion](research/expansion/README.md)에 따로 둔다(매주 자동 갱신).
 
 ## 구조
@@ -16,6 +18,7 @@ supabase/migrations/   DB 스키마와 SQL 로직 (raw → core → mart, ref �
 tests/                 실제 공시 픽스처로 SQL 로직 검증 (PGlite, Supabase 불필요)
 ingest/                OpenDART 수집기 (GitHub Actions, 매일 07:10 KST, 실패·누락 시 10:10 재시도)
 web/                   Next.js 화면 (Vercel, 서울 리전) — web/README.md
+desk/                  딜 발굴 데스크: 에이전트 부서 (Python 표준 라이브러리, GitHub Actions desk-daily, 수동 실행)
 docs/                  아키텍처, 로직 변경 가이드, 결정 사항
 ```
 
@@ -24,6 +27,7 @@ docs/                  아키텍처, 로직 변경 가이드, 결정 사항
 - [아키텍처](docs/ARCHITECTURE.md) — 레이어, 데이터 흐름, 화면 ↔ mart 계약
 - [현업 피드백 반영 가이드](docs/LOGIC_CHANGE_GUIDE.md) — 인터뷰 후 SQL·규칙만 고치는 방법
 - [결정 사항](docs/DECISIONS.md) — 결정된 것과 대기 중인 것
+- [딜 발굴 데스크](docs/DESK.md) — 에이전트 부서의 흐름, 1pager 구성, 켜는 순서, 한계
 
 ## 테스트
 
@@ -34,6 +38,8 @@ npm run test:ingest      # 수집기 종단: 모의 OpenDART → 수집 RPC → 
 npm run test:transforms  # 실제 OpenDART 응답 샘플 → 딜 변환 결과 (원문 값 반영 포함)
 npm run test:insights    # AI 요약 숫자·전망 표현 검증, 규칙 문장
 npm run test:docparse    # 신고서 원문 파서 (실제 신고서 조각)
+npm run test:desk        # 딜 발굴 데스크 SQL 함수: 입력 묶음, 본 것, 신호, 대상 보드, 권한
+npm run test:desk-run    # 딜 발굴 데스크 실행 코드: 가짜 Supabase·Claude·OpenDART 로 전 구간(이어 하기, 비용 상한, 검수)
 npm run test:deck        # 제안서 덱: 발행 일정 역산, AI 문안 검증, 목차 번호·템플릿, 트랜치 근거, 데이터 사용 현황, 검수, 검토 표시, 장표 레이아웃(실제 데이터 스냅샷), 템플릿 조립
 ```
 
@@ -46,6 +52,8 @@ npm run test:deck        # 제안서 덱: 발행 일정 역산, AI 문안 검증
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Vercel 환경변수 | 화면 데이터 없음 |
 | `ECOS_API_KEY` | GitHub Secrets | 금리 화면만 빔 |
 | `OPENAI_API_KEY` (선택 `OPENAI_MODEL`) | GitHub Secrets | 인사이트가 규칙 문장으로 표시 |
+| `ANTHROPIC_API_KEY` | GitHub Secrets | 딜 발굴 데스크가 돌지 않음(실패로 치지 않음) |
+| `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET` 또는 `NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET` (선택) | GitHub Secrets | 딜 발굴 데스크가 뉴스 없이 공시만으로 돎 |
 | `OPENAI_API_KEY` (선택 `OPENAI_DECK_MODEL`) | Vercel 환경변수 | AI 질문 안 됨, 제안서는 규칙 문안으로 생성 |
 
 ## DB
