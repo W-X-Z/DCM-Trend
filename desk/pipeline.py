@@ -13,6 +13,7 @@ from . import core as c, news, render, runtime as rt, supply, tools
 from .agents import AGENTS, BATCH, CALLS, MAX_LEADS
 
 REPEAT_DAYS = 14                 # 보드에 오른 회사를 다시 고르지 않는 기간
+HANDOFF_ROWS = 400               # 실행 요약에 남기는 넘김 기록(팀 사이에 오간 자료)의 줄 수 상한
 TEXT = ("headline", "reference")
 LISTS = ("funding", "agenda", "recent", "open_items")
 
@@ -20,6 +21,10 @@ LISTS = ("funding", "agenda", "recent", "open_items")
 def _j(o, cap=30000):
     s = json.dumps(o, ensure_ascii=False, default=str, separators=(",", ":"))
     return s if len(s) <= cap else s[:cap] + " …(잘림)"
+
+
+def _flat(d):
+    return " · ".join(f"{k} {v}" for k, v in (d or {}).items())[:400] if isinstance(d, dict) else str(d or "")[:400]
 
 
 def _today():
@@ -79,7 +84,17 @@ def monitor(inp, rid):
         c.rpc("desk_signals_put", {"p_run_id": rid, "p_items": rows})
     if seen:
         c.rpc("desk_seen_put", {"p_run_id": rid, "p_items": seen})
-    return {"signals": len(rows), "read": len(seen)}
+    picked = {r["src_ref"]: r for r in rows}
+    read = []
+    for x in seen[:HANDOFF_ROWS]:   # 데이터팀 → 모니터링팀으로 넘어간 건과 선별 결과
+        kind, src = by_ref[x["src_ref"]]
+        pk = picked.get(x["src_ref"]) or {}
+        read.append({k: v for k, v in {
+            "kind": "공시" if kind == "filing" else "기사", "dt": src.get("dt"), "corp": src.get("corp_name") or pk.get("corp_name"), "market": src.get("market"),
+            "title": src.get("label") if kind == "filing" else src.get("title"), "detail": _flat(src.get("facts")) if kind == "filing" else src.get("snippet"),
+            "amount": render.won(src["size_krw"]) + "원" if src.get("size_krw") else None, "source": "DART" if kind == "filing" else src.get("source"), "url": src.get("url"),
+            "picked": bool(pk), "need": pk.get("need"), "what": pk.get("what"), "why": pk.get("why"), "strength": pk.get("strength")}.items() if v not in (None, "")})
+    return {"signals": len(rows), "read": len(seen), "handoff": {"read": read}}
 
 
 def _fact(v):
@@ -103,6 +118,14 @@ def scout(inp, rid, stat):
         stat["supply"] = {"orders": len(orders), "suppliers": sum(len(x["협력사"]) for x in chain), "latest": latest}
         if latest and str(latest) < str(_today() - dt.timedelta(days=supply.STALE_DAYS)):
             stat["supply_stale"] = str(latest)
+    ho = stat.setdefault("handoff", {})
+    ho["orders"] = [{"corp": o["corp_name"], "market": o.get("시장"), "revenue": o.get("최근 연매출"), "amount": o.get("수주 합계"), "pct": o.get("연매출 대비(%)"), "n": o.get("건수"),
+                     "last_dt": o.get("최근 공시일"), "contracts": " / ".join(" ".join(str(k.get(f)) for f in ("공시일", "계약", "상대방", "금액", "기간") if k.get(f)) for k in o.get("계약") or []),
+                     "url": o.get("_url")} for o in orders]
+    ho["chain"] = [{"front": row["전방"], "front_event": row.get("전방 건"), "corp": sp["corp_name"],
+                    "basis": " / ".join(" ".join(str(e.get(f)) for f in ("구분", "공시일", "내용", "금액") if e.get(f)) for e in sp.get("근거") or []), "url": sp.get("_url")}
+                   for row in chain for sp in row["협력사"]]
+    ho["rules"] = [{"corp": r.get("corp_name"), "label": r.get("label"), "dt": r.get("event_dt"), "detail": _flat(r.get("facts"))} for r in rules]
     if not comps and not rules and not orders:
         return []
     board = inp.get("board") or []
@@ -275,6 +298,21 @@ def write_out(rid, leads, stat):
     return d
 
 
+def _lead_row(x):
+    """회사 한 곳이 팀을 거치며 받은 것: 선정 → 분석 → 1pager → 검증. 실행이 끝날 때의 모습을 남긴다(나중에 다시 써도 이 실행의 기록은 그대로)."""
+    rs, br, vf = x.get("research") or {}, x.get("brief") or {}, x.get("verify") or {}
+    fd = rs.get("funding") or {}
+    return {"corp": x["corp_name"], "corp_code": x.get("corp_code"), "origin": x.get("origin"), "result": x.get("result"), "note": x.get("note"),
+            "scout": {"need": x.get("need"), "funding": x.get("hypothesis"), "checks": x.get("questions") or [], "exclude_if": x.get("kill"),
+                      "signals": [f"{s.get('dt') or ''} {s.get('what') or ''}".strip() for s in x.get("signals") or [] if isinstance(s, dict)]},
+            "research": {"call": rs.get("call"), "call_reason": rs.get("call_reason"), "funding": _flat(fd) if isinstance(fd, dict) else fd, "capacity": rs.get("capacity"),
+                         "progress": rs.get("progress"), "caution": rs.get("caution"), "open_items": rs.get("open_items") or [],
+                         "sources": [s.get("url") for s in rs.get("sources") or [] if isinstance(s, dict) and s.get("url")][:12]} if rs else None,
+            "brief": {"call": br.get("call"), "headline": br.get("headline"), "md": x.get("brief_md")} if br else None,
+            "verify": {"state": vf.get("state"), "note": vf.get("note"), "fixes": [f"{f.get('item') or ''}: {f.get('finding') or ''}".strip(": ") for f in vf.get("fixes") or [] if isinstance(f, dict)],
+                       "unconfirmed": vf.get("unconfirmed") or []} if vf else None}
+
+
 def _run(kind, body):
     rid = rt.start_run(kind)
     stat, leads, status = {}, [], "done"
@@ -293,6 +331,7 @@ def _run(kind, body):
         for x in leads:
             x.setdefault("result", "대기")
         stat["leads"] = [{"corp_name": x["corp_name"], "result": x["result"]} for x in leads]
+        stat.setdefault("handoff", {})["leads"] = [_lead_row(x) for x in leads]
         rt.finish_run(status, stat)
         write_out(rid, leads, stat)
     return {"run_id": rid, "status": status, "stat": stat, "leads": leads}

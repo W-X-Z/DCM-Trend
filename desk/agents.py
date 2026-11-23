@@ -190,8 +190,13 @@ DEPTS = [
 ]
 
 
+# 한 번의 호출이 맡는 일의 단위. count 는 같은 지침의 호출을 동시에 몇 개까지 돌리는지(속도)이고, 역할이 여럿이라는 뜻이 아니다
+UNIT = {"collect.newsdesk": "검색어 묶음 1개", "monitor.screener": f"공시·기사 {BATCH}건", "scout.lead": "그날 선별한 건 전체",
+        "research.analyst": "회사 1곳", "brief.writer": "회사 1곳", "verify.checker": "회사 1곳"}
+
+
 def _a(id, dept, name, model, desc, count=1, system=None, tool=None, search=0, max_tokens=4000, tools=()):
-    return {"id": id, "dept": dept, "name": name, "model": os.environ.get("DESK_MODEL_" + id.split(".")[0].upper(), model), "desc": desc, "count": count,
+    return {"id": id, "dept": dept, "name": name, "model": os.environ.get("DESK_MODEL_" + id.split(".")[0].upper(), model), "desc": desc, "count": count, "unit": UNIT.get(id, ""),
             "system": system, "tool": tool, "search": search, "max_tokens": max_tokens, "tools": list(tools)}
 
 

@@ -277,6 +277,17 @@ class Units(Base):
         self.assertIn("2차전지 조립설비 / 공급", lead["brief"]["detail_md"])
         self.assertNotIn("supply", self.lead("남성")["dossier"])   # 공급망 자료가 없는 회사
         self.assertEqual(out["stat"]["supply"], {"orders": 1, "suppliers": 1, "latest": feed["latest"]})
+        ho = self.sb.runs[out["run_id"]]["summary"]["handoff"]   # 팀 사이에 오간 자료가 실행 요약에 남는다
+        self.assertEqual(len(ho["read"]), out["stat"]["read"])
+        self.assertTrue(any(x["picked"] and x["need"] and x["url"] for x in ho["read"]) and any(not x["picked"] for x in ho["read"]))
+        self.assertEqual({x["kind"] for x in ho["read"]}, {"공시", "기사"})
+        self.assertEqual((ho["orders"][0]["corp"], ho["orders"][0]["amount"], ho["chain"][0]["corp"], ho["chain"][0]["front"]), ("롯데관광개발", "900억원", "빅텐츠", "남성"))
+        row = next(x for x in ho["leads"] if x["corp"] == "롯데관광개발")
+        self.assertEqual((row["result"], row["research"]["call"], row["verify"]["state"]), ("게시", "미팅 추천", "수정"))
+        self.assertTrue(row["scout"]["funding"] and row["scout"]["checks"] and row["brief"]["md"].startswith("# 롯데관광개발") and row["verify"]["fixes"])
+        ex = next(x for x in ho["leads"] if x["corp"] == "남성")
+        self.assertEqual((ex["result"], ex["brief"], ex["research"]["call"]), ("기각", None, "제외"))
+        self.assertLess(len(json.dumps(ho, ensure_ascii=False)), 60000)
         self.assertEqual(out["stat"]["supply_stale"], feed["latest"])
         self.assertIn("공급계약 공시가", (core.OUT / out["run_id"] / "summary.md").read_text(encoding="utf-8"))
         supply._call = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down"))   # 조회가 안 돼도 멈추지 않는다
