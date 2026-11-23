@@ -94,9 +94,9 @@ def summarize(agent_id, out):
     if agent_id == "scout.lead":
         ls = [x for x in out.get("leads") or [] if isinstance(x, dict)]
         return ("대상 " + ", ".join(x.get("corp_name", "") for x in ls)) if ls else "대상 없음"
-    if agent_id == "research.analyst":
+    if agent_id.endswith(".analyst"):
         return f"{out.get('call', '')} · {str(out.get('call_reason', ''))[:100]}".strip(" ·")
-    if agent_id == "brief.writer":
+    if agent_id.endswith(".writer"):
         return str(out.get("headline", ""))[:120]
     if agent_id == "verify.checker":
         n = len(out.get("fixes") or [])

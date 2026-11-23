@@ -10,7 +10,7 @@ RM 이 보는 말은 미팅 판단(미팅 추천 · 모니터링 · 제외)이�
 import concurrent.futures as cf, datetime as dt, json, os, traceback
 
 from . import core as c, news, render, runtime as rt, supply, tools
-from .agents import AGENTS, BATCH, CALLS, MAX_LEADS
+from .agents import AGENTS, BATCH, CALLS, TRACK_LEADS, TRACKS, track_of
 
 REPEAT_DAYS = 14                 # 보드에 오른 회사를 다시 고르지 않는 기간
 HANDOFF_ROWS = 400               # 실행 요약에 남기는 넘김 기록(팀 사이에 오간 자료)의 줄 수 상한
@@ -31,9 +31,12 @@ def _today():
     return dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
 
 
+WORKERS = 3                      # 대상 회사를 동시에 몇 곳까지 처리하는지
+
+
 def _lanes(agent_id, items, fn):
-    """items 를 에이전트 인원만큼 동시에 처리한다. fn(item, slot) 의 결과를 순서대로 돌려준다."""
-    n = max(1, AGENTS[agent_id]["count"])
+    """items 를 동시에 처리한다(에이전트면 그 인원만큼, 숫자면 그만큼). fn(item, slot) 의 결과를 순서대로 돌려준다."""
+    n = agent_id if isinstance(agent_id, int) else max(1, AGENTS[agent_id]["count"])
     with cf.ThreadPoolExecutor(max_workers=n) as ex:
         return list(ex.map(lambda p: fn(p[1], p[0] % n + 1), enumerate(items)))
 
@@ -148,12 +151,18 @@ def scout(inp, rid, stat):
     caution = {g["corp_code"] or g["corp_name"] for g in comps if any(x.get("need") == "영업 주의" for x in g["signals"])}
     cutoff = str(_today() - dt.timedelta(days=REPEAT_DAYS))
     recent = {b["corp_code"] for b in board if str(b.get("created")) >= cutoff}
-    leads = []
-    for ld in sorted([x for x in out.get("leads") or [] if isinstance(x, dict)], key=lambda x: x.get("priority") or 9)[:MAX_LEADS]:
+    leads, taken = [], {t: 0 for t in TRACKS}
+    for ld in sorted([x for x in out.get("leads") or [] if isinstance(x, dict)], key=lambda x: x.get("priority") or 9):
         code = ld.get("corp_code") if ld.get("corp_code") in known else by_name.get((ld.get("corp_name") or "").strip(), "")
         if not code or code in recent or code in caution or ld.get("corp_name") in caution:
             print(f"대상 선정: {ld.get('corp_name')} 제외 ({'회사 코드 없음' if not code else '최근 선정 이력' if code in recent else '영업 주의'})")
             continue
+        ov = {"overview": (c.rpc("desk_company", {"p_corp_code": code}) or {}).get("overview")}   # 팀은 회사 자료로 정한다(소싱 담당의 구분은 자료가 없을 때만 쓴다)
+        tr = "corp" if track_of(ov) == "corp" else ld.get("track") if ld.get("track") in TRACKS else "sme"
+        if taken[tr] >= TRACK_LEADS:
+            print(f"대상 선정: {ld.get('corp_name')} 제외 ({TRACKS[tr]} 자리 없음)")
+            continue
+        taken[tr] += 1
         recent.add(code)
         sg = [{"dt": s.get("dt"), "what": s.get("what"), "need": s.get("need"), "url": s.get("url")} for s in sigs if s.get("corp_code") == code][:6]
         sg += [{"dt": r.get("event_dt"), "what": f"{r.get('label')} ({', '.join(f'{k} {_fact(v)}' for k, v in (r.get('facts') or {}).items())})"}
@@ -165,6 +174,7 @@ def scout(inp, rid, stat):
                "hypothesis": ld.get("funding") or ld.get("hypothesis"), "signals": sg, "questions": ld.get("checks") or ld.get("questions") or [],
                "kill": ld.get("exclude_if") or ld.get("kill"), "run_id": rid}   # 칸 이름(hypothesis · questions · kill)은 처음 만든 표의 것. 뜻은 자금 수요 요약 · 확인 사항 · 제외 사유
         row["lead_id"] = c.rpc("desk_lead_put", {"p": row})   # 선정한 회사를 먼저 적는다
+        row["track"] = tr                                     # 저장하는 칸이 아니다. 분석을 시작할 때 회사 자료로 다시 정한다
         leads.append(row)
     return leads
 
@@ -208,8 +218,9 @@ def work(lead, slot=1):
         if not lead.get("dossier"):
             lead["dossier"] = tools.dossier(lead["corp_code"])
             _put(lid, dossier=lead["dossier"])
+        tr = lead["track"] = "corp" if track_of(lead["dossier"]) == "corp" else lead.get("track") if lead.get("track") in TRACKS else "sme"
         if not lead.get("research"):
-            out, _ = rt.call("research.analyst", _head(lead) + f"\n오늘은 {_today()} 이다.\n\n[회사 자료]\n{_j(lead['dossier'], 40000)}", item=lead["corp_name"], slot=slot, reserve=0.5)
+            out, _ = rt.call(f"{tr}.analyst", _head(lead) + f"\n오늘은 {_today()} 이다.\n\n[회사 자료]\n{_j(lead['dossier'], 40000)}", item=lead["corp_name"], slot=slot, reserve=0.5)
             if out is None:
                 return "대기"
             if out.get("call") not in CALLS:   # 정해진 값이 아니면 제외로 읽지 않는다
@@ -227,7 +238,7 @@ def work(lead, slot=1):
         if not lead.get("brief"):
             ds = lead["dossier"]
             data = {k: ds.get(k) for k in ("overview", "short_debt", "maturities", "deals", "financials", "comps", "supply") if k != "supply" or ds.get(k)}
-            out, _ = rt.call("brief.writer", _head(lead) + f"\n미팅 판단: {call} ({why})\n\n[분석 결과]\n{_j(rs, 24000)}\n\n[회사 자료]\n{_j(data, 24000)}", item=lead["corp_name"], slot=slot, reserve=0.3)
+            out, _ = rt.call(f"{tr}.writer", _head(lead) + f"\n미팅 판단: {call} ({why})\n\n[분석 결과]\n{_j(rs, 24000)}\n\n[회사 자료]\n{_j(data, 24000)}", item=lead["corp_name"], slot=slot, reserve=0.3)
             if out is None:
                 return "대기"
             lead["brief"] = {**out, "call": call, "call_reason": why, "nh": render.nh_lines(ds, _today()), "detail_md": render.detail(lead)}
@@ -302,7 +313,7 @@ def _lead_row(x):
     """회사 한 곳이 팀을 거치며 받은 것: 선정 → 분석 → 1pager → 검증. 실행이 끝날 때의 모습을 남긴다(나중에 다시 써도 이 실행의 기록은 그대로)."""
     rs, br, vf = x.get("research") or {}, x.get("brief") or {}, x.get("verify") or {}
     fd = rs.get("funding") or {}
-    return {"corp": x["corp_name"], "corp_code": x.get("corp_code"), "origin": x.get("origin"), "result": x.get("result"), "note": x.get("note"),
+    return {"corp": x["corp_name"], "corp_code": x.get("corp_code"), "track": x.get("track"), "team": TRACKS.get(x.get("track")), "origin": x.get("origin"), "result": x.get("result"), "note": x.get("note"),
             "scout": {"need": x.get("need"), "funding": x.get("hypothesis"), "checks": x.get("questions") or [], "exclude_if": x.get("kill"),
                       "signals": [f"{s.get('dt') or ''} {s.get('what') or ''}".strip() for s in x.get("signals") or [] if isinstance(s, dict)]},
             "research": {"call": rs.get("call"), "call_reason": rs.get("call_reason"), "funding": _flat(fd) if isinstance(fd, dict) else fd, "capacity": rs.get("capacity"),
@@ -318,7 +329,7 @@ def _run(kind, body):
     stat, leads, status = {}, [], "done"
     try:
         leads = body(rid, stat)
-        for ld, res in zip(leads, _lanes("research.analyst", leads, work)):
+        for ld, res in zip(leads, _lanes(WORKERS, leads, work)):
             ld["result"] = res
         if any(x["result"] == "대기" for x in leads):
             status = "partial"
@@ -330,7 +341,7 @@ def _run(kind, body):
     finally:
         for x in leads:
             x.setdefault("result", "대기")
-        stat["leads"] = [{"corp_name": x["corp_name"], "result": x["result"]} for x in leads]
+        stat["leads"] = [{"corp_name": x["corp_name"], "result": x["result"], "track": x.get("track")} for x in leads]
         stat.setdefault("handoff", {})["leads"] = [_lead_row(x) for x in leads]
         rt.finish_run(status, stat)
         write_out(rid, leads, stat)

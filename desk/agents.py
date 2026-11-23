@@ -12,7 +12,18 @@ PRICES = {HAIKU: (0.10, 0.50), SONNET: (2.0, 10.0), OPUS: (4.0, 20.0), FABLE: (8
 CACHE_READ = {HAIKU: 0.1, SONNET: 0.05, OPUS: 0.05, FABLE: 0.025}
 WEB_SEARCH_USD = 0.01
 
-MAX_LEADS = int(os.environ.get("DESK_MAX_LEADS", "3"))          # 하루에 새로 선정하는 회사 수
+TRACK_LEADS = int(os.environ.get("DESK_TRACK_LEADS", "2"))      # 하루에 팀마다 새로 선정하는 회사 수
+MAX_LEADS = TRACK_LEADS * 2
+# 대상 선정 뒤에 회사를 두 팀으로 나눈다. 팀마다 분석 담당과 브리핑 담당이 있고 판단 기준과 1pager 의 초점이 다르다
+TRACKS = {"corp": "대기업팀", "sme": "SME팀"}
+BIG_ASSETS = 2_000_000_000_000   # 회사채 등급·공모채 이력이 없어도 자산총계가 이 이상이면 대기업팀
+
+
+def track_of(dossier):
+    """회사 자료로 팀을 정한다: 회사채 등급이나 공모채 발행 이력이 있거나 자산총계 2조원 이상이면 대기업팀, 그 밖의 상장사는 SME팀."""
+    ov = (dossier or {}).get("overview") or {}
+    assets = (((dossier or {}).get("financials") or {}).get("balance") or {}).get("assets") or 0
+    return "corp" if ov.get("latest_bond_rating") or (ov.get("bond_deal_count") or 0) > 0 or assets >= BIG_ASSETS else "sme"
 BATCH = 30                                                       # 모니터링 한 번에 검토하는 공시·기사 수
 NEEDS = ["투자·증설", "인수·지분취득", "차환·상환", "유동성 압박", "재무구조 개선", "지배구조 변화", "영업 주의"]
 CALLS = ["미팅 추천", "모니터링", "제외"]                          # 미팅 판단. RM 이 보는 말 그대로다
@@ -59,7 +70,8 @@ MONITOR_TOOL = {"name": "signals", "description": "자금 조달 관련 선별 �
     "required": ["signals"]}}
 
 # ---------- 소싱팀 ----------
-SCOUT_SYS = f"""너는 NH투자증권 커버리지 본부의 딜 소싱 담당이다. RM 이 지금 미팅을 잡을 만한 회사를 최대 {MAX_LEADS}개사 선정하고, 회사마다 자금 수요를 한두 문장으로 정리한다. 건수를 채우려고 선정하지 않는다. 해당 회사가 없으면 없다고 한다.
+SCOUT_SYS = f"""너는 NH투자증권 커버리지 본부의 딜 소싱 담당이다. RM 이 지금 미팅을 잡을 만한 회사를 대기업과 SME 로 나누어 각각 최대 {TRACK_LEADS}개사씩 선정하고, 회사마다 자금 수요를 한두 문장으로 정리한다. 두 쪽을 서로 비교해 줄 세우지 않는다(대기업의 만기·투자와 SME 의 수주·메자닌은 기준이 다르다).
+구분(track): corp = 대기업(회사채 등급이나 공모채 발행 이력이 있는 회사, 대규모 그룹 계열사), sme = 그 밖의 중견·중소 상장사. 건수를 채우려고 선정하지 않는다. 해당 회사가 없으면 없다고 한다.
 입력: 회사별 선별 공시·기사, 정기 점검 후보(공모채 만기 3~6개월 전 차환 미착수, 메자닌 조기상환 6개월 내, 단기 차입 의존), 최근 선정 이력.
 입력에 있을 때만: 수주 급증 후보(최근 90일 공급계약 공시 합계가 최근 연매출에 비해 큰 상장사), 투자·증설 회사의 협력사(그 회사에 납품하는 상장사와 근거 공시).
 선정 기준:
@@ -78,12 +90,13 @@ SCOUT_TOOL = {"name": "pick", "description": "미팅 대상 회사 선정", "inp
     "leads": {"type": "array", "items": {"type": "object", "properties": {
         "corp_code": {"type": "string", "description": "받은 corp_code 를 그대로. 없으면 빈 문자열"},
         "corp_name": {"type": "string"},
+        "track": {"type": "string", "enum": list(TRACKS), "description": "corp = 대기업, sme = 중견·중소"},
         "need": {"type": "string", "enum": NEEDS[:6]},
         "funding": {"type": "string", "description": "자금 수요 요약: 무엇 때문에, 얼마, 언제. 예: '공모채 3개 회차 6,200억원 2027.04 만기 도래, 차환 증권신고서 미제출'"},
         "checks": {"type": "array", "items": {"type": "string"}, "description": "분석 담당이 확인할 사항"},
         "exclude_if": {"type": "string", "description": "사실로 확인되면 미팅 대상에서 제외할 사유. 예: '차환 증권신고서 제출 또는 주관사 선정 공시'"},
-        "priority": {"type": "integer", "description": "1 이 가장 먼저"}},
-        "required": ["corp_name", "need", "funding", "checks", "exclude_if", "priority"]}},
+        "priority": {"type": "integer", "description": "같은 구분 안에서 1 이 가장 먼저"}},
+        "required": ["corp_name", "track", "need", "funding", "checks", "exclude_if", "priority"]}},
     "skipped": {"type": "string", "description": "선정하지 않은 주요 후보와 사유 한 문단"}},
     "required": ["leads", "skipped"]}}
 
@@ -104,6 +117,23 @@ RESEARCH_SYS = """너는 NH투자증권 커버리지 본부의 기업 분석 담
    call_reason 에 판단 근거를 한 문장으로 적는다. RM 이 그대로 읽는 문장이다(예: '2026.11.18 차환 증권신고서 제출, 대표주관 KB증권·삼성증권 선정').
 4. 동일 등급 발행 사례 목록에서 미팅에서 참고로 제시할 최근 사례를 1~2건 고른다(받은 목록 안에서만).
 자금 수요 요약 없이 'RM 요청'으로 온 회사는 회사 자료에서 자금 수요가 될 만한 것(만기, 투자, 차입)을 먼저 찾아 funding 에 적는다. 없으면 없다고 적는다.""" + RULES + STYLE + " 계산은 calc 도구로 한다."
+
+TRACK_RESEARCH = {
+    "corp": """
+
+[대기업팀] 회사채·CP 등 시장성 조달 이력이 있는 회사다.
+- 자금 수요 규모를 현금성자산·차입 합계·부채비율·12개월 내 만기 도래와 비교해 자체 자금이나 은행 차입으로 충분한지 본다.
+- 같은 그룹 계열사의 같은 시기 만기·투자가 있으면 함께 적는다.
+- 직전 발행의 주관사단을 확인한다(다음 발행에서 그대로 이어지는 경우가 많다).
+- 최근 실적은 숫자와 함께 변동 원인을 확인해 recent 에 적는다(예: '3Q 영업이익 YoY -32%, 중국 법인 판가 하락 영향').""",
+    "sme": """
+
+[SME팀] 회사채 등급이 없는 중견·중소 상장사다. 조달은 주로 메자닌(CB·BW·EB)·유상증자·대출이다.
+- 무슨 사업을 하는지, 주요 제품과 주요 고객을 확인한다(회사 자료의 supply, 사업보고서, 보도).
+- 최근 4개 분기 실적의 변화(흑자·적자 전환, 매출 증감)와 그 원인을 확인해 recent 에 적는다.
+- 기존 메자닌의 미상환 잔액과 조기상환·만기 일정을 확인한다.
+- 영업에 제약이 되는 사항을 caution 에 적는다: 연속 영업적자, 관리종목·상장폐지 사유, 최대주주 변경, 특수관계자 거래 이슈.
+- 상장 후 3년 이내이면 상장 시기를 적는다."""}
 
 RESEARCH_TOOL = {"name": "research", "description": "기업 분석 결과", "input_schema": {"type": "object", "properties": {
     "call": {"type": "string", "enum": CALLS},
@@ -134,6 +164,14 @@ WRITER_SYS = f"""너는 NH투자증권 커버리지 본부의 브리핑 담당�
 - open_items: 확인 필요 사항 {LIMITS['open_items']}개 이내. 공개 자료로 확인되지 않아 미팅에서 확인할 것.
 당사 주관 이력과 주관사단은 공시 자료에서 따로 계산해 넣으므로 쓰지 않는다. 표를 넣지 않는다. 한 줄은 80자 안쪽으로 쓴다.
 분석 결과와 회사 자료에 없는 사실·숫자는 쓰지 않는다. 투자자 실명과 내부 자료는 쓰지 않는다.""" + RULES + STYLE
+
+TRACK_WRITER = {
+    "corp": """
+
+[대기업팀] recent 의 첫 줄은 최근 실적과 변동 원인이다. 조달과 직접 관련이 없어도 미팅에서 화제가 될 회사·그룹·업황 이슈가 분석 결과에 있으면 한 줄 넣는다. 그룹 계열사의 같은 시기 만기가 있으면 funding 에 한 줄로 적는다.""",
+    "sme": """
+
+[SME팀] recent 의 첫 줄은 '사업: 주요 제품, 주요 고객'이다(분석 결과에 있을 때). 다음 줄은 최근 분기 실적의 변화와 원인이다. 기존 메자닌의 미상환 잔액과 조기상환·만기 일정이 있으면 funding 에 적는다. reference 는 규모가 비슷한 회사의 최근 메자닌·유상증자 사례다(받은 사례 안에서만, 맞는 사례가 없으면 빈 문자열)."""}
 
 _LIST = {"type": "array", "items": {"type": "string"}}
 WRITER_TOOL = {"name": "brief", "description": "미팅용 1pager", "input_schema": {"type": "object", "properties": {
@@ -175,15 +213,17 @@ DEPTS = [
      "takes": "새로 들어온 공시와 기사", "gives": "자금 조달과 관련된 건(유형, 내용, 연결 가능성)",
      "steps": [f"공시와 기사를 {BATCH}건씩 나누어 읽습니다.", "자금 조달과 관련된 건을 고르고 유형과 연결 가능성을 적습니다.", "읽은 건은 표시해 두어 다음에 다시 읽지 않습니다."]},
     {"id": "scout", "name": "소싱팀", "sum": "골라낸 건을 회사별로 모아 지금 미팅할 만한 회사를 선정합니다.",
-     "takes": "선별한 공시·기사, 정기 점검 후보(만기·조기상환·단기 차입), 수주 급증 후보와 협력사", "gives": "미팅 대상 회사와 자금 수요 요약, 확인할 사항",
+     "takes": "선별한 공시·기사, 정기 점검 후보(만기·조기상환·단기 차입), 수주 급증 후보와 협력사", "gives": "대기업팀·SME팀에 나누어 넘기는 미팅 대상 회사와 자금 수요 요약, 확인할 사항",
      "steps": ["선별한 건과 정기 점검 후보를 회사별로 모읍니다.", "공급망 지도에서 수주가 크게 늘어난 회사와 투자·증설 회사의 협력사를 함께 살펴봅니다.", "최근에 이미 선정한 회사와 영업에 주의가 필요한 회사는 제외합니다.",
-               f"미팅 대상을 최대 {MAX_LEADS}개사 선정하고 자금 수요를 한두 문장으로 정리합니다."]},
-    {"id": "research", "name": "분석팀", "sum": "선정한 회사의 자금 수요를 공시·재무·보도로 확인하고 미팅 판단을 내립니다.",
-     "takes": "미팅 대상 회사, 자금 수요 요약, 회사 자료(조달 이력·만기·재무·주요 고객과 수주)", "gives": "미팅 판단(미팅 추천·모니터링·제외)과 근거",
-     "steps": ["회사의 공시 자료와 재무제표를 모읍니다.", "자금 수요, 상환 여력, 조달 진행 현황, 유의 사항을 확인합니다.", "미팅 추천, 모니터링, 제외 가운데 하나로 판단하고 근거를 한 문장으로 적습니다."]},
-    {"id": "brief", "name": "브리핑팀", "sum": "분석 결과를 RM 이 미팅 전에 읽을 1pager 로 정리합니다.",
-     "takes": "미팅 판단과 분석 결과, 회사 자료", "gives": "1pager(판단 한 줄, 자금 수요, 미팅 아젠다, 최근 동향, 확인 필요 사항)",
-     "steps": ["판단 근거, 자금 수요, 미팅 아젠다, 최근 동향을 씁니다.", "당사 주관 이력과 근거 자료의 표는 공시 자료에서 그대로 가져와 붙입니다."]},
+               f"미팅 대상을 대기업과 SME 로 나누어 각각 최대 {TRACK_LEADS}개사씩 선정하고 자금 수요를 한두 문장으로 정리합니다.", "회사채 등급·공모채 이력·자산 규모로 팀을 확정해 넘깁니다."]},
+    {"id": "corp", "name": "대기업팀", "sum": "회사채·공모 조달 이력이 있는 회사를 맡아 자금 수요를 확인하고 1pager 를 씁니다.",
+     "takes": "대기업으로 분류된 미팅 대상 회사, 자금 수요 요약, 회사 자료", "gives": "미팅 판단과 1pager",
+     "steps": ["회사의 공시 자료와 재무제표를 모읍니다.", "자금 수요를 현금·차입·만기와 비교하고, 그룹 계열사 일정과 직전 주관사단을 확인합니다.", "미팅 추천, 모니터링, 제외 가운데 하나로 판단합니다.",
+               "실적 변동 원인과 미팅 아젠다를 담아 1pager 를 씁니다."]},
+    {"id": "sme", "name": "SME팀", "sum": "회사채 등급이 없는 중견·중소 상장사를 맡아 자금 수요를 확인하고 1pager 를 씁니다.",
+     "takes": "SME 로 분류된 미팅 대상 회사, 자금 수요 요약, 회사 자료(주요 고객과 수주 포함)", "gives": "미팅 판단과 1pager",
+     "steps": ["회사의 사업, 주요 고객, 수주, 최근 분기 실적을 확인합니다.", "기존 메자닌 일정과 영업에 제약이 되는 사항(연속 적자, 관리종목 사유 등)을 확인합니다.", "미팅 추천, 모니터링, 제외 가운데 하나로 판단합니다.",
+               "사업 한 줄과 실적 변화를 담아 1pager 를 씁니다."]},
     {"id": "verify", "name": "검증팀", "sum": "1pager 의 숫자와 사실을 공시·재무·보도와 하나씩 대조합니다.",
      "takes": "1pager(작성 과정은 받지 않습니다)", "gives": "검증을 마친 1pager, 또는 보류 사유",
      "steps": ["금액, 일자, 비율을 원자료와 대조합니다.", "맞지 않는 곳은 고쳐 씁니다.", "검증을 마친 1pager 만 RM 에게 전달합니다."]},
@@ -192,7 +232,7 @@ DEPTS = [
 
 # 한 번의 호출이 맡는 일의 단위. count 는 같은 지침의 호출을 동시에 몇 개까지 돌리는지(속도)이고, 역할이 여럿이라는 뜻이 아니다
 UNIT = {"collect.newsdesk": "검색어 묶음 1개", "monitor.screener": f"공시·기사 {BATCH}건", "scout.lead": "그날 선별한 건 전체",
-        "research.analyst": "회사 1곳", "brief.writer": "회사 1곳", "verify.checker": "회사 1곳"}
+        "corp.analyst": "회사 1곳", "corp.writer": "회사 1곳", "sme.analyst": "회사 1곳", "sme.writer": "회사 1곳", "verify.checker": "회사 1곳"}
 
 
 def _a(id, dept, name, model, desc, count=1, system=None, tool=None, search=0, max_tokens=4000, tools=()):
@@ -206,11 +246,15 @@ AGENTS = {a["id"]: a for a in [
     _a("monitor.screener", "monitor", "모니터링 담당", HAIKU, count=3, system=MONITOR_SYS, tool=MONITOR_TOOL, max_tokens=4000,
        desc=f"공시와 기사를 {BATCH}건씩 읽고 자금 조달과 관련된 건을 골라냅니다."),
     _a("scout.lead", "scout", "소싱 담당", SONNET, system=SCOUT_SYS, tool=SCOUT_TOOL, max_tokens=8000,
-       desc=f"선별한 건과 정기 점검 후보, 수주 후보를 보고 미팅 대상 회사를 최대 {MAX_LEADS}개사 선정합니다."),
-    _a("research.analyst", "research", "분석 담당", SONNET, count=3, system=RESEARCH_SYS, tool=RESEARCH_TOOL, search=8, max_tokens=8000,
-       tools=["dart_filings", "calc"], desc="선정한 회사의 자금 수요, 상환 여력, 조달 진행 현황을 확인하고 미팅 판단을 내립니다."),
-    _a("brief.writer", "brief", "브리핑 담당", SONNET, count=3, system=WRITER_SYS, tool=WRITER_TOOL, max_tokens=3000,
-       desc="분석 결과를 RM 이 미팅 전에 읽을 1pager 로 정리합니다."),
+       desc=f"선별한 건과 정기 점검 후보, 수주 후보를 보고 미팅 대상 회사를 대기업·SME 각각 최대 {TRACK_LEADS}개사 선정합니다."),
+    _a("corp.analyst", "corp", "대기업 분석 담당", SONNET, count=2, system=RESEARCH_SYS + TRACK_RESEARCH["corp"], tool=RESEARCH_TOOL, search=8, max_tokens=8000,
+       tools=["dart_filings", "calc"], desc="대기업의 자금 수요를 현금·차입·만기와 비교해 확인하고 미팅 판단을 내립니다."),
+    _a("corp.writer", "corp", "대기업 브리핑 담당", SONNET, count=2, system=WRITER_SYS + TRACK_WRITER["corp"], tool=WRITER_TOOL, max_tokens=3000,
+       desc="분석 결과를 실적 변동 원인과 미팅 아젠다 중심의 1pager 로 정리합니다."),
+    _a("sme.analyst", "sme", "SME 분석 담당", SONNET, count=2, system=RESEARCH_SYS + TRACK_RESEARCH["sme"], tool=RESEARCH_TOOL, search=8, max_tokens=8000,
+       tools=["dart_filings", "calc"], desc="중견·중소 상장사의 사업과 자금 수요, 영업에 제약이 되는 사항을 확인하고 미팅 판단을 내립니다."),
+    _a("sme.writer", "sme", "SME 브리핑 담당", SONNET, count=2, system=WRITER_SYS + TRACK_WRITER["sme"], tool=WRITER_TOOL, max_tokens=3000,
+       desc="분석 결과를 사업 한 줄과 실적 변화 중심의 1pager 로 정리합니다."),
     _a("verify.checker", "verify", "검증 담당", SONNET, count=3, system=VERIFY_SYS, tool=VERIFY_TOOL, search=6, max_tokens=8000,
        tools=["company", "financials", "dart_filings", "calc"], desc="1pager 의 숫자와 사실을 공시 자료, 재무제표, 공시 목록, 보도와 대조합니다."),
 ]}

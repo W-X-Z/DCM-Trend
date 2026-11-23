@@ -101,7 +101,7 @@ class Flow(Base):
         sums = {c["agent"]: c.get("summary") for c in self.sb.calls}
         self.assertTrue(sums["monitor.screener"].startswith("선별 "))
         self.assertTrue(sums["verify.checker"].startswith("검증 완료 · 정정 1건"))
-        self.assertTrue(any(c["agent"] == "research.analyst" and c["summary"].startswith("제외 · ") for c in self.sb.calls))
+        self.assertTrue(any(c["agent"] == "sme.analyst" and c["summary"].startswith("제외 · ") for c in self.sb.calls))
         # 조사 담당의 도구 왕복(dart_filings)과 호출 기록
         self.assertTrue(any(p[0].endswith("list.json") for p in self.dart.paths))
         self.assertTrue(all(c.get("status") == "ok" for c in self.sb.calls))
@@ -236,6 +236,39 @@ class Units(Base):
         self.boot(dart_missing={(y, c) for y in (2024, 2025, 2026) for c in ("11011", "11012", "11013", "11014")})
         self.assertIn("error", tools.financials("x", today=dt.date(2026, 11, 22)))
 
+    def test_teams(self):
+        """대상 선정 뒤에 회사 자료로 대기업팀 · SME팀을 나누고, 팀마다 정해진 수까지만 선정한다."""
+        self.assertEqual(agents.track_of({"overview": {"latest_bond_rating": "AA-"}}), "corp")
+        self.assertEqual(agents.track_of({"overview": {"bond_deal_count": 3}}), "corp")
+        self.assertEqual(agents.track_of({"overview": {}, "financials": {"balance": {"assets": 3e12}}}), "corp")
+        self.assertEqual(agents.track_of({"overview": {"mezz_deal_count": 7}, "financials": {"balance": {"assets": 5e11}}}), "sme")
+        self.assertEqual(agents.track_of(None), "sme")
+        lead = lambda code, name, pr, tr: {"corp_code": code, "corp_name": name, "track": tr, "need": "차환·상환", "funding": f"{name} 자금 수요", "checks": [], "exclude_if": "조달 완료", "priority": pr}
+        pick = lambda b: {"leads": [lead("00231372", "롯데관광개발", 1, "sme"), lead("00172185", "남성", 2, "sme")], "skipped": ""}
+        self.boot(script(pick=pick, research=research_ok))
+        rated = fakes.FX["companies"]["00172185"]["overview"]
+        keep = dict(rated)
+        self.addCleanup(lambda: (rated.clear(), rated.update(keep)))
+        rated.update(latest_bond_rating="A+", bond_deal_count=4)      # 남성: 회사채 등급이 있으면 소싱 담당이 SME 라고 해도 대기업팀
+        out = pipeline.daily(force=True)
+        by = {(c["item"], c["agent"].split(".")[0]) for c in self.sb.calls if c["agent"].endswith((".analyst", ".writer"))}
+        self.assertEqual(by, {("롯데관광개발", "sme"), ("남성", "corp")})
+        sysm = {r["system"][0]["text"] for r in self.ai.requests if r["tools"][0]["name"] in ("research", "brief")}
+        self.assertTrue(any("[대기업팀]" in x for x in sysm) and any("[SME팀]" in x for x in sysm))
+        self.assertEqual({x["corp"]: x["team"] for x in self.sb.runs[out["run_id"]]["summary"]["handoff"]["leads"]}, {"롯데관광개발": "SME팀", "남성": "대기업팀"})
+        # 팀마다 자리 수가 따로다: 한 자리씩이면 SME 둘 중 둘째는 선정하지 않고, 대기업 하나는 선정한다
+        keep_n = pipeline.TRACK_LEADS
+        self.addCleanup(lambda: setattr(pipeline, "TRACK_LEADS", keep_n))
+        pipeline.TRACK_LEADS = 1
+        rated.clear(); rated.update(keep)
+        self.boot(script(pick=pick, research=research_ok))
+        pipeline.daily(force=True)
+        self.assertEqual([l["corp_name"] for l in self.sb.leads], ["롯데관광개발"])
+        rated.update(latest_bond_rating="A+")
+        self.boot(script(pick=pick, research=research_ok))
+        pipeline.daily(force=True)
+        self.assertEqual([l["corp_name"] for l in self.sb.leads], ["롯데관광개발", "남성"])
+
     def test_supply(self):
         """공급망 DB 를 붙이면 수주 급증 후보와 협력사가 대상 선정에 들어가고, 선정된 회사의 관련 공시와 근거 자료에 남는다."""
         today = pipeline._today()
@@ -350,7 +383,7 @@ class Units(Base):
     def test_office_config(self):
         """사무실 화면 설정: 부서마다 절차가 있고, 호출 기록에 남는 에이전트가 모두 들어 있다."""
         c = office.config()
-        self.assertEqual([d["id"] for d in c["depts"]], ["collect", "monitor", "scout", "research", "brief", "verify"])
+        self.assertEqual([d["id"] for d in c["depts"]], ["collect", "monitor", "scout", "corp", "sme", "verify"])
         self.assertTrue(all(d["steps"] for d in c["depts"]))
         self.assertEqual(set(c["agents"]) - {"collect.workflow"}, set(agents.AGENTS))
         for a in c["agents"].values():
